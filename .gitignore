@@ -1,0 +1,21 @@
+# secrets
+backend/.env
+.env
+
+# Python
+backend/.venv/
+__pycache__/
+*.pyc
+
+# local databases / generated data
+*.db
+
+# local dev server logs
+frontend/*.log
+
+# OS junk
+.DS_Store
+
+# editor folders (optional, remove if you use these deliberately in the repo)
+.vscode/
+.idea/
