@@ -74,6 +74,12 @@ img{max-width:100%}
 .techtoggle input:checked{background:var(--brand)}
 .techtoggle input:checked::after{left:15px}
 
+/* personalisation status/settings button */
+.personalize-btn{font-size:10.5px;font-weight:700;letter-spacing:.4px;padding:5px 10px;border-radius:20px;
+  background:var(--studio2);border:1px solid var(--studio-line);color:#c9c9d4;cursor:pointer;white-space:nowrap;transition:.14s}
+.personalize-btn:hover{border-color:#57575f}
+.personalize-btn.active{background:#12301f;border-color:#1f5c3a;color:#7fe0a8}
+
 /* full-screen chat view when the technical panels are switched off */
 body.tech-hidden .ins{display:none}
 body.tech-hidden .grid{display:block}

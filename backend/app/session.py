@@ -1,7 +1,8 @@
+from collections import Counter
 from datetime import datetime
 from typing import Dict, List, Optional
 from .config import Settings
-from .models import SessionState, Draft, Confirmation, ValidationResult
+from .models import SessionState, Draft, Confirmation, ValidationResult, PersonalizationSignals
 
 # 9. The 16-stage control chain — §8.2
 # =====================================================================
@@ -57,6 +58,34 @@ class Session:
         self._issued_at: Optional[datetime] = None
         self.execution: Optional[dict] = None
 
+        # ---- Personalization signals — structured facts only, never the transcript ----
+        self.field_rejection_counts: Dict[str, int] = {}
+        self.clarification_history: List[str] = []
+        self.intent_history: List[str] = []
+        self.personalize_auto: bool = False
+        self.personalization_signals: Optional[dict] = None
+        self.personalization_decision: Optional[dict] = None
+
+    def note_field_rejection(self, field: str) -> None:
+        self.field_rejection_counts[field] = self.field_rejection_counts.get(field, 0) + 1
+
+    def note_clarification(self, point: str) -> None:
+        self.clarification_history.append(point)
+
+    def note_intent(self, intent: str) -> None:
+        self.intent_history.append(intent)
+
+    def compute_personalization_signals(self) -> PersonalizationSignals:
+        repeat_rejections = sorted(f for f, c in self.field_rejection_counts.items() if c >= 2)
+        counts = Counter(self.clarification_history)
+        repeat_clarifications = sorted(p for p, c in counts.items() if c >= 2)
+        stalled = (len(self.intent_history) >= 2
+                   and self.intent_history[-1] == "UNCLEAR"
+                   and self.intent_history[-2] == "UNCLEAR")
+        return PersonalizationSignals(repeat_field_rejections=repeat_rejections,
+                                      repeat_clarifications=repeat_clarifications,
+                                      stalled_intent=stalled)
+
     def to_public(self) -> dict:
         return {
             "session_id": self.session_id,
@@ -76,6 +105,9 @@ class Session:
             "signature": "VALID" if self._signature else "NONE",
             "execution": self.execution,
             "engine": "live" if Settings.LIVE_LLM else "mock",
+            "personalize_auto": self.personalize_auto,
+            "personalization_signals": self.personalization_signals,
+            "personalization_decision": self.personalization_decision,
         }
 
 

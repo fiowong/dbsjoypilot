@@ -4,7 +4,8 @@ from .config import Settings
 from .session import STAGES, get_session
 from .data import POLICY
 from .audit import AUDIT
-from .orchestrator import TurnRequest, TurnResponse, ConfirmRequest, run_turn, run_confirmation
+from .orchestrator import (TurnRequest, TurnResponse, ConfirmRequest, run_turn, run_confirmation,
+                            FieldSignalRequest, run_field_signal)
 from .scenarios import SCENARIOS, ScenarioResponse, run_scenario
 
 # 13. FastAPI surface
@@ -24,7 +25,7 @@ async def health() -> dict:
         "prompt_version": Settings.PROMPT_VERSION,
         "schema_version": Settings.SCHEMA_VERSION,
         "agents": ["GUARDRAILS AGENT", "INTENT CLASSIFIER", "PAYMENT AGENT",
-                   "INDEPENDENT VALIDATION AGENT"],
+                   "INDEPENDENT VALIDATION AGENT", "PERSONALIZATION AGENT"],
         "stages": len(STAGES),
         "branches": "A–F / 18 nodes",
         "disclosure": POLICY["disclosure"],
@@ -65,6 +66,11 @@ async def turn(req: TurnRequest) -> TurnResponse:
 @app.post("/confirm", response_model=TurnResponse)
 async def confirm(req: ConfirmRequest) -> TurnResponse:
     return await run_confirmation(req)
+
+
+@app.post("/field_signal", response_model=TurnResponse)
+async def field_signal(req: FieldSignalRequest) -> TurnResponse:
+    return await run_field_signal(req)
 
 
 @app.post("/scenario/{scenario_id}", response_model=ScenarioResponse)

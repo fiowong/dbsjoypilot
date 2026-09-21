@@ -11,7 +11,8 @@ from .models import (SessionState, Draft, Confirmation, ValidationResult, Guardr
 from .data import CUSTOMERS, SAVED_PAYEES, POLICY
 from .parsing import (parse_amount, parse_corrected_amount, last_committed_amount,
                        parse_payee_phrase, parse_reference, detect_language)
-from .agents import GuardrailsAgent, IntentClassifierAgent, PaymentAgent, ValidationAgent
+from .agents import (GuardrailsAgent, IntentClassifierAgent, PaymentAgent, ValidationAgent,
+                      PersonalizationAgent)
 from .agent_runtime import AgentUnavailable
 from .controls import (resolve_payee_and_account, compare_validation_result, evaluate_risk,
                         evaluate_safety_policy, canonical_payload, payload_hash, sign_payload,
@@ -22,6 +23,23 @@ from .session import STAGES, Session, SESSIONS, get_session
 
 # 10. The orchestrator — a deterministic state machine, not a graph of agents
 # =====================================================================
+async def evaluate_personalization(session: Session, emit) -> None:
+    """Recompute the Personalization Agent's decision from this session's current signals
+    and only emit an audit event when the decision actually changed — every other turn just
+    keeps session.personalize_auto in sync silently."""
+    signals = session.compute_personalization_signals()
+    decision, engine = await PersonalizationAgent.run(signals)
+    changed = session.personalization_decision is None or (
+        session.personalization_decision.get("personalize") != decision.personalize
+        or session.personalization_decision.get("score") != decision.score)
+    session.personalize_auto = decision.personalize
+    session.personalization_signals = signals.model_dump()
+    session.personalization_decision = decision.model_dump()
+    if changed:
+        emit("PERSONALIZATION_RESULT", None, {"engine": engine, **decision.model_dump(),
+                                              "signals": signals.model_dump()})
+
+
 class TurnRequest(BaseModel):
     session_id: str = Field(default_factory=lambda: f"sess_{uuid.uuid4().hex[:10]}")
     text: str
@@ -48,6 +66,10 @@ async def run_turn(req: TurnRequest) -> TurnResponse:
                        "payload": payload, "hash": record["hash"]})
         if stage is not None:
             events[-1]["stage_label"] = STAGES[stage][1] if 0 <= stage < len(STAGES) else ""
+
+    async def finish() -> TurnResponse:
+        await evaluate_personalization(session, emit)
+        return TurnResponse(session=session.to_public(), events=events)
 
     # ---------- Stage 0 — authenticated session ----------
     session.state = SessionState.CAPTURED
@@ -83,7 +105,7 @@ async def run_turn(req: TurnRequest) -> TurnResponse:
                 "agent_pipeline_entered": False, "transcript_supplied_to_agents": False,
                 "payment_proposal_created": False, "ledger_invoked": False,
                 "note": "Demonstrates the trust boundary, not production deepfake detection."})
-            return TurnResponse(session=session.to_public(), events=events)
+            return await finish()
         if mock_risk["result"] == "STEP_UP_REQUIRED":
             session.step_up_required = True
             emit("VOICE_STEP_UP_REQUIRED", 1, {
@@ -117,7 +139,7 @@ async def run_turn(req: TurnRequest) -> TurnResponse:
             "intent_classifier_invoked": False, "payment_agent_invoked": False,
             "draft_created": False, "gateway_available_to_agent": False,
             "ledger_invoked": False})
-        return TurnResponse(session=session.to_public(), events=events)
+        return await finish()
 
     if guardrail.decision == GuardrailDecision.SAFETY_INTERVENTION:
         # Stage 10 runs here for the safety path: the consequence is chosen by deterministic
@@ -148,12 +170,13 @@ async def run_turn(req: TurnRequest) -> TurnResponse:
                 "note": "Urgency alone does not prove fraud. Cooling-off is a delay, not an "
                         "accusation; the customer is asked to verify through a number they know.",
                 "draft_created": False, "ledger_invoked": False})
-        return TurnResponse(session=session.to_public(), events=events)
+        return await finish()
 
     if guardrail.decision == GuardrailDecision.CLARIFY:
         session.state, session.outcome = SessionState.CLARIFICATION_REQUIRED, "CLARIFY"
+        session.note_clarification("GUARDRAILS_CLARIFY")
         emit("CLARIFICATION_OPENED", 3, {"message_key": guardrail.message_key})
-        return TurnResponse(session=session.to_public(), events=events)
+        return await finish()
 
     # ---------- Stage 4 — Intent Classifier ----------
     intent, engine = await IntentClassifierAgent.run(req.text, {
@@ -168,6 +191,7 @@ async def run_turn(req: TurnRequest) -> TurnResponse:
                                      f"{Settings.INTENT_CONFIDENCE_THRESHOLD}")
     emit("INTENT_RESULT", 4, {"engine": engine, **intent.model_dump(),
                               "threshold": Settings.INTENT_CONFIDENCE_THRESHOLD})
+    session.note_intent(intent.intent)   # feeds the Personalization Agent's stalled_intent signal
 
     if intent.intent == "CANCEL_OR_STOP":
         session.state, session.cancelled, session.outcome = SessionState.CANCELLED, True, "CANCEL"
@@ -177,7 +201,7 @@ async def run_turn(req: TurnRequest) -> TurnResponse:
                                       "ledger_invoked": False})
         session.confirmation = None
         session._signature, session._payload, session._nonce = None, None, None
-        return TurnResponse(session=session.to_public(), events=events)
+        return await finish()
     if intent.intent == "SAFETY_HELP":
         # BRD §8.6.5: invalidate the confirmation and the signature, then freeze.
         previous = session.confirmation.confirmation_id if session.confirmation else None
@@ -191,14 +215,15 @@ async def run_turn(req: TurnRequest) -> TurnResponse:
             "draft_discarded": False,
             "ledger_invoked": False,
             "note": "A customer who asks for scam help is never charged a fee for asking."})
-        return TurnResponse(session=session.to_public(), events=events)
+        return await finish()
     if intent.intent == "UNCLEAR":
         session.state, session.outcome = SessionState.CLARIFICATION_REQUIRED, "CLARIFY"
+        session.note_clarification("INTENT_UNCLEAR")
         emit("NO_ACTIVE_CHALLENGE", 4, {
             "active_confirmation_challenge": None, "active_signing_challenge": None,
             "execution_permission": "DENIED", "signature_creatable": False,
             "reason": "A generic or replayed “yes” cannot create a signature."})
-        return TurnResponse(session=session.to_public(), events=events)
+        return await finish()
 
     # ---------- EDIT_PAYMENT invalidates everything downstream (§8.11.3) ----------
     if intent.intent == "EDIT_PAYMENT" and session.draft:
@@ -262,11 +287,12 @@ async def run_turn(req: TurnRequest) -> TurnResponse:
     if proposal.status != "PROPOSAL_READY":
         session.state, session.outcome = SessionState.CLARIFICATION_REQUIRED, "CLARIFY"
         session.open_clarification_field = proposal.clarification_field
+        session.note_clarification(proposal.clarification_field or "PAYMENT_UNCLEAR")
         emit("CLARIFICATION_OPENED", 5, {
             "clarification_field": proposal.clarification_field,
             "clarification_question": proposal.clarification_question,
             "canonical_draft": "NOT_CREATED"})
-        return TurnResponse(session=session.to_public(), events=events)
+        return await finish()
 
     # ---------- Stage 6 — deterministic payee and account resolution ----------
     session.payee_phrase = (session.payee_phrase or parse_payee_phrase(req.text)
@@ -284,15 +310,16 @@ async def run_turn(req: TurnRequest) -> TurnResponse:
             "reason": resolution.reason,
             "authoritative_destination_changed": False,
             "confirmation_permitted": False, "ledger_invoked": False})
-        return TurnResponse(session=session.to_public(), events=events)
+        return await finish()
     if resolution.outcome == "NEEDS_CLARIFICATION":
         session.state, session.outcome = SessionState.CLARIFICATION_REQUIRED, "CLARIFY"
         session.open_clarification_field = resolution.clarification_field
+        session.note_clarification(resolution.clarification_field or "PAYEE_UNCLEAR")
         emit("CLARIFICATION_OPENED", 6, {
             "clarification_field": resolution.clarification_field,
             "clarification_question": resolution.clarification_question,
             "candidates": resolution.candidates, "canonical_draft": "NOT_CREATED"})
-        return TurnResponse(session=session.to_public(), events=events)
+        return await finish()
 
     # ---------- Stage 7 — canonical draft and schema gate ----------
     session.drafts_created += 1
@@ -330,7 +357,7 @@ async def run_turn(req: TurnRequest) -> TurnResponse:
         session.state, session.frozen, session.outcome = SessionState.FROZEN, True, "FREEZE"
         emit("TRANSACTION_FROZEN", 9, {"reason": comparator.reason,
                                        "confirmation_permitted": False, "ledger_invoked": False})
-        return TurnResponse(session=session.to_public(), events=events)
+        return await finish()
 
     # ---------- Stage 10 — risk and velocity policy ----------
     risk = evaluate_risk(draft, {"drafts_created": session.drafts_created}, guardrail)
@@ -339,14 +366,14 @@ async def run_turn(req: TurnRequest) -> TurnResponse:
     if risk.decision == RiskDecision.REJECT:
         session.state, session.frozen, session.outcome = SessionState.FROZEN, True, "REJECT"
         emit("RISK_REJECTED", 10, {"reasons": risk.reasons, "ledger_invoked": False})
-        return TurnResponse(session=session.to_public(), events=events)
+        return await finish()
     if risk.decision == RiskDecision.COOLING_OFF:
         session.state, session.cooling_off, session.outcome = SessionState.COOLING_OFF, True, "COOLING_OFF"
         emit("COOLING_OFF_APPLIED", 10, {
             "reasons": risk.reasons,
             "note": "Urgency alone does not prove fraud. Cooling-off is a delay, not an accusation.",
             "ledger_invoked": False})
-        return TurnResponse(session=session.to_public(), events=events)
+        return await finish()
     if risk.decision == RiskDecision.STEP_UP:
         session.state, session.outcome = SessionState.CONFIRMATION_READY, "STEP_UP"
         emit("STEP_UP_REQUIRED", 10, {"reasons": risk.reasons})
@@ -368,6 +395,35 @@ async def run_turn(req: TurnRequest) -> TurnResponse:
         "fields_to_confirm": ["RECIPIENT", "AMOUNT", "SOURCE_ACCOUNT"],
         "note": "One “yes” confirms only the displayed field. It never signs and never calls the gateway."})
 
+    return await finish()
+
+
+# =====================================================================
+# 10b. Field-review signal — reported by the client the instant a customer accepts or
+# rejects a field on review (BRD §8.11.2 UI), independent of and before /confirm.
+# This is what makes "the same field rejected twice" a real, server-tracked fact instead
+# of something the client claims after it already happened.
+# =====================================================================
+class FieldSignalRequest(BaseModel):
+    session_id: str
+    field: Literal["RECIPIENT", "AMOUNT", "SOURCE_ACCOUNT"]
+    result: Literal["CONFIRMED", "REJECTED"]
+
+
+async def run_field_signal(req: FieldSignalRequest) -> TurnResponse:
+    session = get_session(req.session_id)
+    events: List[dict] = []
+
+    def emit(event_type: str, stage: Optional[int], payload: dict) -> None:
+        record = AUDIT.append(session.session_id, event_type, payload, stage)
+        events.append({"event_type": event_type, "stage": stage, "ts": record["ts"],
+                       "payload": payload, "hash": record["hash"]})
+
+    if req.result == "REJECTED":
+        session.note_field_rejection(req.field)
+    emit("FIELD_REVIEW_SIGNAL", 11, {"field": req.field, "result": req.result,
+                                     "note": "UI-only signal — never signs and never calls the gateway."})
+    await evaluate_personalization(session, emit)
     return TurnResponse(session=session.to_public(), events=events)
 
 

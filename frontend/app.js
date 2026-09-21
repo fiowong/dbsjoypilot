@@ -50,37 +50,121 @@ const BRANCHES = [
 
 /* ---------- deterministic multilingual INTERFACE templates ---------- */
 const T = {
-  EN:{ intro:'Good, Auntie. Let us check one by one.',
-    recipient:n=>`The recipient is ${n}. Is this recipient correct?`,
-    amount:a=>`The amount is ${a}. Is this amount correct?`,
-    source:m=>`The money will be paid from your savings account ${m}. Is this account correct?`,
-    ready:'Thank you, Auntie. All the details have been checked. No money has been sent yet. Please use FaceID to confirm this payment.',
-    done:(a,n,r)=>`The payment is complete. ${a} has been paid to ${n}. The transaction number is ${r}.`,
-    yes:'Yes, correct', no:'No, change it' },
-  ZH:{ intro:'好的，Auntie。我们一项一项检查。',
-    recipient:n=>`收款人是 ${n}。这个收款人对吗？`,
-    amount:a=>`金额是${a}。对吗？`,
-    source:m=>`从储蓄账户${m}付款。对吗？`,
-    ready:'所有资料已经检查。钱还没有汇出。请使用 FaceID 确认这笔付款。',
-    done:(a,n,r)=>`付款已经完成。${a}已付给 ${n}。交易编号是 ${r}。`,
-    yes:'对，没错', no:'不对，要改' },
-  BM:{ intro:'Baik Auntie, kita semak satu per satu.',
-    recipient:n=>`Penerima ialah ${n}. Adakah penerima ini betul?`,
-    amount:a=>`Jumlahnya ialah ${a}. Adakah jumlah ini betul?`,
-    source:m=>`Wang akan dibayar daripada akaun simpanan ${m}. Adakah akaun ini betul?`,
-    ready:'Terima kasih, Auntie. Semua butiran sudah disemak. Tiada wang dihantar lagi. Sila gunakan FaceID untuk mengesahkan bayaran ini.',
-    done:(a,n,r)=>`Pembayaran selesai. ${a} telah dibayar kepada ${n}. Nombor transaksi ialah ${r}.`,
-    yes:'Ya, betul', no:'Tidak, tukar' }
+  EN:{ intro:"Great, let's go through this together, one step at a time.",
+    recipient:n=>`You're sending this to ${n}. Does that look right?`,
+    amount:a=>`The amount is ${a}. Does that look right?`,
+    source:m=>`This will come out of your savings account ${m}. Does that look right?`,
+    ready:'Thanks, Auntie! Everything is checked, and no money has been sent yet. Just confirm with FaceID when you\'re ready.',
+    done:(a,n,r)=>`All done! ${a} has been sent to ${n}. Your reference number is ${r}.`,
+    yes:'Yes, that\'s right', no:'No, let me fix it',
+    // Plainer, shorter wording used once a conversation has shown real difficulty
+    // (see PERSONALIZATION below) — same information, fewer words per sentence.
+    simple:{ intro:"Okay. Let's go one step at a time, no rush.",
+      recipient:n=>`Sending to: ${n}. Is that right?`,
+      amount:a=>`Amount: ${a}. Is that right?`,
+      source:m=>`Paying from: ${m}. Is that right?`,
+      ready:'Everything is checked. No money sent yet. Please confirm with FaceID.',
+      done:(a,n,r)=>`Done. ${a} sent to ${n}. Reference number: ${r}.`,
+      confirmAgain:v=>`Just to check again, ${v}. Shall I continue?` } },
+  ZH:{ intro:'好，我们一起一步一步来看。',
+    recipient:n=>`您要汇给 ${n}，对吗？`,
+    amount:a=>`金额是 ${a}，对吗？`,
+    source:m=>`这笔钱会从您的储蓄账户 ${m} 扣款，对吗？`,
+    ready:'谢谢您，Auntie！资料都检查好了，钱还没有汇出，准备好了就用 FaceID 确认一下。',
+    done:(a,n,r)=>`完成了！${a} 已经汇给 ${n}，交易编号是 ${r}。`,
+    yes:'对，没错', no:'不对，帮我改',
+    simple:{ intro:'好，我们慢慢来，一项一项看。',
+      recipient:n=>`收款人：${n}。对吗？`,
+      amount:a=>`金额：${a}。对吗？`,
+      source:m=>`付款账户：${m}。对吗？`,
+      ready:'都检查好了。钱还没有汇出。请用 FaceID 确认。',
+      done:(a,n,r)=>`完成了。${a}已付给${n}。编号：${r}。`,
+      confirmAgain:v=>`我再确认一次，${v}。可以继续吗？` } },
+  BM:{ intro:'Baik, jom kita semak sama-sama, satu demi satu.',
+    recipient:n=>`Auntie nak hantar kepada ${n}. Betul tak?`,
+    amount:a=>`Jumlahnya ${a}. Betul tak?`,
+    source:m=>`Wang akan ditolak daripada akaun simpanan ${m}. Betul tak?`,
+    ready:'Terima kasih, Auntie! Semua sudah disemak, dan wang belum dihantar. Sahkan dengan FaceID bila Auntie sudah bersedia.',
+    done:(a,n,r)=>`Selesai! ${a} telah dihantar kepada ${n}. Nombor rujukan ialah ${r}.`,
+    yes:'Ya, betul', no:'Tidak, tolong betulkan',
+    simple:{ intro:'Baik. Kita buat perlahan-lahan, satu demi satu.',
+      recipient:n=>`Hantar kepada: ${n}. Betul?`,
+      amount:a=>`Jumlah: ${a}. Betul?`,
+      source:m=>`Bayar daripada: ${m}. Betul?`,
+      ready:'Semua sudah disemak. Wang belum dihantar. Sila sahkan dengan FaceID.',
+      done:(a,n,r)=>`Selesai. ${a} dihantar kepada ${n}. Nombor: ${r}.`,
+      confirmAgain:v=>`Saya semak sekali lagi, ${v}. Boleh saya teruskan?` } }
 };
 const amountWord = { ZH:'五十新加坡元', BM:'lima puluh dolar Singapura', EN:'fifty Singapore dollars' };
+
+// ==========================================================================
+// PERSONALIZATION — adapts to observed difficulty in THIS conversation, not
+// to any guess about who the customer is. The decision itself is made server-side
+// by the Personalization Agent (backend/auntiejoy/agents.py), which reasons only
+// over structured facts about this session (a clarification point that had to be
+// raised twice, a field rejected twice, two turns in a row that didn't resolve) —
+// never the customer's words. This file just reflects that decision and lets the
+// customer override it from the "Personalisation" button.
+// ==========================================================================
+let CUSTOMER_NAME = 'Auntie';    // updated from the trusted session.customer_preferred_name once
+                                  // a live turn responds — never taken from anything the customer typed
+let PERSONALIZE_MODE = 'auto';   // 'auto' | 'on' | 'off' — 'auto' follows AUTO_PERSONALIZE
+let AUTO_PERSONALIZE = false;    // mirrors the backend's session.personalize_auto
+let INTRO_SPOKEN = false;        // say "let's check one by one" once per conversation, not on every re-entry
+let LAST_PERSONALIZATION_DECISION = null;   // the Personalization Agent's own reason_code, for the settings popup
+function personalizeActive(){
+  return PERSONALIZE_MODE==='on' || (PERSONALIZE_MODE==='auto' && AUTO_PERSONALIZE);
+}
+// Picks the wording set to speak with: the plain/simple variant once active,
+// falling back to the standard field for anything simple{} doesn't override.
+function tt(lang){
+  const base = T[lang]||T.EN;
+  return personalizeActive() ? Object.assign({}, base, base.simple||{}) : base;
+}
+function updatePersonalizeBadge(){
+  const b=$('personalizeBadge'); if(!b) return;
+  b.textContent = personalizeActive() ? 'Personalisation: Adapted' : 'Personalisation: Standard';
+  b.classList.toggle('active', personalizeActive());
+}
+// Reads the Personalization Agent's latest decision off a /turn, /confirm or
+// /field_signal response and announces the change once, the moment it actually
+// flips — never retroactively, never silently.
+function syncPersonalization(session){
+  if(!session) return;
+  if(session.customer_preferred_name) CUSTOMER_NAME = session.customer_preferred_name;
+  if(typeof session.personalize_auto !== 'boolean') return;
+  const before = personalizeActive();
+  AUTO_PERSONALIZE = session.personalize_auto;
+  if(session.personalization_decision) LAST_PERSONALIZATION_DECISION = session.personalization_decision;
+  if(!before && personalizeActive()){
+    iface('I\'ll take a little more time from here, and check each detail with you twice, just to be safe.');
+  }
+  updatePersonalizeBadge();
+}
+// Reports a field-review answer to the backend the instant it happens, so a
+// second "no" on the same field is a fact the Personalization Agent can see —
+// not something the client only claims after the fact.
+async function reportFieldSignal(field, result){
+  if(!FREE_SESSION_ID) return;
+  try{
+    const resp = await postJSON('/field_signal', {session_id: FREE_SESSION_ID, field, result});
+    syncPersonalization(resp.session);
+    // Render whatever the backend actually did — including a live PERSONALIZATION AGENT
+    // card the instant a repeat signal crosses the threshold, not just on the next turn.
+    for(const ev of (resp.events||[])){
+      if(ev.event_type==='PERSONALIZATION_RESULT') agent('PERSONALIZATION AGENT', ev.payload);
+      audit(ev.event_type + (ev.stage_label?(' · '+ev.stage_label):''), auditClassFor(ev.event_type));
+    }
+  }catch(err){ /* best-effort — a failed signal just means slower adaptation, never a broken flow */ }
+}
 
 // The Guardrails Agent (and the deterministic safety policy) only ever return a short
 // CODE — message_key — never customer-facing text ("message_key a short template key
 // the application will render", per its own system prompt). This is where the
 // application renders it, same idea as the T[] templates above.
 const MSG = {
-  EN:{ BLOCK_BYPASS:"I'm sorry, Auntie — I can't skip checking with you first. Every payment needs your confirmation before it is sent.",
-    BLOCK_OVERRIDE:"I'm sorry, Auntie — I can't change that safety setting. It stays on to protect you.",
+  EN:{ BLOCK_BYPASS:"I'm sorry, Auntie. I can't skip checking with you first. Every payment needs your confirmation before it is sent.",
+    BLOCK_OVERRIDE:"I'm sorry, Auntie. I can't change that safety setting. It stays on to protect you.",
     PAUSE_SCAM:"Auntie, please stop for a moment. This sounds like it could be a scam, so I will not send this payment. Please call the person or the bank directly, using a number you already know and trust.",
     CLARIFY_INPUT:"Sorry Auntie, I didn't quite catch that. Could you please say it again?",
     COOLING_OFF:"Auntie, this looks a little unusual, so I want to pause for a moment before we continue. Please take your time, and check with someone you trust if you are not sure." },
@@ -125,6 +209,36 @@ if(techToggle){
   techToggle.onchange = () => document.body.classList.toggle('tech-hidden', !techToggle.checked);
 }
 
+// Personalisation settings button: shows honestly what's active and why, and
+// always lets the customer override it — automatic detection never has the
+// final word.
+const personalizeBadge = $('personalizeBadge');
+if(personalizeBadge){
+  personalizeBadge.onclick = async () => {
+    const why = {
+      REPEAT_REJECTION: "the same detail got corrected twice during review",
+      REPEAT_CLARIFICATION: "the same question had to be asked twice",
+      STALLED_INTENT: "the conversation wasn't moving forward",
+      COMBINED: "a couple of things kept needing to be repeated",
+    }[LAST_PERSONALIZATION_DECISION?.reason_code] || "this conversation needed a bit more back-and-forth";
+    const statusLine = PERSONALIZE_MODE==='on' ? "You've turned this on yourself."
+      : PERSONALIZE_MODE==='off' ? "You've turned this off. AuntieJoy won't switch it on itself."
+      : personalizeActive() ? `AuntieJoy noticed ${why}, so it's using simpler wording and double-checking each detail.`
+      : "AuntieJoy is using its standard wording. It'll offer to simplify if a conversation needs a bit more back-and-forth.";
+    const choice = await popup({
+      kicker:'PERSONALISATION', title:'How AuntieJoy is adapting',
+      body:`${statusLine}<br><br>This only reacts to difficulty in <i>this</i> conversation, never to how someone talks, types, or who they might be.`,
+      acts:[
+        {id:'on', label:'Keep it simple', kind: PERSONALIZE_MODE==='on'?'yes':''},
+        {id:'off', label:'Use standard wording', kind: PERSONALIZE_MODE==='off'?'yes':''},
+        {id:'auto', label:'Let AuntieJoy decide', kind: PERSONALIZE_MODE==='auto'?'yes':''}
+      ],
+      note:'You can change this anytime. It never overrides what you choose here.'
+    });
+    if(choice==='on'||choice==='off'||choice==='auto'){ PERSONALIZE_MODE=choice; updatePersonalizeBadge(); }
+  };
+}
+
 function buildStatic(){
   chainEl.innerHTML = STAGES.map((s,i)=>
     `<div class="stg" id="stg${i}"><span class="no">${String(i).padStart(2,'0')}</span>`+
@@ -145,7 +259,11 @@ function bubble(kind,label,text){
 }
 const auntie   = t => bubble('auntie','AUNTIE',t);
 const attacker = t => bubble('attacker','ATTACKER',t);
-const iface    = t => bubble('iface','INTERFACE',t);
+// Single choke point for every reply the customer hears (live turns AND scripted
+// scenarios both go through this) — swaps the generic "Auntie" address for the
+// actual customer's name once a live session has told us one, whole-word only so
+// it never mangles unrelated text.
+const iface    = t => bubble('iface','INTERFACE', CUSTOMER_NAME==='Auntie' ? t : t.replace(/\bAuntie\b/g, CUSTOMER_NAME));
 const sysLine  = t => bubble('sys','SYSTEM',t);
 
 function hl(o){
@@ -1007,6 +1125,7 @@ const AGENT_NAME_FOR_EVENT = {
   INTENT_RESULT: 'INTENT CLASSIFIER',
   PAYMENT_PROPOSAL: 'PAYMENT AGENT',
   VALIDATION_RESULT: 'INDEPENDENT VALIDATION AGENT',
+  PERSONALIZATION_RESULT: 'PERSONALIZATION AGENT',
 };
 
 // A few other event types are still worth showing as a card even though
@@ -1169,13 +1288,13 @@ function finalStateSteps(s){
 // all three fields get a "yes" — a "no" just stops here and asks Auntie to
 // restate that field as a normal free-text/voice turn (same as scenario E2).
 async function liveFieldReview(lang, d){
-  const t=T[lang]||T.EN;
+  const t=tt(lang);
   const F=[
     ['RECIPIENT','Recipient', t.recipient(`${d.payee_display} · ${d.payee_masked}`), 1],
     ['AMOUNT','Amount',       t.amount(money(d.amount_minor)),                        2],
     ['SOURCE_ACCOUNT','Source', t.source(d.account_masked),                           3]
   ];
-  iface(t.intro); await sleep(500);
+  if(!INTRO_SPOKEN){ iface(t.intro); INTRO_SPOKEN = true; await sleep(500); }
   for(let i=0;i<F.length;i++){
     const f=F[i];
     stage(11,'run');
@@ -1189,7 +1308,24 @@ async function liveFieldReview(lang, d){
     if(a==='cancelled') return {cancelled:true};
     if(a==='no'){
       stage(11,'fail'); audit(`FIELD_REJECTED_${f[0]}`,'warn'); outcome('EDIT_REQUESTED','warn');
+      await reportFieldSignal(f[0], 'REJECTED');
       return {edit:true, field:f[0]};
+    }
+    // Extra confirmation layer: once personalization is active, a single "yes"
+    // isn't taken as final — the detail is read back once more before it locks in.
+    if(personalizeActive() && t.confirmAgain){
+      const again = await popup({
+        kicker:`DOUBLE-CHECK · ${f[0]}`, title:f[1],
+        body: t.confirmAgain(f[2]),
+        acts:[{id:'yes',label:t.yes,kind:'yes'},{id:'no',label:t.no,kind:'no'}],
+        note:'Confirming twice, just to be sure. This still hasn’t signed or sent anything.'
+      });
+      if(again==='cancelled') return {cancelled:true};
+      if(again==='no'){
+        stage(11,'fail'); audit(`FIELD_REJECTED_${f[0]}_ON_RECHECK`,'warn'); outcome('EDIT_REQUESTED','warn');
+        await reportFieldSignal(f[0], 'REJECTED');
+        return {edit:true, field:f[0]};
+      }
     }
     audit(`FIELD_CONFIRMED_${f[0]}`,'ok');
   }
@@ -1204,10 +1340,10 @@ async function liveConfirmFlow(session, lang, my){
   const r = await liveFieldReview(lang, d);
   if(my!==RUN || r.cancelled) return;
   if(r.edit){
-    iface('No problem, Auntie — please tell me the correct '+f_readable(r.field)+'.');
+    iface('No worries, Auntie. Just let me know the correct '+f_readable(r.field)+'.');
     return;
   }
-  iface(T[lang].ready); await sleep(500);
+  iface(tt(lang).ready); await sleep(500);
   if(my!==RUN) return;
   stage(12,'run');
   const a = await popup({
@@ -1233,12 +1369,13 @@ async function liveConfirmFlow(session, lang, my){
     return;
   }
   if(my!==RUN) return;
+  syncPersonalization(resp.session);
   const seenStages=new Set();
   const steps = eventsToSteps(resp.events, seenStages).concat(finalStateSteps(resp.session));
   await play(steps, my);
   if(my!==RUN) return;
   if(resp.session.state==='EXECUTED'){
-    iface(T[lang].done(money(d.amount_minor), d.payee_display, resp.session.execution?.transaction_id||d.draft_id));
+    iface(tt(lang).done(money(d.amount_minor), d.payee_display, resp.session.execution?.transaction_id||d.draft_id));
   }else{
     const said = composeReply(resp, lang);
     if(said) iface(said);
@@ -1253,6 +1390,9 @@ async function liveFreeTurn(text, viaVoice){
     FREE_SESSION_ID = 'sess_free_' + Math.random().toString(36).slice(2,10);
     resetRun();
     document.querySelectorAll('.sbtn').forEach(b=>b.classList.remove('on'));
+    AUTO_PERSONALIZE = false;   // a new conversation starts with a clean read — no carry-over profiling
+    INTRO_SPOKEN = false;
+    updatePersonalizeBadge();
     await sleep(120);
     if(my!==RUN) return;
     audit('LIVE BACKEND · '+API_BASE,'ok');
@@ -1277,6 +1417,7 @@ async function liveFreeTurn(text, viaVoice){
   if(my!==RUN) return;
 
   const st = resp.session.state;
+  syncPersonalization(resp.session);   // the backend's Personalization Agent already decided this turn
   if(st==='CONFIRMATION_READY' && resp.session.draft){
     await liveConfirmFlow(resp.session, lang, my);
   } else {
@@ -1317,4 +1458,4 @@ mic.onclick=()=>{
 /* ---------- boot ---------- */
 /* Boot: play the happy path so the first thing anyone sees is the real control chain,
    then it pauses at the field-by-field confirmation popup waiting for Auntie. */
-// runScenario('HAPPY');
+runScenario('HAPPY');

@@ -10,6 +10,8 @@ CUSTOMERS: Dict[str, Dict[str, Any]] = {
     "cust_auntie_001": {
         "customer_id": "cust_auntie_001",
         "display_name": "Tan Mei Ling",
+        "preferred_name": "Mei Ling",    # what the app calls the customer in chat — a trusted
+                                          # field from this record, never taken from the chat text
         "tier": "STANDARD",              # trusted source — never taken from chat (§A.6 C3)
         "language_preference": "ZH",
         "accounts": [
@@ -41,5 +43,3 @@ POLICY = {
     "disclosure": "synthetic demonstration limit — not a real DBS limit",
     "high_risk_payee_ids": [],
 }
-
-

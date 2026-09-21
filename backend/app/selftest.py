@@ -4,6 +4,35 @@ from .config import Settings
 from .session import STAGES
 from .scenarios import SCENARIOS, run_scenario
 from .main import app
+from .agents import PersonalizationAgent
+from .models import PersonalizationSignals
+
+# 14a. Personalization Agent — unit-tested directly against its own documented weight
+# table, the same way you'd test any pure scoring function (§ observed-friction policy).
+# =====================================================================
+PERSONALIZATION_CASES = [
+    # (signals, expected personalize, expected reason_code) — mirrors Settings.PERSONALIZATION_WEIGHTS
+    (PersonalizationSignals(), False, "NONE"),
+    (PersonalizationSignals(repeat_field_rejections=["AMOUNT"]), True, "REPEAT_REJECTION"),
+    (PersonalizationSignals(repeat_clarifications=["PAYEE_UNCLEAR"]), True, "REPEAT_CLARIFICATION"),
+    (PersonalizationSignals(stalled_intent=True), False, "STALLED_INTENT"),   # weight 1 alone, below threshold 2
+    (PersonalizationSignals(repeat_field_rejections=["AMOUNT"], stalled_intent=True), True, "COMBINED"),
+    (PersonalizationSignals(repeat_clarifications=["PAYEE_UNCLEAR"], repeat_field_rejections=["RECIPIENT"]), True, "COMBINED"),
+]
+
+
+def _test_personalization() -> int:
+    failures = 0
+    for signals, expected_personalize, expected_reason in PERSONALIZATION_CASES:
+        decision = PersonalizationAgent.mock(signals)
+        ok = decision.personalize == expected_personalize and decision.reason_code == expected_reason
+        status = "PASS" if ok else "FAIL"
+        failures += not ok
+        print(f"{status} personalization  signals={signals.model_dump()} "
+              f"-> personalize={decision.personalize} score={decision.score} reason={decision.reason_code}")
+        if not ok:
+            print(f"        -> expected personalize={expected_personalize}, reason={expected_reason}")
+    return failures
 
 # 14. Self-test — every scenario, asserting the BRD's own acceptance rules (§A.12)
 # =====================================================================
@@ -68,7 +97,14 @@ async def selftest() -> int:
               f"rows={len(result.ledger_rows)}")
         for problem in problems:
             print(f"        -> {problem}")
-    print(f"\n{len(SCENARIOS) - failures}/{len(SCENARIOS)} scenarios passed.")
+
+    print()
+    personalization_failures = _test_personalization()
+    failures += personalization_failures
+
+    print(f"\n{len(SCENARIOS) - (failures - personalization_failures)}/{len(SCENARIOS)} scenarios passed.")
+    print(f"{len(PERSONALIZATION_CASES) - personalization_failures}/{len(PERSONALIZATION_CASES)} "
+          "personalization cases passed.")
     print("Ledger invocations across all scenarios: "
           f"{sum(1 for s in ('HAPPY', 'E2', 'F3'))} expected, "
           f"{await _ledger_rows_in(('HAPPY', 'E2', 'F3'))} observed "

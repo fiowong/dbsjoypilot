@@ -2,7 +2,8 @@ import re
 from typing import List, Tuple
 from .config import Settings
 from .models import (GuardrailDecision, RiskCategory, GuardrailResult, IntentResult,
-                      PaymentProposal, FieldCheck, ValidationResult, Draft)
+                      PaymentProposal, FieldCheck, ValidationResult, Draft,
+                      PersonalizationSignals, PersonalizationDecision)
 from .agent_runtime import AgentUnavailable, typed_call
 from .llm_client import llm_complete
 from .parsing import (detect_language, parse_amount, parse_payee_phrase,
@@ -69,6 +70,32 @@ Return only a JSON object with exactly these keys: status (PASS or FREEZE), fiel
 Each field_check has: field_name, result (MATCH or MISMATCH or UNCERTAIN), evidence_source, evidence_value,
 draft_value. evidence_source is one of TRANSCRIPT, CLARIFICATION_TURN, VERIFIED_SESSION_FACT, PRODUCT_RULE,
 MODEL_INFERENCE, EXTERNAL_UNTRUSTED_DATA."""
+
+PERSONALIZATION_SYSTEM_PROMPT = """You are the Personalization Agent for AuntieJoy.
+
+You decide only whether THIS session should switch to simpler wording and an extra confirmation
+step before each field locks in. You are never given the transcript, the customer's wording, their
+voice, or anything about who they might be — only three structured, already-computed facts about
+what happened mechanically in this session:
+
+  repeat_field_rejections   list of fields the customer rejected on review MORE THAN ONCE
+                            (a single rejection is normal — the system asked and got corrected;
+                             a second rejection on the SAME field is the actual signal)
+  repeat_clarifications     list of clarification points that had to be raised MORE THAN ONCE
+                            (one clarification is often a genuinely ambiguous request; a repeat
+                             on the same point means the first answer didn't resolve it)
+  stalled_intent            true only if the last two turns BOTH failed to resolve to anything
+
+You must NOT infer age, ability, accent or identity — you have no basis to, since you are not
+given the words the customer used. Score only from the three facts above, using these weights:
+repeat_field_rejections present: +2, repeat_clarifications present: +2, stalled_intent true: +1.
+personalize is true only once the total score reaches 2.
+
+Return only a JSON object with exactly these keys:
+  personalize      true or false
+  score            the integer total you computed
+  reason_code      one of NONE, REPEAT_REJECTION, REPEAT_CLARIFICATION, STALLED_INTENT, COMBINED
+  developer_reason one short sentence for the audit log, never shown to the customer"""
 
 
 class GuardrailsAgent:
@@ -316,6 +343,45 @@ class ValidationAgent:
             except AgentUnavailable:
                 pass
         return ValidationAgent.mock(draft, evidence, verified), "mock"
+
+
+class PersonalizationAgent:
+    """5th bounded agent. Unlike the other four, its mock() IS the reference policy, not a
+    stand-in for a live call — the weights are configuration (Settings.PERSONALIZATION_WEIGHTS),
+    documented and testable, so the decision is defensible even when Settings.LIVE_LLM is off."""
+    name = "PERSONALIZATION AGENT"
+    prompt = PERSONALIZATION_SYSTEM_PROMPT
+    schema = PersonalizationDecision
+
+    @staticmethod
+    def mock(signals: PersonalizationSignals) -> PersonalizationDecision:
+        w = Settings.PERSONALIZATION_WEIGHTS
+        score = 0
+        reasons: List[str] = []
+        if signals.repeat_field_rejections:
+            score += w["repeat_field_rejection"]
+            reasons.append("REPEAT_REJECTION")
+        if signals.repeat_clarifications:
+            score += w["repeat_clarification"]
+            reasons.append("REPEAT_CLARIFICATION")
+        if signals.stalled_intent:
+            score += w["stalled_intent"]
+            reasons.append("STALLED_INTENT")
+        code = "NONE" if not reasons else (reasons[0] if len(reasons) == 1 else "COMBINED")
+        why = ("No repeated friction observed this session." if not reasons else
+              f"score {score}/{Settings.PERSONALIZATION_THRESHOLD} from: {', '.join(reasons)}.")
+        return PersonalizationDecision(personalize=score >= Settings.PERSONALIZATION_THRESHOLD,
+                                       score=score, reason_code=code, developer_reason=why)
+
+    @staticmethod
+    async def run(signals: PersonalizationSignals) -> Tuple[PersonalizationDecision, str]:
+        if Settings.LIVE_LLM:
+            try:
+                raw = await llm_complete(PersonalizationAgent.prompt, signals.model_dump())
+                return typed_call(raw, PersonalizationDecision), "live"
+            except AgentUnavailable:
+                pass
+        return PersonalizationAgent.mock(signals), "mock"
 
 
 # =====================================================================

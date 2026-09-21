@@ -144,3 +144,29 @@ class Confirmation(BaseModel):
     status: Literal["OPEN", "COMPLETE", "INVALIDATED"] = "OPEN"
 
 
+# =====================================================================
+# Personalization Agent — 5th bounded agent. Reasons ONLY over structured,
+# already-computed facts about what happened mechanically in this session.
+# It is never given the transcript, so it cannot infer age, ability, accent
+# or identity from how the customer speaks or types (see agents.py docstring).
+# =====================================================================
+class PersonalizationSignals(BaseModel):
+    """Every field here is a fact about what happened, never about how it was said.
+
+    A single rejection/clarification is normal system behaviour (the system caught
+    or asked about something) — only a REPEAT on the same point is a friction signal.
+    """
+    repeat_field_rejections: List[Literal["RECIPIENT", "AMOUNT", "SOURCE_ACCOUNT"]] = Field(default_factory=list)
+    repeat_clarifications: List[str] = Field(default_factory=list)
+    stalled_intent: bool = False
+
+
+class PersonalizationDecision(BaseModel):
+    """Output is a score + reason, not a black-box probability — every point is traceable
+    to one of the three PersonalizationSignals fields (see PERSONALIZATION_WEIGHTS)."""
+    personalize: bool
+    score: int
+    reason_code: Literal["NONE", "REPEAT_REJECTION", "REPEAT_CLARIFICATION", "STALLED_INTENT", "COMBINED"]
+    developer_reason: str
+
+

@@ -24,6 +24,16 @@ class Settings:
     AGENT_MAX_RETRIES = 1                   # §8.1
     ASR_AMBIGUITY_THRESHOLD = 0.85
 
+    # Personalization Agent (§ observed-friction, not speech-pattern inference).
+    # Each weight is individually justified — see agents.py PERSONALIZATION_SYSTEM_PROMPT
+    # and the developer_reason on PersonalizationDecision for the audit-trail rationale.
+    PERSONALIZATION_THRESHOLD = 2
+    PERSONALIZATION_WEIGHTS = {
+        "repeat_field_rejection": 2,   # the SAME field rejected twice — the first "no" is normal use
+        "repeat_clarification": 2,     # the SAME clarification point raised twice
+        "stalled_intent": 1,           # two consecutive turns that failed to resolve at all
+    }
+
     # §8.10 — synthetic demonstration limits, never real DBS limits
     DEMO_MAX_TRANSFER_MINOR = 1_000_000     # SGD 10,000.00
     COOLING_OFF_HIGH_VALUE_MINOR = 500_000  # SGD 5,000.00
