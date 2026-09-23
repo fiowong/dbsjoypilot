@@ -148,6 +148,15 @@ MESSAGES: Dict[str, Dict[str, str]] = {
         "BM": "{name}, saya tidak jumpa penerima bernama {phrase}. {name} nak hantar kepada siapa?",
     },
 
+    # ---------- Stage 5 — multiple recipients named in one request (MVP: one transfer at a time) ----------
+    "MULTIPLE_RECIPIENTS": {
+        "EN": "{name}, I can only send money to one person at a time. Which would you like to "
+              "pay first — {recipients}?",
+        "ZH": "{name}，我一次只能给一个人转账。您想先付给谁——{recipients}？",
+        "BM": "{name}, saya hanya boleh hantar duit kepada seorang pada satu masa. Nak bayar "
+              "kepada siapa dulu — {recipients}?",
+    },
+
     # ---------- Stages 6/9/10 — freezes ----------
     "FROZEN_UNTRUSTED_METADATA": {
         "EN": "{name}, I found suspicious text inside {payee}'s saved-payee record. I have "
@@ -176,6 +185,18 @@ MESSAGES: Dict[str, Dict[str, str]] = {
         "EN": "{name}, I've paused this payment for safety. No money was sent.",
         "ZH": "{name}，为了安全，我先暂停了这笔付款。钱没有汇出。",
         "BM": "{name}, saya pause bayaran ini untuk keselamatan. Wang belum dihantar.",
+    },
+
+    # ---------- Customer states insufficient funds (empathetic abort, no pressure) ----------
+    "INSUFFICIENT_FUNDS": {
+        "EN": "{name}, no worries at all. We don't have to send this right now. If you'd like, "
+              "just tell me a smaller amount and I can help with that — or we can leave it for "
+              "today. Nothing has been sent.",
+        "ZH": "{name}，没关系的。我们不必现在就汇出。如果您愿意，只要告诉我少一点的金额，我来帮您处理；"
+              "或者今天就先不汇也可以。钱还没有汇出。",
+        "BM": "{name}, tak apa langsung. Kita tidak perlu hantar sekarang. Jika {name} mahu, "
+              "beritahu saya jumlah yang lebih kecil dan saya boleh bantu — atau kita boleh "
+              "biarkan dulu hari ini. Wang belum dihantar.",
     },
 
     # ---------- Stage 10 → 11 — ready for review ----------

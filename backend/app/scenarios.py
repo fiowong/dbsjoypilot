@@ -85,6 +85,13 @@ SCENARIOS: Dict[str, dict] = {
            "turns": [{"text": "帮我 transfer 五十块给 Mei.", "asr_confidence": 0.97}],
            "confirm": {"fields": ["RECIPIENT", "AMOUNT", "SOURCE_ACCOUNT"], "language": "ZH",
                        "extra_forges": ["RETRY_IDEMPOTENT", "REPLAY_NONCE", "EXPIRED"]}},
+    "G1": {"branch": "G", "title": "G1 Multiple recipients in one request",
+           "turns": [{"text": "Send fifty dollars to John Doe and John Smith.", "asr_confidence": 0.97}],
+           "confirm": None},
+    "H1": {"branch": "H", "title": "H1 Customer states insufficient funds",
+           "turns": [{"text": "Wah, I don't think I have enough to send fifty dollars to Mei.",
+                      "asr_confidence": 0.97}],
+           "confirm": None},
 }
 
 

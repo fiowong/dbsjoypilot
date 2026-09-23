@@ -56,6 +56,7 @@ EXPECTED = {
     "F1":    {"state": "REJECTED", "outcome": "REJECTED", "ledger": "NOT_INVOKED"},
     "F2":    {"state": "REJECTED", "outcome": "REJECTED", "ledger": "NOT_INVOKED"},
     "F3":    {"state": "REJECTED", "outcome": "REJECTED", "ledger": "RECORDED"},
+    "G1":    {"state": "CLARIFICATION_REQUIRED", "outcome": "CLARIFY", "ledger": "NOT_INVOKED"},
 }
 
 

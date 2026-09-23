@@ -24,6 +24,15 @@ LANGUAGE_SWITCH_RE = re.compile(
 AFFIRMATION_RE = re.compile(
     r"^(yes|ya|ok|okay|confirm|confirmed|proceed|sure|betul|saja|correct|right|"
     r"yup|yep|bai|setuju)\b", re.IGNORECASE)
+# Shared deterministic cue for the affordability / insufficient-funds situation: a customer who
+# volunteers they cannot cover the amount is answered with an empathetic, non-pressuring response.
+# Trilingual because Auntie switches between EN / BM / ZH mid-conversation.
+INSUFFICIENT_FUNDS_RE = re.compile(
+    r"(insufficient|not enough|no money|don'?t have (enough|the money)|"
+    r"do not have (enough|the money)|have enough|cannot afford|can'?t afford|"
+    r"short of (money|cash)|low on (cash|money)|haven'?t got enough|"
+    r"tak cukup (duit|wang|cash)?|duit tak cukup|tak ada duit|wang tak cukup|"
+    r"不够|钱不够|没有钱|没钱|余额不足)", re.IGNORECASE)
 
 # =====================================================================
 # 6. The four bounded agents — each a typed call, live or mock

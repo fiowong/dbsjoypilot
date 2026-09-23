@@ -15,14 +15,15 @@ from .parsing import (parse_amount, parse_corrected_amount, last_committed_amoun
                        ambiguous_amount_pair)
 from .agents import (GuardrailsAgent, IntentClassifierAgent, PaymentAgent, ValidationAgent,
                      PersonalizationAgent, CONFIRMATION_BYPASS_RE, LANGUAGE_SWITCH_RE,
-                     AFFIRMATION_RE)
+                     AFFIRMATION_RE, INSUFFICIENT_FUNDS_RE)
 from .agent_runtime import AgentUnavailable
 from .controls import (resolve_payee_and_account, compare_validation_result, evaluate_risk,
                         evaluate_safety_policy, canonical_payload, payload_hash, sign_payload,
                         Ledger, gateway_verify, GatewayDecision, GatewayResult, ComparatorResult,
-                        RiskDecision, RiskOutcome, _not_expired, freeze_message_key)
+                        RiskDecision, RiskOutcome, _not_expired, freeze_message_key,
+                        detect_multiple_recipients)
 from .messages import (say, interface_language, candidate_options, amount_pair,
-                        customer_name, display_phrase)
+                        customer_name, display_phrase, join_options)
 from .audit import AUDIT
 from .session import STAGES, Session, SESSIONS, get_session
 
@@ -207,6 +208,22 @@ async def run_turn(req: TurnRequest) -> TurnResponse:
                                       "schema_version": Settings.SCHEMA_VERSION,
                                       "note": "live guardrails relaxed to ALLOW for language-switch "
                                               "by deterministic safeguard"})
+
+    # Deterministic safeguard (affordability / insufficient funds, branch H): a customer who
+    # volunteers they cannot cover the amount (e.g. "I don't have enough", "tak cukup duit",
+    # "钱不够") gets an empathetic, non-pressuring response. The conversation stays open so they
+    # can name a smaller amount or cancel — no draft is ever created from an affordability
+    # statement alone. This is a deterministic policy, so it fires regardless of what the
+    # (untrusted) Guardrails Agent might have classified the turn as.
+    if INSUFFICIENT_FUNDS_RE.search(req.text):
+        session.state, session.outcome = SessionState.CLARIFICATION_REQUIRED, "INSUFFICIENT_FUNDS"
+        emit("INSUFFICIENT_FUNDS_DETECTED", 3, {
+            "customer_stated_affordability": True,
+            "draft_created": False, "payment_proposal_permitted": False,
+            "gateway_available_to_agent": False, "ledger_invoked": False,
+            "note": "Empathetic abort — the system never pressures the customer to proceed."})
+        say_line("INSUFFICIENT_FUNDS", 3)
+        return await finish()
 
     if guardrail.decision == GuardrailDecision.BLOCK:
         # BRD §8.5.7 deterministic routing: BLOCK -> session.state = "FROZEN".
@@ -403,6 +420,23 @@ async def run_turn(req: TurnRequest) -> TurnResponse:
     emit("PAYMENT_PROPOSAL", 5, {"engine": engine, **proposal.model_dump(),
                                  "trusted": False,
                                  "note": "Untrusted proposal. No beneficiary id, token or approval."})
+
+    # §MVP — one saved-payee transfer at a time. A request that names 2+ payees is clarified down
+    # to a single recipient before any draft is built. This is a deterministic policy, so it fires
+    # regardless of what the (untrusted) Payment Agent returned — even a PROPOSAL_READY that carried
+    # two names would be caught here instead of silently binding the first match.
+    multi = detect_multiple_recipients(req.text, session.customer_id)
+    if multi:
+        session.state, session.outcome = SessionState.CLARIFICATION_REQUIRED, "CLARIFY"
+        session.open_clarification_field = "RECIPIENT"
+        session.note_clarification("MULTIPLE_RECIPIENTS")
+        emit("CLARIFICATION_OPENED", 5, {
+            "clarification_field": "RECIPIENT",
+            "clarification_key": "MULTIPLE_RECIPIENTS",
+            "candidates": [{"displayName": n} for n in multi],
+            "canonical_draft": "NOT_CREATED"})
+        say_line("MULTIPLE_RECIPIENTS", 5, recipients=join_options(multi, lang))
+        return await finish()
 
     if proposal.status != "PROPOSAL_READY":
         session.state, session.outcome = SessionState.CLARIFICATION_REQUIRED, "CLARIFY"

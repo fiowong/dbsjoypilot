@@ -10,6 +10,7 @@ from .config import Settings, now_iso, money
 from .models import (Draft, Confirmation, PaymentProposal, ValidationResult, GuardrailResult,
                       REQUIRED_VALIDATION_FIELDS)
 from .data import CUSTOMERS, SAVED_PAYEES, POLICY
+from .parsing import PAYEE_ALIASES
 
 # 7. Deterministic controls — the half that is allowed to move money
 # =====================================================================
@@ -37,6 +38,34 @@ FREEZE_MESSAGE_KEYS = {
 
 def freeze_message_key(reason: Optional[str]) -> str:
     return FREEZE_MESSAGE_KEYS.get(reason or "", "FROZEN_RISK")
+
+
+def detect_multiple_recipients(text: str, customer_id: str) -> Optional[List[str]]:
+    """§MVP — one saved-payee transfer at a time. Return the display names of 2+ *distinct* saved
+    payees named in the turn, else None.
+
+    Matching is on the full display name or a full-name alias only, so a bare "john" (which is
+    ambiguous between the two Johns) is NOT counted here — that case is the existing PAYEE_AMBIGUOUS
+    clarification, a different situation. This keeps a request like "pay John" from being misread as
+    "pay both Johns".
+    """
+    payees = SAVED_PAYEES.get(customer_id, [])
+    lowered = text.lower()
+    found: List[str] = []
+    for p in payees:
+        hit = p.display_name.lower() in lowered
+        if not hit:
+            for alias, canon in PAYEE_ALIASES.items():
+                if " " in alias and canon == p.display_name.lower() \
+                        and re.search(rf"\b{re.escape(alias)}\b", lowered):
+                    hit = True
+                    break
+        if hit:
+            found.append(p.display_name)
+    # de-dup, preserving order
+    seen: set = set()
+    distinct = [n for n in found if not (n in seen or seen.add(n))]
+    return distinct if len(distinct) >= 2 else None
 
 
 def resolve_payee_and_account(customer_id: str, proposal: PaymentProposal,

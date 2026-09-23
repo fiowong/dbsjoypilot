@@ -35,7 +35,7 @@ async def health() -> dict:
         "agents": ["GUARDRAILS AGENT", "INTENT CLASSIFIER", "PAYMENT AGENT",
                    "INDEPENDENT VALIDATION AGENT", "PERSONALIZATION AGENT"],
         "stages": len(STAGES),
-        "branches": "A–F / 18 nodes",
+        "branches": "A–G / 19 nodes",
         "disclosure": POLICY["disclosure"],
         "audit_db": Settings.DB_PATH,
     }
@@ -55,6 +55,7 @@ async def scenarios() -> dict:
         "D": "Auntie is being manipulated",
         "E": "Auntie does not understand the payment",
         "F": "Wrong, forged or repeated payment executed",
+        "G": "Multiple or out-of-shape request",
     }
     return {
         "scenarios": [{"id": k, "branch": v["branch"], "title": v["title"],
