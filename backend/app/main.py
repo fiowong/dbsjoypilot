@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from .config import Settings
+from .llm_client import check_llm_health
 from .session import STAGES, get_session
 from .data import POLICY
 from .audit import AUDIT
@@ -18,10 +19,17 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 
 @app.get("/health")
 async def health() -> dict:
+    configured = Settings.LIVE_LLM
+    reachable = await check_llm_health() if configured else False
     return {
         "status": "ok",
-        "engine": "live" if Settings.LIVE_LLM else "mock",
-        "model": Settings.LLM_MODEL if Settings.LIVE_LLM else "deterministic-mock",
+        # engine reflects ACTUAL reachability, not mere key presence — a key can be set while
+        # the upstream service is down, and /health must not claim "live" in that case.
+        "engine": "live" if reachable else "mock",
+        "llm_configured": configured,
+        "llm_reachable": reachable,
+        "llm_base_url": Settings.LLM_BASE_URL if configured else None,
+        "model": Settings.LLM_MODEL if configured else "deterministic-mock",
         "prompt_version": Settings.PROMPT_VERSION,
         "schema_version": Settings.SCHEMA_VERSION,
         "agents": ["GUARDRAILS AGENT", "INTENT CLASSIFIER", "PAYMENT AGENT",

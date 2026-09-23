@@ -15,7 +15,7 @@ except ImportError:
 # 0. Configuration — every threshold is configuration, never prompt text (§8.6.4)
 # =====================================================================
 class Settings:
-    PROMPT_VERSION = "aj-2026-09-19"
+    PROMPT_VERSION = "aj-2026-09-22e"
     SCHEMA_VERSION = "aj-schema-1.0"
 
     INTENT_CONFIDENCE_THRESHOLD = 0.75      # §8.6.4
@@ -36,7 +36,11 @@ class Settings:
 
     # §8.10 — synthetic demonstration limits, never real DBS limits
     DEMO_MAX_TRANSFER_MINOR = 1_000_000     # SGD 10,000.00
-    COOLING_OFF_HIGH_VALUE_MINOR = 500_000  # SGD 5,000.00
+    STEP_UP_HIGH_VALUE_MINOR = 500_000      # SGD 5,000.00 — transfers above this (and at/below
+                                           # the synthetic reject limit) require extra verification
+                                           # via STEP_UP; the reject ceiling is DEMO_MAX_TRANSFER_MINOR
+                                           # (SGD 10,000). Repurposed from COOLING_OFF_HIGH_VALUE_MINOR,
+                                           # which was defined but never referenced.
     VELOCITY_MAX_DRAFTS_PER_SESSION = 5
 
     SIGNING_SECRET = os.getenv("AUNTIEJOY_SIGNING_SECRET", "demo-only-not-a-production-hsm")

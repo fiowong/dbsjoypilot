@@ -1,6 +1,8 @@
 import re
 from typing import List, Optional, Tuple
 
+from .config import Settings
+
 # =====================================================================
 # 4. Language + amount understanding (deterministic, multilingual)
 # =====================================================================
@@ -33,12 +35,21 @@ PAYEE_ALIASES = {
 }
 
 
+# The three supported interaction languages, plus code-mixed speech. These patterns are
+# module-level (not buried inside detect_language) because two callers need them:
+# detect_language() to classify the turn, and messages.interface_language() to decide which
+# template language a code-mixed turn should be answered in. One definition, two readers.
+CJK_MARKERS = re.compile(r"[\u4e00-\u9fff]")
+BM_MARKERS = re.compile(
+    r"\b(hantar|kepada|dolar|duit|saya|tidak|boleh|jumlah|akaun|bayar|sekarang|"
+    r"lima|lapan|sepuluh|ribu|seratus|buang|had|cucu|cepat|maaf)\b", re.I)
+EN_MARKERS = re.compile(r"\b(transfer|send|pay|dollars?|please|account|confirm)\b", re.I)
+
+
 def detect_language(text: str) -> str:
-    has_zh = bool(re.search(r"[\u4e00-\u9fff]", text))
-    bm_markers = re.search(
-        r"\b(hantar|kepada|dolar|duit|saya|tidak|boleh|jumlah|akaun|bayar|sekarang|"
-        r"lima|lapan|sepuluh|ribu|seratus|buang|had|cucu|cepat|maaf)\b", text, re.I)
-    en_markers = re.search(r"\b(transfer|send|pay|dollars?|please|account|confirm)\b", text, re.I)
+    has_zh = bool(CJK_MARKERS.search(text))
+    bm_markers = BM_MARKERS.search(text)
+    en_markers = EN_MARKERS.search(text)
     signals = sum(bool(x) for x in (has_zh, bm_markers, en_markers))
     if has_zh and signals > 1:
         return "MIXED"
@@ -47,6 +58,28 @@ def detect_language(text: str) -> str:
     if bm_markers:
         return "MIXED" if en_markers else "BM"
     return "EN"
+
+
+def ambiguous_amount_pair(text: str, asr_confidence: float,
+                          already_disambiguated: bool = False) -> Optional[Tuple[int, int]]:
+    """The two readings of a *materially* ambiguous amount, or None.
+
+    "fifty" is either fifty dollars or fifty thousand dollars. That is only material when the
+    audio evidence was also uncertain (§A.5 B1), the customer has not already disambiguated
+    the amount, and the turn is not an explicit correction (an explicit correction wins).
+
+    Returns (lower_minor, higher_minor). Both the Payment Agent (which raises the ambiguity)
+    and the orchestrator (which renders the question) call this one predicate, so the question
+    can never disagree with the reason it was asked.
+    """
+    if already_disambiguated or asr_confidence >= Settings.ASR_AMBIGUITY_THRESHOLD:
+        return None
+    if parse_corrected_amount(text) is not None:
+        return None
+    amount, scale_ambiguous = parse_amount(text)
+    if amount is None or not scale_ambiguous:
+        return None
+    return amount, amount * 1000
 
 
 def _number_word_matches(haystack_lowered: str, haystack_raw: str) -> List[Tuple[str, int]]:

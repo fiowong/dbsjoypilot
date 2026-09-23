@@ -3,6 +3,7 @@ from datetime import datetime
 from typing import Dict, List, Optional
 from .config import Settings
 from .models import SessionState, Draft, Confirmation, ValidationResult, PersonalizationSignals
+from .data import CUSTOMERS
 
 # 9. The 16-stage control chain — §8.2
 # =====================================================================
@@ -87,9 +88,13 @@ class Session:
                                       stalled_intent=stalled)
 
     def to_public(self) -> dict:
+        # The preferred name is trusted data from the customer record — never taken from
+        # anything the customer typed (§A.6 C3). The app addresses the customer with it.
+        customer = CUSTOMERS.get(self.customer_id) or {}
         return {
             "session_id": self.session_id,
             "customer_id": self.customer_id,
+            "customer_preferred_name": customer.get("preferred_name"),
             "state": self.state.value,
             "outcome": self.outcome,
             "evidence": self.evidence,

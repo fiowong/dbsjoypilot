@@ -17,9 +17,26 @@ class DeterministicResolution(BaseModel):
     outcome: Literal["RESOLVED", "NEEDS_CLARIFICATION", "FREEZE"]
     draft: Optional[Draft] = None
     clarification_field: Optional[str] = None
-    clarification_question: Optional[str] = None
+    # A message_key, not a sentence. Deterministic code says WHAT is unclear and hands over
+    # the candidates; messages.py decides how that is phrased, in which language, and how the
+    # customer is addressed. Nothing in this file writes prose the customer will read.
+    clarification_key: Optional[str] = None
     candidates: List[dict] = Field(default_factory=list)
     reason: Optional[str] = None
+    # Set on the FREEZE path so the customer can be told *which* record was suspicious.
+    payee_display: Optional[str] = None
+
+
+# Freeze reasons -> the catalogue key that explains them to the customer. Kept here because
+# this module owns the reason vocabulary; messages.py owns the wording.
+FREEZE_MESSAGE_KEYS = {
+    "UNTRUSTED_PAYEE_METADATA_DETECTED": "FROZEN_UNTRUSTED_METADATA",
+    "NO_ELIGIBLE_SOURCE_ACCOUNT": "FROZEN_NO_ACCOUNT",
+}
+
+
+def freeze_message_key(reason: Optional[str]) -> str:
+    return FREEZE_MESSAGE_KEYS.get(reason or "", "FROZEN_RISK")
 
 
 def resolve_payee_and_account(customer_id: str, proposal: PaymentProposal,
@@ -28,7 +45,7 @@ def resolve_payee_and_account(customer_id: str, proposal: PaymentProposal,
     if proposal.status != "PROPOSAL_READY":
         return DeterministicResolution(outcome="NEEDS_CLARIFICATION",
                                        clarification_field=proposal.clarification_field,
-                                       clarification_question=proposal.clarification_question)
+                                       clarification_key="RECIPIENT_MISSING")
 
     payees = SAVED_PAYEES.get(customer_id, [])
     needle = (payee_phrase or proposal.recipient_phrase or "").lower()
@@ -38,11 +55,14 @@ def resolve_payee_and_account(customer_id: str, proposal: PaymentProposal,
     if not matches:
         return DeterministicResolution(outcome="NEEDS_CLARIFICATION",
                                        clarification_field="RECIPIENT",
-                                       clarification_question="Auntie, I could not find that saved payee.")
+                                       clarification_key="PAYEE_NOT_FOUND")
     if len(matches) > 1:
+        # The candidates travel as structured records. The question that names them is built
+        # from this list by messages.candidate_options() — so the customer is always told
+        # WHICH John, instead of a generic "which one do you mean?".
         return DeterministicResolution(
             outcome="NEEDS_CLARIFICATION", clarification_field="RECIPIENT",
-            clarification_question="Auntie, I found more than one saved payee with that name. Which one do you mean?",
+            clarification_key="PAYEE_AMBIGUOUS",
             candidates=[{"beneficiary_id": p.beneficiary_id, "displayName": p.display_name,
                          "maskedDestination": p.masked} for p in matches])
 
@@ -51,11 +71,13 @@ def resolve_payee_and_account(customer_id: str, proposal: PaymentProposal,
     if payee.untrusted_note and re.search(
             r"ignore|skip|change the destination|instruction|override", payee.untrusted_note, re.I):
         return DeterministicResolution(outcome="FREEZE",
-                                       reason="UNTRUSTED_PAYEE_METADATA_DETECTED")
+                                       reason="UNTRUSTED_PAYEE_METADATA_DETECTED",
+                                       payee_display=payee.display_name)
 
     account = next((a for a in CUSTOMERS[customer_id]["accounts"] if a.eligible), None)
     if account is None:
-        return DeterministicResolution(outcome="FREEZE", reason="NO_ELIGIBLE_SOURCE_ACCOUNT")
+        return DeterministicResolution(outcome="FREEZE", reason="NO_ELIGIBLE_SOURCE_ACCOUNT",
+                                       payee_display=payee.display_name)
 
     return DeterministicResolution(outcome="RESOLVED", draft=Draft(
         draft_id="dr_pending", version=1,
@@ -112,6 +134,8 @@ def evaluate_risk(draft: Draft, session: dict, guardrail: Optional[GuardrailResu
     reasons: List[str] = []
     if draft.amount_minor > POLICY["max_transfer_minor"]:
         reasons.append("AMOUNT_ABOVE_SYNTHETIC_LIMIT")
+    elif draft.amount_minor > Settings.STEP_UP_HIGH_VALUE_MINOR:
+        reasons.append("HIGH_VALUE_STEP_UP")
     if session.get("drafts_created", 0) >= Settings.VELOCITY_MAX_DRAFTS_PER_SESSION:
         reasons.append("VELOCITY_EXCEEDED")
     if draft.beneficiary_id in POLICY["high_risk_payee_ids"]:
@@ -244,7 +268,12 @@ def gateway_verify(payload: dict, signature: str, claimed: dict, draft: Draft,
         else "FAIL")
     checks["validation"] = "PASS" if validation.status == "PASS" else "FAIL"
     checks["comparator"] = "PASS" if comparator.result == "PASS" else "FAIL"
-    checks["risk_policy"] = "PASS" if risk.decision == RiskDecision.PASS else "FAIL"
+    # STEP_UP is an allowed risk outcome whose extra verification (the transaction-specific
+    # FaceID at stage 12) has already been satisfied by the time we reach the gateway, so it
+    # passes — exactly like a PASS. REJECT/COOLING_OFF still fail. This makes the amount-based
+    # step-up symmetric with the voice-based step-up (which keeps risk=PASS and only sets
+    # session.step_up_required).
+    checks["risk_policy"] = "PASS" if risk.decision in (RiskDecision.PASS, RiskDecision.STEP_UP) else "FAIL"
     checks["freeze_status"] = "PASS" if not session.get("frozen") else "FAIL"
     checks["cancellation_status"] = "PASS" if not session.get("cancelled") else "FAIL"
     checks["nonce_fresh"] = "PASS" if payload["nonce"] not in Ledger._nonces else "FAIL"
