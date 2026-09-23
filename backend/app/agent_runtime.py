@@ -1,7 +1,7 @@
 import json
 import re
 import sys
-from typing import get_args, get_origin, Literal, Union
+from typing import get_args, get_origin, Literal, Union, Optional
 from pydantic import BaseModel, ValidationError
 
 # =====================================================================
@@ -38,6 +38,9 @@ _ENUM_ALIASES = {
     # field-name -> {lowercased-synonym: canonical Literal}
     "status": {
         "proposal": "PROPOSAL_READY", "proposalready": "PROPOSAL_READY", "ready": "PROPOSAL_READY",
+        "proposed": "PROPOSAL_READY", "ready_for_confirmation": "PROPOSAL_READY",
+        "proposal_for_confirmation": "PROPOSAL_READY", "for_confirmation": "PROPOSAL_READY",
+        "awaiting_confirmation": "PROPOSAL_READY",
         "draft": "PROPOSAL_READY", "new": "PROPOSAL_READY", "complete": "PROPOSAL_READY",
         "completed": "PROPOSAL_READY", "ok": "PROPOSAL_READY", "done": "PROPOSAL_READY",
         "created": "PROPOSAL_READY",
@@ -64,18 +67,88 @@ def _literal_tokens(ann) -> list:
     return []
 
 
+def _is_str_field(ann) -> bool:
+    """True for `str` or `Optional[str]` (Union containing str)."""
+    if ann is str:
+        return True
+    if get_origin(ann) is Union and str in get_args(ann):
+        return True
+    return False
+
+
+def _list_element_type(ann):
+    """Return the element type of a `List[...]` annotation, else None."""
+    if get_origin(ann) is list:
+        args = get_args(ann)
+        if args:
+            return args[0]
+    return None
+
+
+def _describe_literal(v: str, ann) -> Optional[str]:
+    """Case-insensitive canonical match for a Literal[str] value, e.g. 'match' -> 'MATCH'."""
+    if get_origin(ann) is Literal and all(isinstance(a, str) for a in get_args(ann)):
+        up = v.strip().upper()
+        for tok in get_args(ann):
+            if tok.upper() == up:
+                return tok
+    return None
+
+
+def _coerce_str_list(val: list) -> list:
+    """risk_flags: List[str] whose elements may arrive as dicts/numbers -> list of strings."""
+    out = []
+    for item in val:
+        if isinstance(item, str):
+            out.append(item)
+        elif isinstance(item, dict):
+            # Validation agent returned structured flags; keep the meaningful bit as a string.
+            out.append(str(item.get("flag") or item.get("detail") or item.get("reason")
+                             or json.dumps(item, ensure_ascii=False)))
+        else:
+            out.append(str(item))
+    return out
+
+
+def _normalize_subfields(item: dict, sub_model: type[BaseModel]) -> None:
+    """Coerce nested scalar string / Literal-string fields a model returned as the wrong type
+    (e.g. FieldCheck.draft_value: 5000 -> '5000'). Only str-typed sub-fields are touched."""
+    for sub_name, sub_field in sub_model.model_fields.items():
+        if sub_name not in item or item[sub_name] is None:
+            continue
+        v = item[sub_name]
+        sub_ann = sub_field.annotation
+        if _is_str_field(sub_ann) and not isinstance(v, str):
+            item[sub_name] = str(v)
+        elif isinstance(v, str):
+            canonical = _describe_literal(v, sub_ann)
+            if canonical is not None:
+                item[sub_name] = canonical
+
+
 def _normalize_obj(obj: dict, model_cls: type[BaseModel]) -> dict:
     """Tolerant pre-validation for live-model replies only. Absorbs harmless spelling variance:
-    full language names, status/currency synonyms, whitespace, numeric-string amounts, string-in-list
-    risk_flags, and null lists. Keeps the strict schema for the deterministic control chain."""
+    full language names, status/currency synonyms, whitespace, numeric-string amounts, nested
+    FieldCheck scalar coercion, structured risk_flags -> strings, and null lists. Keeps the strict
+    schema for the deterministic control chain; mock replies never pass through here."""
     for name, field in model_cls.model_fields.items():
         if name not in obj:
             continue
         val = obj[name]
+        ann = field.annotation
+        # --- list fields: field_checks (List[FieldCheck]) and risk_flags (List[str]) ---
+        elem = _list_element_type(ann)
+        if elem is not None and isinstance(val, list):
+            if isinstance(elem, type) and issubclass(elem, BaseModel):
+                for item in val:
+                    if isinstance(item, dict):
+                        _normalize_subfields(item, elem)
+            elif elem is str:
+                obj[name] = _coerce_str_list(val)
+            continue
         # risk_flags returned as a bare string instead of a list
-        if name == "risk_flags":
-            if isinstance(val, str):
-                obj[name] = [val] if val.strip() else []
+        if name == "risk_flags" and isinstance(val, str):
+            obj[name] = [val] if val.strip() else []
             continue
         # amount_minor returned as a numeric string ("5000" / "50 dollars") -> int
         if name == "amount_minor" and isinstance(val, str):
@@ -103,7 +176,7 @@ def _normalize_obj(obj: dict, model_cls: type[BaseModel]) -> dict:
             obj[name] = alias
             continue
         # generic Literal / Optional[Literal] case-insensitive match (e.g. 'en' -> 'EN')
-        literal_tokens = _literal_tokens(field.annotation)
+        literal_tokens = _literal_tokens(ann)
         if literal_tokens:
             up = s.upper()
             for tok in literal_tokens:

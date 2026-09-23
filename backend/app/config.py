@@ -20,8 +20,8 @@ class Settings:
 
     INTENT_CONFIDENCE_THRESHOLD = 0.75      # §8.6.4
     AGENT_TEMPERATURE = 0.0                 # §8.1
-    AGENT_TIMEOUT_S = 12.0
-    AGENT_MAX_RETRIES = 1                   # §8.1
+    AGENT_TIMEOUT_S = 30.0                  # raised: deepseek endpoint occasionally slow; 30s ceiling, not a typical latency
+    AGENT_MAX_RETRIES = 3                    # §8.1 — 4 attempts total with exponential backoff + 429 Retry-After (upstream is flaky)
     ASR_AMBIGUITY_THRESHOLD = 0.85
 
     # Personalization Agent (§ observed-friction, not speech-pattern inference).

@@ -1,13 +1,22 @@
 import json
 import sys
+import asyncio
 from typing import Optional
 import httpx
 from .config import Settings
 from .agent_runtime import AgentUnavailable
 
 # =====================================================================
-# 5. LLM client — OpenAI-compatible, temperature 0, ≤1 retry, fail closed
+# 5. LLM client — OpenAI-compatible, temperature 0, fail closed.
+#    Resilient: exponential backoff + honours 429 Retry-After, and logs the
+#    REAL cause (exception type / HTTP status / body) instead of an empty string
+#    so live-mode transport failures are diagnosable (see aj-2026-09-23 transport fix).
 # =====================================================================
+# Light pacing so we never thunder the upstream with a burst. The selftest fires many calls
+# back-to-back; the live demo is interactive, so this is invisible. It reduces the 502
+# "upstream model service is abnormal or unreachable" rate when the provider is load-sensitive.
+_CALL_PACE_S = 0.3
+
 async def llm_complete(system_prompt: str, user_payload: dict) -> str:
     if not Settings.LIVE_LLM:
         raise AgentUnavailable("live LLM not configured")
@@ -20,7 +29,9 @@ async def llm_complete(system_prompt: str, user_payload: dict) -> str:
         ],
     }
     last_error: Optional[Exception] = None
+    backoff = 0.5
     for attempt in range(Settings.AGENT_MAX_RETRIES + 1):
+        await asyncio.sleep(_CALL_PACE_S)
         try:
             async with httpx.AsyncClient(timeout=Settings.AGENT_TIMEOUT_S) as client:
                 resp = await client.post(
@@ -29,20 +40,40 @@ async def llm_complete(system_prompt: str, user_payload: dict) -> str:
                              "Content-Type": "application/json"},
                     json=body,
                 )
+                if resp.status_code == 429:
+                    # Rate limited — wait the server's Retry-After (or our backoff) and retry.
+                    last_error = httpx.HTTPStatusError(
+                        "rate limited (429)", request=resp.request, response=resp)
+                    if attempt < Settings.AGENT_MAX_RETRIES:
+                        retry_after = resp.headers.get("Retry-After")
+                        wait = float(retry_after) if (retry_after and retry_after.isdigit()) else backoff
+                        await asyncio.sleep(wait)
+                        backoff = min(backoff * 2, 10.0)
+                        continue
+                    break
                 resp.raise_for_status()
                 return resp.json()["choices"][0]["message"]["content"]
         except Exception as exc:                      # noqa: BLE001 — fail closed on anything
             last_error = exc
             if attempt < Settings.AGENT_MAX_RETRIES:
-                await _async_sleep(0.4)
-    print(f"[AGENT_LIVE_FALLBACK] llm_complete: transport/HTTP failed after retries: {last_error}",
+                await asyncio.sleep(backoff)
+                backoff = min(backoff * 2, 10.0)
+    print(f"[AGENT_LIVE_FALLBACK] llm_complete: transport/HTTP failed after retries: {_describe(last_error)}",
           file=sys.stderr, flush=True)
-    raise AgentUnavailable(f"LLM call failed after retries: {last_error}")
+    raise AgentUnavailable(f"LLM call failed after retries: {_describe(last_error)}")
 
 
-async def _async_sleep(seconds: float) -> None:
-    import asyncio
-    await asyncio.sleep(seconds)
+def _describe(exc: Optional[Exception]) -> str:
+    """Render a transport/HTTP failure with enough detail to diagnose (timeout vs 429 vs 5xx)."""
+    if exc is None:
+        return "(no error captured)"
+    if isinstance(exc, httpx.HTTPStatusError):
+        try:
+            body = exc.response.text[:300]
+        except Exception:
+            body = ""
+        return f"{type(exc).__name__} status={exc.response.status_code} body={body!r}"
+    return f"{type(exc).__name__}: {exc}"
 
 
 async def check_llm_health() -> bool:
