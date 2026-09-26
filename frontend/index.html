@@ -4,6 +4,11 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>AuntieJoy — DBS Voice-First Payments</title>
+<!-- Banking-grade type. Inter is the requested DBS/enterprise face; the CSS stack keeps a
+     full system fallback, so an offline demo laptop simply renders in system-ui instead. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap">
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -92,8 +97,13 @@
         <!-- 1 · DBS digibank LOG IN -->
         <section class="scr on" id="scrLogin">
           <div class="lgwrap">
+            <!-- Integrated dark brand header. The DBS mark sits inside the header block rather
+                 than on a cut-off bar, and the build tag is a quiet pill on the right. -->
             <div class="lghead">
-              <img class="dbslogo" src="assets/dbs-logo-white.png" alt="DBS">
+              <div class="lgrow-top">
+                <img class="dbslogo" src="assets/dbs-logo-white.png" alt="DBS">
+                <span class="lgbuild">SG · v4.12</span>
+              </div>
               <div class="lgtag">Live more, Bank less</div>
             </div>
 
@@ -102,20 +112,39 @@
               <p class="lgsub">Log in to digibank to continue.</p>
 
               <label class="lgf">
-                <span>NRIC / Username</span>
-                <input id="lgUser" value="S12345678A" autocomplete="off" spellcheck="false">
-              </label>
-              <label class="lgf">
-                <span>PIN</span>
-                <input id="lgPin" type="password" value="SAMPLEPASSWORD1234" autocomplete="off">
+                <span class="lglab">NRIC / Username</span>
+                <span class="lgin">
+                  <input id="lgUser" value="S1234567A" autocomplete="off" spellcheck="false">
+                  <span class="lgok" id="lgUserOk" aria-hidden="true"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="m5 13 4.5 4.5L19 7"/></svg></span>
+                </span>
               </label>
 
-              <button class="btn-dbs" id="lgBtn" type="button">Log in</button>
-              <div class="lgnote">Prototype only — these are sample credentials. No real credentials
-                are collected, stored or transmitted.</div>
+              <label class="lgf">
+                <span class="lglab"><span>PIN</span><button type="button" class="lgforgot" id="lgForgot">Forgot PIN?</button></span>
+                <span class="lgin">
+                  <input id="lgPin" type="password" value="SAMPLEPASSWORD1234" autocomplete="off">
+                  <span class="lgok on" aria-hidden="true"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="m5 13 4.5 4.5L19 7"/></svg></span>
+                </span>
+              </label>
+
+              <button class="btn-dbs" id="lgBtn" type="button">Log in securely</button>
+
+              <button class="lgalt" id="lgAlt" type="button">
+                <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8V5.5A2.5 2.5 0 0 1 5.5 3H8"/><path d="M16 3h2.5A2.5 2.5 0 0 1 21 5.5V8"/><path d="M21 16v2.5a2.5 2.5 0 0 1-2.5 2.5H16"/><path d="M8 21H5.5A2.5 2.5 0 0 1 3 18.5V16"/><path d="M9 9.5v2"/><path d="M15 9.5v2"/><path d="M9.5 15.5a3.5 3.5 0 0 0 5 0"/></svg>
+                <span>Log in with Digital Token / Face ID</span>
+              </button>
+
+              <div class="lgtrust">
+                <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4.5" y="10.5" width="15" height="10" rx="2.5"/><path d="M8 10.5V7a4 4 0 0 1 8 0v3.5"/></svg>
+                <span>Protected by DBS 256-Bit SSL Encryption · Digital Token enabled</span>
+              </div>
             </div>
 
-            <div class="lgfoot">DBS Bank Ltd · demonstration build</div>
+            <div class="lgfoot">
+              <div class="lgfoot-t">DBS Bank Ltd · Reg. No. 196800306E</div>
+              <div class="lgfoot-s">Demonstration build. Sample credentials only — nothing is
+                collected, stored or transmitted.</div>
+            </div>
           </div>
         </section>
 
@@ -124,33 +153,56 @@
           <div class="appbar">
             <img class="dbslogo sm" src="assets/dbs-logo-white.png" alt="DBS">
             <span class="appbar-t">digibank</span>
-            <button class="appbar-x" id="appBack" type="button">← AuntieJoy</button>
+            <button class="appbar-x" id="appBack" type="button">
+              <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5"/><path d="m11 18-6-6 6-6"/></svg>
+              <span>AuntieJoy</span>
+            </button>
           </div>
           <div class="appbody" id="appBody"></div>
         </section>
 
         <!-- 3 · AUNTIEJOY CHAT -->
         <section class="scr" id="scrJoy">
+          <!-- LIGHT app bar: back control on the left, identity and trust state centred.
+               Deliberately no avatar here — the assistant introduces itself in the message
+               card below, so the header stays a quiet piece of navigation chrome.
+               The back control is absolutely positioned so the title is centred on the
+               SCREEN, not on the space left over after the button. -->
           <div class="abar">
-            <div class="av"><img id="avImg" alt="AuntieJoy"></div>
-            <div>
-              <div class="nm">AuntieJoy</div>
-              <div class="sub" id="abarSub">DBS · payment preparation only</div>
+            <button class="aback" id="joyBack" type="button" aria-label="Back to digibank">
+              <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 6-6 6 6 6"/></svg>
+              <span>Back</span>
+            </button>
+            <div class="ameta">
+              <div class="nm">AuntieJoy Voice Assist</div>
+              <div class="sub"><i class="safedot"></i>Protected by DBS Safeguard</div>
             </div>
-            <div class="dot"><i></i>SECURE</div>
           </div>
           <div class="chat" id="chat"></div>
-          <div class="langtog" id="langtog" title="Which language should the mic listen for?">
-            <button class="lt on" data-lang="en-SG" data-l="EN">EN</button>
-            <button class="lt" data-lang="zh-CN" data-l="ZH">中文</button>
-            <button class="lt" data-lang="ms-MY" data-l="BM">BM</button>
-          </div>
+          <!-- Language pills live INSIDE the input container, so the composer is one unit. -->
           <div class="cinput">
-            <input class="fld" id="fld" placeholder="Speak or type…" autocomplete="off">
-            <button class="mic" id="mic" title="Speak">🎤</button>
+            <div class="langtog" id="langtog" title="Which language should the mic listen for?">
+              <button class="lt on" data-lang="en-SG" data-l="EN">EN</button>
+              <button class="lt" data-lang="zh-CN" data-l="ZH">中文</button>
+              <button class="lt" data-lang="ms-MY" data-l="BM">BM</button>
+            </div>
+            <div class="cinrow">
+              <input class="fld" id="fld" placeholder="Speak or type payment command…" autocomplete="off">
+              <button class="mic" id="mic" title="Speak" aria-label="Speak">
+                <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="2" width="6" height="13" rx="3"/><path d="M12 19v3"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/></svg>
+              </button>
+            </div>
           </div>
         </section>
 
+        <!-- ================= POPUP (Auntie appears in every popup) =================
+             Deliberately INSIDE the phone screen rather than floating over the whole page:
+             the customer is holding a phone, so the field-by-field confirmation and the
+             FaceID prompt have to appear on that screen. It also stops the popup from
+             covering the technical inspector panels, so judges see both at once. -->
+        <div class="modal" id="modal">
+          <div class="mcard" id="mcard"></div>
+        </div>
       </div>
     </div>
 
@@ -200,16 +252,14 @@
   </div>
 </div>
 
-<!-- ================= POPUP (Auntie appears in every popup) ================= -->
-<div class="modal" id="modal">
-  <div class="mcard" id="mcard"></div>
-</div>
-
 <script src="translations.js"></script>
+<script src="icons.js"></script>
 <script src="ui.js"></script>
 <script src="personalization.js"></script>
 <script src="scenarios.js"></script>
+<script src="stt.js"></script>
 <script src="live.js"></script>
+<script src="tts.js"></script>
 <script src="shell.js"></script>
 </body>
 </html>

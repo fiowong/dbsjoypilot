@@ -181,8 +181,10 @@ const SNAP = `(() => {
     console.log('  chat area         : ' + s.chat.w + ' x ' + s.chat.h);
     console.log('  composer          : ' + s.cinput.w + ' x ' + s.cinput.h);
     ok('chat area has real height', s.chat.h > 300, s.chat.h + 'px');
-    const stack = s.abar.h + s.chat.h + s.langtog.h + s.cinput.h;
-    ok('header + chat + language toggle + composer exactly fill the screen',
+    // .langtog now lives INSIDE .cinput (one composer unit), so its height is already
+    // included in s.cinput.h — adding it separately would double-count it.
+    const stack = s.abar.h + s.chat.h + s.cinput.h;
+    ok('header + chat + composer exactly fill the screen',
        Math.abs(stack - s.screen.h) < 2,
        stack.toFixed(1) + ' vs ' + s.screen.h);
     ok('device + inspector fit the stage width',

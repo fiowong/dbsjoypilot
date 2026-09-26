@@ -10,13 +10,15 @@
 /* ---------- element refs ---------- */
 const studioEl  = $('studio');
 const appBodyEl = $('appBody');
-const avImgEl   = $('avImg');
-if(avImgEl) avImgEl.src = MASCOT;   // point the chat header avatar at the mascot
+const deviceScreenEl = $('deviceScreen');
 
 /* ---------- one DBS app screen at a time, inside the device ---------- */
 const SCREENS = ['scrLogin','appwin','scrJoy'];
 function showScreen(id){
   SCREENS.forEach(s=>{ const el = $(s); if(el) el.classList.toggle('on', s===id); });
+  // AuntieJoy is the only screen with a LIGHT header, so the mock status bar flips to dark
+  // ink there. Without this the white status text vanishes against the pale page.
+  if(deviceScreenEl) deviceScreenEl.classList.toggle('light-bar', id==='scrJoy');
 }
 
 function showLogin(){
@@ -25,62 +27,80 @@ function showLogin(){
 }
 
 /* ---------- digibank home ---------- */
+/* Every icon here comes from icons.js — no OS emoji in banking chrome. The balance card is a
+   dark gradient surface with a masked account number and a currency pill; the AuntieJoy entry
+   is a white card with a red accent badge and a pulsing mic dot rather than a full-red block. */
 const HOME_HTML = `
   <div class="balcard"><div class="bb">
-    <div class="bk">DBS SAVINGS · ENDING 1234</div>
-    <div class="bv">SGD 12,480.55</div>
-    <div class="bs">Available balance · updated just now</div>
+    <div class="brow">
+      <div>
+        <div class="bk">DBS Multi-Currency Autosave</div>
+        <div class="bnum">•••• 1234</div>
+      </div>
+      <span class="bpill">PRIMARY</span>
+    </div>
+    <div class="bamt"><span class="bcur">SGD</span><span class="bv">12,480.55</span></div>
+    <div class="bdiv"></div>
+    <div class="bs"><span>Available balance</span><span>Updated just now</span></div>
   </div></div>
 
   <button class="enable" type="button" data-go="joy" data-blank="1">
-    <span class="eav"><img src="${MASCOT}" alt=""></span>
-    <span class="etxt">
-      <span class="ebadge">VOICE-FIRST · NEW</span>
+    <span class="eav">${icon('mic')}<span class="epulse"></span></span>
+    <div class="etxt">
+      <span class="ebadge">${icon('sparkle','ic-sm')}VOICE-FIRST</span>
       <div class="et">Enable AuntieJoy</div>
       <div class="ed">Just say who you want to pay and how much. AuntieJoy gets it ready,
         DBS checks it, and you approve it.</div>
-    </span>
-    <span class="earrow">›</span>
+    </div>
+    <span class="earrow">${icon('chevronRight')}</span>
   </button>
 
-  <div class="appsec">QUICK ACTIONS</div>
+  <div class="appsec">Quick actions</div>
   <div class="tiles">
-    <button class="tile" type="button" data-go="pay"><div class="ti">💸</div>
-      <div class="tn">Pay &amp; Transfer</div><div class="td">Send money to any payee</div></button>
-    <button class="tile" type="button" data-go="pay"><div class="ti">📱</div>
-      <div class="tn">PayNow</div><div class="td">Transfer by mobile or NRIC</div></button>
-    <button class="tile" type="button" data-go="pay"><div class="ti">📷</div>
-      <div class="tn">Scan &amp; Pay</div><div class="td">Pay with a QR code</div></button>
-    <button class="tile" type="button" data-go="pay"><div class="ti">💳</div>
-      <div class="tn">Cards</div><div class="td">Manage your cards</div></button>
+    <button class="tile" type="button" data-go="pay">
+      <span class="ti">${icon('transfer')}</span>
+      <div><div class="tn">Pay &amp; Transfer</div><div class="td">Local &amp; international</div></div>
+    </button>
+    <button class="tile" type="button" data-go="pay">
+      <span class="ti">${icon('paynow')}</span>
+      <div><div class="tn">PayNow</div><div class="td">Mobile, NRIC or UEN</div></div>
+    </button>
+    <button class="tile" type="button" data-go="pay">
+      <span class="ti">${icon('scan')}</span>
+      <div><div class="tn">Scan &amp; Pay</div><div class="td">SGQR / NETS QR</div></div>
+    </button>
+    <button class="tile" type="button" data-go="pay">
+      <span class="ti">${icon('card')}</span>
+      <div><div class="tn">Cards</div><div class="td">Manage &amp; controls</div></div>
+    </button>
   </div>`;
 
 const PAY_HTML = `
-  <div class="appsec" style="margin-top:0">PAY &amp; TRANSFER</div>
+  <div class="appsec" style="margin-top:0">Pay &amp; Transfer</div>
   <div class="applist">
     <button class="approw hero" type="button" data-go="joy">
-      <span class="ri">🎤</span>
+      <span class="ri">${icon('mic')}</span>
       <span class="rt"><div class="rn">Ask AuntieJoy instead</div>
         <div class="rd">Say it in English, 中文 or Bahasa Melayu</div></span>
-      <span class="rc">›</span>
+      <span class="rc">${icon('chevronRight')}</span>
     </button>
     <button class="approw" type="button" data-go="saved">
-      <span class="ri">👤</span>
+      <span class="ri">${icon('user')}</span>
       <span class="rt"><div class="rn">To a saved payee</div>
         <div class="rd">Mei Tan · John Doe · Alice</div></span>
-      <span class="rc">›</span>
+      <span class="rc">${icon('chevronRight')}</span>
     </button>
     <button class="approw" type="button" data-go="new">
-      <span class="ri">➕</span>
+      <span class="ri">${icon('plus')}</span>
       <span class="rt"><div class="rn">To a new payee</div>
         <div class="rd">Add an account number or PayNow ID</div></span>
-      <span class="rc">›</span>
+      <span class="rc">${icon('chevronRight')}</span>
     </button>
     <button class="approw" type="button" data-go="paynow">
-      <span class="ri">SG</span>
+      <span class="ri">${icon('paynow')}</span>
       <span class="rt"><div class="rn">PayNow transfer</div>
         <div class="rd">Mobile number, NRIC or UEN</div></span>
-      <span class="rc">›</span>
+      <span class="rc">${icon('chevronRight')}</span>
     </button>
   </div>`;
 
@@ -116,43 +136,66 @@ async function showPayScopeNotice(){
   if(a==='joy') showJoy();
 }
 
-/* ---------- AuntieJoy chat surface ---------- */
+/* Same honesty rule for the two other real-digibank affordances we now surface on the login
+   screen: say they aren't built rather than leaving a control that does nothing. */
+async function showAltLoginNotice(){
+  await popup({
+    kicker:'PROTOTYPE SCOPE',
+    title:'Digital Token / Face ID sign-in isn’t wired up',
+    body:'The real digibank app signs you in with a <b>Digital Token</b> or <b>Face ID</b>. '+
+         'This build demonstrates <b>AuntieJoy</b>, so sign-in uses the sample credentials shown above.',
+    acts:[{id:'ok',label:'Got it',kind:'yes'}],
+    icon:'faceid',
+    note:'Nothing was sent, and no credential was collected.'
+  });
+}
+async function showForgotNotice(){
+  await popup({
+    kicker:'PROTOTYPE SCOPE',
+    title:'PIN recovery isn’t part of this demo',
+    body:'In the real app you would reset your PIN through DBS support. This build only '+
+         'demonstrates the <b>AuntieJoy</b> payment flow.',
+    acts:[{id:'ok',label:'Got it',kind:'yes'}],
+    icon:'lock',
+    note:'Nothing was sent.'
+  });
+}
+
+/* ---------- AuntieJoy chat surface ----------
+   The landing block is one transcript child: the assistant's message card, the
+   "SAMPLE VOICE COMMANDS" label, and the example chips. Kept together so the
+   transcript still holds exactly one thing before the customer says anything.
+   The card is a plain WHITE surface with a monogram avatar — the assistant is
+   introduced by the card, so the app bar above it can stay quiet navigation. */
 function introCard(){
   const d=document.createElement('div');
-  d.className='row them';
+  d.className='row them full';
   d.innerHTML=
     `<div class="intro">
        <div class="ihead">
-         <span class="iav"><img src="${MASCOT}" alt=""></span>
-         <span>
-           <div class="inm">AuntieJoy</div>
-           <div class="isub">voice-first payments</div>
-         </span>
-         <img class="dbslogo sm" src="assets/dbs-logo-white.png" alt="DBS">
+         <span class="ajav">AJ</span>
+         <span class="inm">AuntieJoy</span>
+         <span class="itag">Voice Assistant</span>
        </div>
-       <div class="ibody">
-         <div class="ihi">Hello! I'm AuntieJoy 👋</div>
-         <div class="itext">I can get a payment ready for you. Just tell me <b>who</b> you'd like to
-           pay and <b>how much</b> — in English, 中文 or Bahasa Melayu. I'll read it back to you,
-           and nothing is sent until you say yes.</div>
-         <div class="chips">
-           <button class="chip" type="button" data-say="Pay Mei Tan 50 dollars">Pay Mei Tan $50</button>
-           <button class="chip" type="button" data-say="Pay John Doe 100 dollars">Pay John Doe $100</button>
-           <button class="chip" type="button" data-say="付给Mei Tan五十元">付给 Mei Tan $50</button>
-           <button class="chip" type="button" data-say="Bayar Mei Tan lima puluh dolar">Bayar Mei Tan $50</button>
-         </div>
-         <button class="ibig" type="button">🎤 Tap to speak</button>
-         <div class="inote">You can also type in the box below. DBS checks every payment before it
-           goes out — and AuntieJoy can never send one on its own.</div>
+       <div class="itext">Hello<span data-nslot></span>! Tell me who to pay and how much.
+         I support English, 华语, or Bahasa Melayu.</div>
+       <div class="isec">${icon('alert')}
+         <div><b>Security Check:</b> AuntieJoy prepares the transaction. You must review &amp;
+           authorize with your Digital Token before any money moves.</div>
        </div>
+     </div>
+     <div class="cmdlabel">SAMPLE VOICE COMMANDS</div>
+     <div class="chips">
+       <button class="chip" type="button" data-say="Pay Mei Tan 50 dollars">&ldquo;Pay Mei Tan $50&rdquo;</button>
+       <button class="chip" type="button" data-say="付给Mei Tan五十元">&ldquo;付给 Mei Tan $50&rdquo;</button>
+       <button class="chip" type="button" data-say="Bayar Mei Tan lima puluh dolar">&ldquo;Bayar Mei Tan $50&rdquo;</button>
      </div>`;
   chatEl.appendChild(d); scroll();
+  if(typeof refreshNameSlots === 'function') refreshNameSlots(d);
   d.querySelectorAll('.chip').forEach(c=>c.addEventListener('click', ev=>{
     ev.preventDefault();
     liveFreeTurn(c.dataset.say, false);
   }));
-  const big=d.querySelector('.ibig');
-  if(big) big.addEventListener('click', ev=>{ ev.preventDefault(); mic.click(); });
   return d;
 }
 
@@ -172,8 +215,29 @@ function showJoy(blank){
 const lgBtn = $('lgBtn');
 if(lgBtn) lgBtn.addEventListener('click', ev=>{ ev.preventDefault(); showHome(); });
 
+/* Trailing validity tick. It only appears once the field actually matches the real Singapore
+   NRIC shape (letter + 7 digits + letter), so the cue carries information instead of being
+   decoration that is always on. */
+const lgUserEl = $('lgUser'), lgUserOk = $('lgUserOk');
+if(lgUserEl && lgUserOk){
+  const markValid = () => lgUserOk.classList.toggle('on', /^[STFGM]\d{7}[A-Z]$/i.test(lgUserEl.value.trim()));
+  lgUserEl.addEventListener('input', markValid);
+  markValid();
+}
+
+const lgAlt = $('lgAlt');
+if(lgAlt) lgAlt.addEventListener('click', ev=>{ ev.preventDefault(); showAltLoginNotice(); });
+
+const lgForgot = $('lgForgot');
+if(lgForgot) lgForgot.addEventListener('click', ev=>{ ev.preventDefault(); showForgotNotice(); });
+
 const appBack = $('appBack');
 if(appBack) appBack.addEventListener('click', ev=>{ ev.preventDefault(); showJoy(); });
+
+/* The chat header's Back control returns to the digibank home — the same single-header
+   navigation the redesign calls for. */
+const joyBack = $('joyBack');
+if(joyBack) joyBack.addEventListener('click', ev=>{ ev.preventDefault(); showHome(); });
 
 const restartBtn = $('restartBtn');
 if(restartBtn) restartBtn.addEventListener('click', ev=>{ ev.preventDefault(); showHome(); });

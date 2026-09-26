@@ -8,7 +8,7 @@ async function play(steps, my){
     switch(s.t){
       case 'auntie':   auntie(s.v); break;
       case 'attacker': attacker(s.v); break;
-      case 'iface':    iface(s.v); break;
+      case 'iface':    iface(s.v); speak(fill(s.v)); break;
       case 'sys':      sysLine(s.v); break;
       case 'agent':    agent(s.name,s.v); break;
       case 'stage':    stage(s.n,s.s); break;
@@ -40,6 +40,7 @@ function resetPanels(){
   BRANCHES.forEach(b=>{ $('br'+b[0]).classList.remove('hit'); b[2].forEach(n=>$('nd'+n).classList.remove('hit')); });
   state('IDLE'); draft('—'); ledger('NOT_INVOKED'); sig('NONE'); outcome('—');
   closePopup('cancelled');   // never leave a script blocked on a stale popup
+  closeDraftCard('cancelled');   // ...or on a draft card the customer never acted on
 }
 function resetRun(){
   chatEl.innerHTML='';
@@ -116,7 +117,8 @@ function executeChain(lang, d, opts){
       fields:`<div class="fr"><span class="k">Confirmation</span><span class="v">${d.confirmation_id}</span></div>
               <div class="fr"><span class="k">Bound to draft</span><span class="v">${d.draft_id} · v${d.version}</span></div>
               <div class="fr big"><span class="k">Amount</span><span class="v">${money(d.amount_minor)}</span></div>`,
-      acts:[{id:'ok',label:'😊  Confirm with Face ID',kind:'yes'}],
+      acts:[{id:'ok',label:icon('faceid')+' Confirm with Face ID',kind:'yes'}],
+      icon:'faceid',
       note:'Simulated. The prototype does not claim production FaceID integration (BRD §7.4).'}},
     {t:'agent',name:'MOCK FACEID',v:{result:'SUCCESS',simulation:true,confirmation_id:d.confirmation_id}},
     {t:'audit',v:'MOCK_FACEID_SUCCESS · bound to '+d.confirmation_id,c:'ok'},
@@ -205,7 +207,8 @@ SC.A1 = () => [
   {t:'stage',n:12,s:'run'},
   {t:'popup',d:150,cfg:{kicker:'BRANCH A · A1 — IMPERSONATION',title:'Face ID required',
     body:'The voice does not match the registered customer. FaceID on the registered device is the next control.',
-    acts:[{id:'ok',label:'😊  Try Face ID',kind:'yes'}],
+    acts:[{id:'ok',label:icon('faceid')+' Try Face ID',kind:'yes'}],
+    icon:'faceid',
     note:'Mocked evidence. The prototype does not claim production voiceprint authentication (BRD §6.2).'}},
   {t:'agent',name:'MOCK FACEID',v:{result:'FAILED',reason_code:'BIOMETRIC_NOT_VERIFIED'}},
   {t:'stage',n:12,s:'fail'},{t:'stage',n:13,s:'skip'},{t:'stage',n:14,s:'skip'},{t:'stage',n:15,s:'skip'},
@@ -367,7 +370,7 @@ SC.B3 = () => [
   {t:'agent',name:'PAYMENT AGENT',
     v:{status:'PROPOSAL_READY',detected_language:'EN',recipient_phrase:'Mei',amount_minor:5000,
        currency:'SGD',source_account_phrase:null,clarification_field:null,clarification_question:null,risk_flags:[]}},
-  {t:'sys',v:'⚠ INJECTED TEST CONDITION: incorrect proposal deliberately allowed into draft construction (BRD A.5 / B3).'},
+  {t:'sys',v:icon('alert')+' INJECTED TEST CONDITION: incorrect proposal deliberately allowed into draft construction (BRD A.5 / B3).'},
   {t:'stage',n:5,s:'pass'},{t:'stage',n:6,s:'pass'},{t:'stage',n:7,s:'pass'},
   {t:'draft',v:'v1 · amount_minor 5000'},
   {t:'stage',n:8,s:'run'},
@@ -788,7 +791,23 @@ SC.H1 = () => [
    If the backend is unreachable, runScenario() automatically falls back to
    the scripted version so the demo still works.
    ============================================================================ */
-const API_BASE = window.AUNTIEJOY_API_BASE || 'http://127.0.0.1:8077';
+/* Where the backend lives. Resolved in this order, so the backend can be moved to another
+   port or machine WITHOUT editing any code:
+     1. window.AUNTIEJOY_API_BASE — set in the page before these scripts load
+     2. ?api=http://host:port     — quick manual override in the address bar
+     3. default: the host this page was served from, port 8078
+   The default deliberately uses the PAGE's own hostname instead of a hardcoded 127.0.0.1:
+   when the app is opened from a phone on the same Wi-Fi, 127.0.0.1 would mean the phone
+   itself, not the laptop running the backend. */
+const API_BASE = (() => {
+  const clean = u => String(u).replace(/\/+$/, '');
+  if (window.AUNTIEJOY_API_BASE) return clean(window.AUNTIEJOY_API_BASE);
+  try {
+    const q = new URLSearchParams(window.location.search).get('api');
+    if (q) return clean(q);
+  } catch (_) { /* no URLSearchParams: fall through to the default */ }
+  return `http://${window.location.hostname || '127.0.0.1'}:8078`;
+})();
 
 // Which event_type values are one of the four LLM agents (§ stages 3/4/5/8) —
 // these get rendered as an agent card (name + JSON), same as the scripted demo.

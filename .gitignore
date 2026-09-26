@@ -8,7 +8,10 @@ __pycache__/
 *.pyc
 
 # local databases / generated data
+# -shm / -wal are SQLite's write-ahead-log sidecars; without these they show up as untracked junk
 *.db
+*.db-shm
+*.db-wal
 
 # local dev server logs
 frontend/*.log

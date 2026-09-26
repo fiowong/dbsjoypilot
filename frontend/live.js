@@ -4,6 +4,14 @@ const fld=$('fld'), mic=$('mic');
 let FREE_SESSION_ID = null;
 const TERMINAL_STATES = new Set(['EXECUTED','REJECTED','FROZEN','COOLING_OFF']);
 
+// Right-column YOU bubble the mic handler draws as words arrive (interim + final).
+// liveFreeTurn consumes this on a voice turn so it doesn't echo a second "YOU" copy.
+// The mic handler clears it on the no-speech / error paths so it never lingers.
+let _pendingYouBubble = null;
+// Re-entrancy guard: while a listening session is in flight, ignore extra mic taps.
+// Without this a double-tap would start a second SttClient on the same mic.
+let _micListening = false;
+
 function guessLang(text){
   if(/[一-鿿]/.test(text)) return 'ZH';
   if(/\b(hantar|kepada|dolar|akaun|puluh|duit|ribu|wang|betul|saja)\b/i.test(text)) return 'BM';
@@ -69,9 +77,9 @@ function showUnderstood(resp, asrConfidence, viaVoice){
 async function liveFieldReview(lang, d){
   const t=tt(lang);
   const F=[
-    ['RECIPIENT','Recipient', t.recipient(`${d.payee_display} · ${d.payee_masked}`), 1],
-    ['AMOUNT','Amount',       t.amount(money(d.amount_minor)),                        2],
-    ['SOURCE_ACCOUNT','Source', t.source(d.account_masked),                           3]
+    ['RECIPIENT','Recipient', t.recipient(`${d.payee_display} · ${d.payee_masked}`), 1, 'user'],
+    ['AMOUNT','Amount',       t.amount(money(d.amount_minor)),                        2, 'receipt'],
+    ['SOURCE_ACCOUNT','Source', t.source(d.account_masked),                           3, 'card']
   ];
   // No spoken intro here: the backend already said the REVIEW_READY line from its catalogue
   // when it opened confirmation, so this walkthrough is popups only.
@@ -80,6 +88,7 @@ async function liveFieldReview(lang, d){
     stage(11,'run');
     const a=await popup({
       kicker:`FIELD ${f[3]} OF 3 · ${f[0]}`, stepIdx:i, steps:F,
+      icon:f[4] || 'shieldCheck',
       title:f[1], body:f[2],
       fields: `<div class="fr"><span class="k">Draft version</span><span class="v">v${d.version} · ${d.draft_id}</span></div>`,
       acts:[{id:'yes',label:t.yes,kind:'yes'},{id:'no',label:t.no,kind:'no'}],
@@ -117,6 +126,11 @@ async function liveFieldReview(lang, d){
 // backend actually decided (sign, gateway, ledger — or a freeze/reject).
 async function liveConfirmFlow(session, lang, my){
   const d = session.draft;
+  // Present the recognised draft in the transcript first. The approval walkthrough begins
+  // only when the customer acts on that card, so the card is a real control rather than
+  // decoration. A new run resolves it as 'cancelled' and this flow unwinds.
+  const go = await draftCard(d);
+  if(my!==RUN || go!=='confirm') return;
   const r = await liveFieldReview(lang, d);
   if(my!==RUN || r.cancelled) return;
   // A rejected field already produced the backend's FIELD_EDIT_REQUESTED line via
@@ -132,7 +146,8 @@ async function liveConfirmFlow(session, lang, my){
     body:'AuntieJoy is asking for a <b>transaction-specific</b> biometric confirmation on the registered device.',
     fields:`<div class="fr"><span class="k">Draft</span><span class="v">${d.draft_id} · v${d.version}</span></div>
             <div class="fr big"><span class="k">Amount</span><span class="v">${money(d.amount_minor)}</span></div>`,
-    acts:[{id:'ok',label:'😊  Confirm with Face ID',kind:'yes'}],
+    acts:[{id:'ok',label:icon('faceid')+' Confirm with Face ID',kind:'yes'}],
+    icon:'faceid',
     note:'Simulated. The prototype does not claim production FaceID integration (BRD §7.4).'
   });
   if(my!==RUN){ return; }
@@ -146,7 +161,7 @@ async function liveConfirmFlow(session, lang, my){
     });
   }catch(err){
     audit('CONFIRM_CALL_FAILED · '+err.message,'stop');
-    iface('Sorry {name}, I could not reach the payment system just now. Please try again.');
+    iface('Sorry, I could not reach the payment system just now. Please try again.');
     return;
   }
   if(my!==RUN) return;
@@ -172,11 +187,13 @@ async function liveConfirmFlow(session, lang, my){
   }
 }
 
-// asrConfidence: the REAL confidence the speech engine reported for this utterance.
-// Passing it through is what makes the backend's ASR ambiguity guardrail live — previously
-// every voice turn was sent as a hardcoded 0.93, so a badly misheard amount could never
-// trigger a "please repeat that" challenge.
-async function liveFreeTurn(text, viaVoice, asrConfidence){
+// asrConfidence: the REAL confidence the speech engine reported for this utterance, or null
+// when it reported none. Passing it through is what makes the backend's ASR ambiguity
+// guardrail live — previously every voice turn was sent as a hardcoded 0.93, so a badly
+// misheard amount could never trigger a "please repeat that" challenge.
+// asrSource travels with it so the backend can always tell a measurement from a stand-in.
+async function liveFreeTurn(text, viaVoice, asrConfidence, asrSource){
+  stopSpeaking();   // barge-in: a fresh customer turn cuts Auntie off mid-sentence
   const my=++RUN;
   BUSY=true;
   if(!FREE_SESSION_ID){
@@ -193,18 +210,40 @@ async function liveFreeTurn(text, viaVoice, asrConfidence){
     audit('LIVE BACKEND · '+API_BASE,'ok');
   }
   const lang = guessLang(text);
-  auntie(text);
+  // Clear only the STALE, transient mic status markers ("Listening…" / "Hearing…" /
+  // "Stopped listening…") left over from a PREVIOUS mic press. The "Heard you — clarity N%"
+  // marker is KEPT: it is the only place the engine's clarity reading survives, and it proves
+  // the ears worked. Clarification cards (.ccard) and every other bubble stay untouched.
+  chatEl.querySelectorAll('.row.them .bub.iface').forEach(b => {
+    if(/^(Listening|Hearing|Stopped listening)/.test(b.textContent || '')) b.closest('.row').remove();
+  });
+  // Echo the customer's own words into the transcript. BOTH typed and voice turns get a
+  // right-column "YOU" echo for symmetry — but a VOICE turn has usually already drawn that
+  // bubble word-by-word while the mic streamed interim results, so reuse it instead of
+  // creating a second copy. A TYPED turn never reuses one: any bubble still hanging around
+  // belongs to an abandoned mic session and must be dropped, or the typed words would go
+  // un-echoed and a stale line would be left on screen.
+  if(viaVoice && _pendingYouBubble){
+    _pendingYouBubble = null;
+  } else {
+    if(_pendingYouBubble){ try{ _pendingYouBubble.remove(); }catch(_){} _pendingYouBubble = null; }
+    customer(text);
+  }
   let resp;
   try{
+    // A number alone is not evidence. Where it came from travels with it, so the audit trail
+    // never mistakes a stand-in for a measurement the engine actually reported.
+    const hasConf = (typeof asrConfidence==='number' && asrConfidence>=0 && asrConfidence<=1);
     resp = await postJSON('/turn', {
       session_id: FREE_SESSION_ID, text, via_voice: !!viaVoice,
-      asr_confidence: (typeof asrConfidence==='number' && asrConfidence>=0 && asrConfidence<=1)
-        ? asrConfidence                    // real engine confidence, when the browser gives one
-        : (viaVoice ? 0.93 : 0.99)         // typed text is unambiguous; fallback if unavailable
+      asr_confidence: hasConf ? asrConfidence
+                              : (viaVoice ? 0.93 : 0.99),   // stand-in, labelled as such below
+      asr_confidence_source: hasConf ? (asrSource || 'engine_reported')
+                                     : (viaVoice ? 'unreported' : 'typed')
     });
   }catch(err){
     audit('TURN_CALL_FAILED · '+err.message,'stop');
-    iface('Sorry {name}, I could not reach the payment system just now. Please try again.');
+    iface('Sorry, I could not reach the payment system just now. Please try again.');
     BUSY=false; return;
   }
   if(my!==RUN) return;
@@ -251,9 +290,126 @@ document.querySelectorAll('#langtog .lt').forEach(b=>{
   };
 });
 
+/* Tencent has no single engine that covers English + Chinese + Malay, so the language
+   toggle picks the ENGINE, not just a hint: EN and ZH share 16k_zh_en (which auto-detects
+   between them), while BM needs 16k_multi_lang. */
+function sttLanguage(){
+  const l = document.querySelector('#langtog .lt.on')?.dataset.l || 'EN';
+  return l === 'BM' ? 'bm' : (l === 'ZH' ? 'zh' : 'en');
+}
+
+/* The real ears: stream the mic to the backend, which asks Tencent Cloud ASR.
+   Resolves with {text, confidence, confidenceSource}; throws if the engine is unusable. */
+async function sttTurn(setYou){
+  // Tap-to-talk that waits for the engine to finish. We deliberately do NOT call start()
+  // and stop() back-to-back — that gave no listening window, so the engine returned an
+  // empty final and the turn was silently dropped. Instead we let the engine's VAD
+  // (1 s of silence after speech) finalise on its own, and only cancel on timeout/error.
+  // Interim results stream into the customer's own bubble via setYou, word by word.
+  let failure = null;
+  let lastInterim = '';   // keep the best partial, in case the engine's final comes back empty
+  const result = await new Promise((resolve, reject) => {
+    let client, settled = false;
+    const done = (v) => {
+      if(settled) return;
+      settled = true;
+      if(client){ try { client.cancel(); } catch(_){} }
+      resolve(v);
+    };
+    client = new SttClient({
+      onInterim: t => { lastInterim = t; try { setYou(t); } catch(_){} },
+      onError:   m => { failure = m; },
+      onFinal:   r => done(r)
+    });
+    client.start(sttLanguage()).then(() => {
+      if(failure){ client.cancel(); reject(new Error(failure)); return; }
+      // Safety net so the mic can never hang forever if the engine never finalises.
+      setTimeout(() => done(null), 30000);
+    }, reject);
+  });
+  if(failure && !result) throw new Error(failure);
+  // Never drop a turn the engine clearly heard: if the final is empty (or never came) but
+  // interim words did arrive, use those instead of returning nothing. This is exactly the
+  // "it caught my words but didn't send" case.
+  if((!result || !result.text) && lastInterim){
+    return { text: lastInterim,
+             confidence: result ? result.confidence : null,
+             confidenceSource: result ? result.confidenceSource : 'interim_fallback',
+             engine: result ? result.engine : undefined };
+  }
+  return result;
+}
+
+/* The browser's built-in recogniser. Kept as the fallback: it needs no server and no key,
+   so the demo still works when the backend or the ASR provider is unavailable. */
+function webSpeechTurn(setYou){
+  return new Promise(resolve=>{
+    const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+    if(!SR){ resolve(null); return; }
+    const r = new SR();
+    r.lang = MIC_LANG;
+    // Partial results let the customer see words streaming into their own bubble (setYou).
+    r.interimResults = true;
+    r.continuous = false;
+    r.maxAlternatives = 1;
+    r.onresult = e=>{
+      let interim='', final='', conf=null;
+      for(let i=e.resultIndex;i<e.results.length;i++){
+        const res=e.results[i], alt=res[0];
+        if(res.isFinal){ final += alt.transcript; conf = alt.confidence; }
+        else interim += alt.transcript;
+      }
+      if(interim.trim()) setYou(interim.trim());
+      if(final.trim()) resolve({ text: final.trim(), confidence: typeof conf==='number' ? conf : null });
+    };
+    // Errors are SYSTEM messages, so they belong on the left — never in the customer's bubble.
+    r.onerror = ev=>{
+      iface(icon('alert') + ' ' + ({
+        'not-allowed':'Microphone permission was blocked. Please allow it in your browser, or type instead.',
+        'service-not-allowed':'The speech service is not allowed here. Please type instead.',
+        'audio-capture':'No microphone was found. Please check your device, or type instead.',
+        'network':'Speech recognition needs a network connection. Please type instead.',
+        'no-speech':'I didn’t hear anything. Tap the microphone once and try again.',
+        'aborted':'Listening stopped.'
+      }[ev.error] || 'Listening stopped unexpectedly. Please try again, or type instead.'));
+      resolve(null);
+    };
+    r.onend = ()=>{
+      resolve(null);
+    };
+    try{ r.start(); }
+    catch(err){ resolve(null); }
+  });
+}
+
 mic.onclick=async()=>{
+  // Re-entrancy guard: a second tap while we are already listening would start a second
+  // SttClient on the same microphone and corrupt both streams. Ignore it.
+  if(_micListening) return;
+  _micListening = true;
+  try{ await micCapture(); }
+  finally{ _micListening = false; }
+};
+
+async function micCapture(){
+  stopSpeaking();   // barge-in: pressing the mic immediately silences any playback
+  // Clear any stale mic placeholders from a PREVIOUS press (Listening…/Hearing…/Stopped…)
+  // so we never end up with a stack of them. The live FreeTurn path also clears these,
+  // but that only fires when the engine produced a result — if it didn't (no speech,
+  // aborted, blocked by a guardrail), the bubbles would otherwise pile up on every
+  // extra press of the mic.
+  chatEl.querySelectorAll('.row.them .bub.iface').forEach(b => {
+    if(/^(Listening|Hearing|Stopped listening)/.test(b.textContent || '')) b.closest('.row').remove();
+  });
+  // A previous press may also have left an unsent YOU bubble behind (interim words that
+  // never became a turn). Remove it so the customer never sees a ghost line of their own.
+  if(_pendingYouBubble){ try{ _pendingYouBubble.remove(); }catch(_){} _pendingYouBubble = null; }
   const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
-  if(!SR){ iface('Voice input is not available in this browser — please type, or run a scripted scenario.'); return; }
+  const haveStt = (typeof SttClient !== 'undefined') && SttClient.supported();
+  if(!haveStt && !SR){
+    iface('Voice input is not available in this browser — please type, or run a scripted scenario.');
+    return;
+  }
 
   // Pre-flight the microphone explicitly. SpeechRecognition does not always raise the
   // browser's permission prompt, and when it doesn't, clicking the mic silently does
@@ -264,7 +420,7 @@ mic.onclick=async()=>{
       const probe = await navigator.mediaDevices.getUserMedia({ audio:true });
       probe.getTracks().forEach(t=>t.stop());   // we only wanted the permission
     }catch(err){
-      iface('🎙 ' + ({
+      iface(icon('alert') + ' ' + ({
         NotAllowedError:'Microphone permission is blocked. Click the padlock/site-settings icon in the address bar, set Microphone to Allow, then try again.',
         PermissionDeniedError:'Microphone permission is blocked. Click the padlock/site-settings icon in the address bar, set Microphone to Allow, then try again.',
         NotFoundError:'No microphone was found on this device. Please type instead.',
@@ -275,63 +431,61 @@ mic.onclick=async()=>{
     }
   }
 
-  const langLabel = document.querySelector('#langtog .lt.on')?.dataset.l || 'EN';
-  const r = new SR();
-  r.lang = MIC_LANG;
-  // Partial results let Auntie SEE the mic picking her up. Without this the UI just sits
-  // on a silent "Listening…" line and there is no way to tell whether anything was heard.
-  r.interimResults = true;
-  r.continuous = false;
-  r.maxAlternatives = 1;
-
-  // One bubble, updated in place — we must not spam the transcript with every partial.
-  const live = iface(`🎙 Listening… (${langLabel}) — speak now`);
-  const setLive = t => { const b = live && live.querySelector('.bub'); if(b) b.textContent = t; };
+  // The INTERFACE bubble is only a status marker ("we are listening"). The customer's OWN
+  // words stream into their own right-column YOU bubble, word by word, via setYou — so the
+  // transcript reads like a real voice-first exchange instead of the system quoting them back.
+  const live = iface(icon('mic') + 'Listening…');
+  // Every status line carries the mic icon; the icon is re-emitted on each update because
+  // setting innerHTML replaces the whole bubble content.
+  const setLive = t => { const b = live && live.querySelector('.bub'); if(b) b.innerHTML = icon('mic') + fill(t); };
+  // Interim → the customer's own bubble. The first partial creates it; every later partial
+  // updates it in place, so the words appear one by one exactly as they are spoken.
+  const setYou = t => {
+    const s = String(t==null?'':t).trim();
+    if(!s) return;
+    if(!_pendingYouBubble) _pendingYouBubble = customer(s);
+    else { const b = _pendingYouBubble.querySelector('.bub.you'); if(b) b.textContent = s; }
+  };
   mic.classList.add('on');
 
-  r.onstart = ()=>{ mic.classList.add('on'); setLive(`🎙 Listening… (${langLabel}) — speak now`); };
-
-  r.onresult = e=>{
-    let interim='', final='', conf=null;
-    for(let i=e.resultIndex;i<e.results.length;i++){
-      const res=e.results[i], alt=res[0];
-      if(res.isFinal){ final += alt.transcript; conf = alt.confidence; }
-      else interim += alt.transcript;
+  try{
+    // Prefer the real engine. Any failure — no config, no server, no key — falls through to
+    // the browser's recogniser rather than leaving Auntie with a dead button.
+    if(haveStt){
+      let r = null;
+      try{ r = await sttTurn(setYou); }
+      catch(err){ console.warn('[auntiejoy] falling back to the browser recogniser:', err.message); }
+      if(r && r.text){
+        setYou(r.text);   // settle the customer's bubble on the FINAL text, not the last partial
+        const c = (typeof r.confidence==='number') ? r.confidence : null;
+        const clarity = c!=null ? ` — clarity ${Math.round(c*100)}%` : ' — clarity not reported';
+        // The words now live in the customer's own bubble, so this left-hand marker carries
+        // only the reading that has no home there: how clearly the engine heard them.
+        setLive(`Heard you${clarity}`);
+        // Feed the REAL engine confidence through, so a garbled utterance can be challenged
+        // instead of sailing past the ASR ambiguity guardrail.
+        liveFreeTurn(r.text, true, c, r.confidenceSource);
+        return;
+      }
     }
-    if(interim.trim()) setLive(`🎙 Hearing… “${interim.trim()}”`);
-    if(final.trim()){
-      mic.classList.remove('on');
-      const c = (typeof conf==='number') ? conf : null;
-      const clarity = c!=null ? ` — clarity ${Math.round(c*100)}%` : '';
-      setLive(`🎙 Heard: “${final.trim()}”${clarity}`);
-      // Feed the REAL engine confidence through, so a garbled utterance can be challenged
-      // instead of sailing past the ASR ambiguity guardrail.
-      liveFreeTurn(final.trim(), true, c);
+
+    const spoken = await webSpeechTurn(setYou);
+    if(spoken && spoken.text){
+      setYou(spoken.text);
+      const c = (typeof spoken.confidence==='number') ? spoken.confidence : null;
+      setLive(`Heard you${c!=null ? ` — clarity ${Math.round(c*100)}%` : ''}`);
+      liveFreeTurn(spoken.text, true, c);
+      return;
     }
-  };
 
-  r.onerror = ev=>{
-    mic.classList.remove('on');
-    setLive('🎙 ' + ({
-      'not-allowed':'Microphone permission was blocked. Please allow it in your browser, or type instead.',
-      'service-not-allowed':'The speech service is not allowed here. Please type instead.',
-      'audio-capture':'No microphone was found. Please check your device, or type instead.',
-      'network':'Speech recognition needs a network connection. Please type instead.',
-      'no-speech':'I didn’t hear anything, {name}. Tap the microphone once and try again.',
-      'aborted':'Listening stopped.'
-    }[ev.error] || 'Listening stopped unexpectedly. Please try again, or type instead.'));
-  };
-
-  r.onend = ()=>{
-    mic.classList.remove('on');
-    // Never leave a dangling "Listening…" line if nothing was ever transcribed.
+    // Nothing usable came back: never leave a ghost YOU bubble or a stuck "Listening…" marker.
+    if(_pendingYouBubble){ try{ _pendingYouBubble.remove(); }catch(_){} _pendingYouBubble = null; }
     const b = live && live.querySelector('.bub');
-    if(b && /Listening…/.test(b.textContent)) b.textContent = '🎙 Stopped listening — nothing was heard.';
-  };
-
-  try{ r.start(); }
-  catch(err){ mic.classList.remove('on'); setLive('🎙 Could not start listening. Please type instead.'); }
-};
+    if(b && /Listening…/.test(b.textContent)) b.innerHTML = icon('mic') + 'Stopped listening — nothing was heard.';
+  } finally {
+    mic.classList.remove('on');
+  }
+}
 
 /* ---------- boot ---------- */
 /* Boot: play the happy path so the first thing anyone sees is the real control chain,

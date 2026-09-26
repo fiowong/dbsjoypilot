@@ -8,7 +8,10 @@ const dir = __dirname;
 const html = fs.readFileSync(path.join(dir, 'index.html'), 'utf8');
 const css  = fs.readFileSync(path.join(dir, 'styles.css'), 'utf8');
 // Loaded in the same order index.html uses — the files share globals.
-const files = ['translations.js','ui.js','personalization.js','scenarios.js','live.js','shell.js'];
+// icons.js MUST be here: ui.js and shell.js call icon() at load time, so without it the
+// whole bundle throws during boot.
+const files = ['translations.js','icons.js','ui.js','personalization.js','scenarios.js','stt.js',
+               'live.js','shell.js'];
 
 let fails = 0;
 const ok = (name, cond, extra) => {
@@ -92,6 +95,16 @@ ok('intro card rendered', !!chat.querySelector('.intro'));
 ok('intro offers suggestion chips', chat.querySelectorAll('.chip').length >= 3,
    chat.querySelectorAll('.chip').length + ' chips');
 ok('transcript contains ONLY the intro card', chat.children.length === 1, chat.children.length + ' children');
+// The greeting addresses the customer by name, but the intro card is drawn BEFORE the first
+// turn — so at this point no trusted name exists yet. It must NOT invent one (addressing the
+// customer as "Auntie" reads like the assistant talking to itself).
+const greet = () => chat.querySelector('.intro .itext').textContent.replace(/\s+/g, ' ').trim();
+ok('greeting starts nameless rather than inventing a name', /^Hello! Tell me who to pay/.test(greet()), greet());
+ev("CUSTOMER_NAME='Mei Ling'; CUSTOMER_NAME_KNOWN=true; refreshNameSlots();");
+ok('greeting fills the trusted name once the session supplies it',
+   /^Hello Mei Ling! Tell me who to pay/.test(greet()), greet());
+ev("CUSTOMER_NAME='Auntie'; CUSTOMER_NAME_KNOWN=false; refreshNameSlots();");
+ok('and drops it again if the session is reset', /^Hello! Tell me/.test(greet()), greet());
 
 console.log('\n=== 4. RESET: resetPanels() KEEPS THE TRANSCRIPT, resetRun() CLEARS IT ===');
 const beforePanels = chat.children.length;
@@ -189,6 +202,63 @@ console.log('\n=== 9. REAL DBS LOGO ASSETS ===');
 for (const f of ['dbs-logo.png','dbs-logo-white.png','dbs-mark.png']) {
   ok('asset present: assets/' + f, fs.existsSync(path.join(dir, 'assets', f)));
 }
+
+console.log('\n=== 11. THE EARS (stt.js) ===');
+// `class SttClient` is a top-level class declaration, so (like `const`) it is a global
+// LEXICAL binding, not a property of window — reach it the way live.js does.
+ok('SttClient is defined', ev("typeof SttClient") === 'function');
+// jsdom has no AudioContext, so the client must honestly report that it cannot run here.
+// That same flag is what makes live.js fall back to the browser recogniser.
+ok('reports itself unsupported with no audio device', ev("SttClient.supported()") === false);
+ok('toggle maps to an ASR engine (EN default)', ev("sttLanguage()") === 'en');
+ev("document.querySelector('#langtog .lt[data-l=\\'BM\\']').click()");
+ok('BM switches to the multilingual engine', ev("sttLanguage()") === 'bm');
+ev("document.querySelector('#langtog .lt[data-l=\\'EN\\']').click()");
+const wsUrl = ev("sttWsUrl()");
+// API_BASE defaults to the PAGE's host (the jsdom page is http://127.0.0.1:8077/) on the
+// backend's port. If you change the default port in scenarios.js, update it here and in README.
+ok('socket URL is derived from API_BASE', wsUrl === 'ws://127.0.0.1:8078/ws/stt', wsUrl);
+ok('API_BASE follows the page host + backend port (no hardcoded 127.0.0.1)',
+   ev("API_BASE") === 'http://127.0.0.1:8078', ev("API_BASE"));
+// Convert inside the page realm and return a plain string — a jsdom ArrayBuffer is not
+// safely viewable from this realm.
+const pcm = ev("Array.from(new Int16Array(floatToPcm16(new Float32Array([0, 1, -1])))).join(',')");
+ok('PCM is 16-bit signed, full-scale mapped correctly', pcm === '0,32767,-32768', pcm);
+
+console.log('\n=== 12. STYLESHEET COVERS EVERY CLASS THE MARKUP USES ===');
+// The composer once shipped with `.cinput` / `.cinrow` / `.langtog` present in the HTML and NO
+// rules in styles.css at all. Nothing threw, so every other check here stayed green while the
+// layout silently collapsed. Compare the two sets directly instead of trusting a screenshot.
+const cssSelectors = css.replace(/\/\*[\s\S]*?\*\//g, '')   // comments
+  .replace(/url\([^)]*\)/g, '')                             // asset paths (.png/.svg/...)
+  .replace(/"[^"]*"|'[^']*'/g, '');                         // quoted property values
+const cssClasses = new Set();
+for (const m of cssSelectors.matchAll(/\.(-?[_a-zA-Z][\w-]*)/g)) cssClasses.add(m[1]);
+
+const markupClasses = new Set();
+const jsFiles = fs.readdirSync(dir).filter(f => f.endsWith('.js') && !f.endsWith('.test.js'));
+for (const src of [html, ...jsFiles.map(f => fs.readFileSync(path.join(dir, f), 'utf8'))]) {
+  for (const m of src.matchAll(/class\s*=\s*["']([^"']*)["']/g)) {
+    for (const tok of m[1].split(/\s+/)) {
+      // Only literal class names. `class="ic${cls ? ' ' + cls : ''}"` splits into fragments
+      // that are not class names at all, so require the exact CSS identifier shape.
+      if (/^-?[_a-zA-Z][\w-]*$/.test(tok)) markupClasses.add(tok);
+    }
+  }
+  // State classes toggled from JS are styling hooks too. Take ONLY the first argument:
+  // `classList.toggle('light-bar', id==='scrJoy')` has a boolean second argument that is not
+  // a class, and a naive scan reports "scrJoy" as an unstyled class forever.
+  for (const m of src.matchAll(/classList\s*\.\s*(?:add|remove|toggle|contains)\s*\(\s*(["'])([^"']*)\1/g)) {
+    for (const tok of m[2].split(/\s+/)) {
+      if (/^-?[_a-zA-Z][\w-]*$/.test(tok)) markupClasses.add(tok);
+    }
+  }
+}
+const unstyled = [...markupClasses].filter(c => !cssClasses.has(c)).sort();
+ok('every class used in markup has a rule in styles.css', unstyled.length === 0,
+   'unstyled: ' + unstyled.join(', '));
+ok('scanned a meaningful number of classes', markupClasses.size > 60,
+   markupClasses.size + ' classes found');
 
 console.log('\n=== 10. NO STRAY ERRORS ===');
 const realErrors = errors.filter(e => !/Not implemented|Could not parse CSS/.test(e));

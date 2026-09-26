@@ -26,12 +26,19 @@ function scroll(){ chatEl.scrollTop = chatEl.scrollHeight; }
 
 function bubble(kind,label,text){
   const d=document.createElement('div');
-  d.className='row '+(kind==='auntie'||kind==='attacker'?'me':'them');
+  // "me" (right column) = the person holding the phone: the customer, or an attacker who
+  // took it. Everything Auntie/the system says lands on the left ("them"). The customer's
+  // own words therefore go right, under a "YOU" label — never "AUNTIE".
+  d.className='row '+(kind==='auntie'||kind==='attacker'||kind==='you'?'me':'them');
   d.innerHTML=`<span class="lab ${label}">${label}</span><div class="bub ${kind}">${text}</div>`;
   chatEl.appendChild(d); scroll(); return d;
 }
 const auntie   = t => bubble('auntie','AUNTIE',t);
 const attacker = t => bubble('attacker','ATTACKER',t);
+// The customer's own spoken/typed words. Echoed in the transcript (right column, "YOU" label)
+// so the conversation reads like a real voice-first exchange. Distinct from the AUNTIE bubble
+// — the customer is the one whose voice we just heard, not the assistant.
+const customer = t => bubble('you','YOU',t);
 // The one placeholder for the customer's name, everywhere in the system. The backend's
 // messages.py catalogue renders {name} server-side for live turns (so the live path arrives
 // already addressed); this fills it for the offline scripted fallback, whose strings are
@@ -40,6 +47,19 @@ const attacker = t => bubble('attacker','ATTACKER',t);
 const fill     = t => String(t==null?'':t).replace(/\{name\}/g, CUSTOMER_NAME);
 const iface    = t => bubble('iface','INTERFACE', fill(t));
 const sysLine  = t => bubble('sys','SYSTEM',t);
+
+/* Chrome strings that address the customer by name carry an empty `<span data-nslot></span>`
+   which is filled from the TRUSTED session name the moment it arrives — never from anything
+   the customer said, and never invented. The intro card is drawn before the first turn, when
+   the name is not yet known, so the slot renders as nothing and the sentence still reads
+   correctly ("Hello! Tell me who to pay…"). A data attribute, not a class: it is a behaviour
+   hook, and section 12 of shell.test.js requires every class to carry a rule in styles.css. */
+function refreshNameSlots(root){
+  const known = (typeof CUSTOMER_NAME_KNOWN === 'boolean') && CUSTOMER_NAME_KNOWN;
+  (root || document).querySelectorAll('[data-nslot]').forEach(el=>{
+    el.textContent = known ? ' ' + CUSTOMER_NAME : '';
+  });
+}
 
 function hl(o){
   return JSON.stringify(o,null,2)
@@ -139,7 +159,7 @@ function receiptCard(o){
     `<div class="rcpt">
        <div class="rhead"><img class="dbslogo" src="assets/dbs-logo-white.png" alt="DBS"><span class="rt">PAYMENT RECEIPT</span></div>
        <div class="rok">
-         <div class="rtick">✓</div>
+         <div class="rtick">${icon('check')}</div>
          <div class="rstatus">Payment completed</div>
          <div class="rsub">${esc(o.stamp)}</div>
        </div>
@@ -155,6 +175,68 @@ function receiptCard(o){
      </div>`;
   chatEl.appendChild(d); scroll();
   return d;
+}
+
+/* ==========================================================================
+   INLINE DRAFT CARD — "Voice Command Recognized"
+   What AuntieJoy THINKS it heard, shown in the transcript before any approval
+   starts. Deliberately not a modal: the customer should be able to read it
+   against the conversation that produced it, and it stays on screen as the
+   record of what was recognised.
+   The card renders only what the canonical draft already says — it composes no
+   figure of its own. It accepts both draft shapes: the live /turn payload uses
+   payee_display / payee_masked / account_masked, while the offline scripted
+   fallback carries a payee{} object.
+   ========================================================================== */
+let draftResolve = null;
+function closeDraftCard(v){
+  const r = draftResolve; draftResolve = null;
+  if(r) r(v || 'cancelled');
+}
+// "ending 1234" -> "•••• 1234", matching how the dashboard masks the account.
+const maskAcct = s => String(s==null?'':s).replace(/^ending\s+/i, '•••• ');
+
+function draftCard(d){
+  const esc = s => String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;');
+  const payeeName   = d.payee_display || (d.payee && d.payee.displayName) || '—';
+  const payeeDetail = d.payee_masked  || (d.payee && d.payee.masked)      || '';
+  const acctName    = (typeof ACCOUNT!=='undefined' && ACCOUNT.displayName) || 'DBS Savings';
+  const acctDetail  = maskAcct(d.account_masked || (typeof ACCOUNT!=='undefined' && ACCOUNT.masked));
+  const amt         = (typeof d.amount_minor === 'number') ? money(d.amount_minor) : '—';
+
+  return new Promise(res=>{
+    draftResolve = res;
+    const el=document.createElement('div');
+    el.className='row them full';
+    el.innerHTML=
+      `<div class="dcard">
+         <div class="dhead">
+           <span class="dtick">${icon('checkCircle')}</span>
+           <span class="dtitle">Voice Command Recognized</span>
+           <span class="dtag">DRAFT</span>
+         </div>
+         <div class="drows">
+           <div class="dr"><span class="k">Recipient:</span>
+             <span class="v">${esc(payeeName)}${payeeDetail?' · '+esc(payeeDetail):''}</span></div>
+           <div class="dr"><span class="k">Amount:</span>
+             <span class="v amt">${esc(amt)}</span></div>
+           <div class="dr"><span class="k">From Account:</span>
+             <span class="v">${esc(acctName)} ${esc(acctDetail)}</span></div>
+         </div>
+         <button class="dbtn" type="button">Confirm &amp; Slide to Pay</button>
+       </div>`;
+    chatEl.appendChild(el); scroll();
+
+    // The button is the customer's decision, not decoration: the approval walkthrough
+    // only starts here. A new run resolves it as 'cancelled' via closeDraftCard().
+    const b=el.querySelector('.dbtn');
+    if(b) b.addEventListener('click', ev=>{
+      ev.preventDefault(); ev.stopPropagation();
+      b.disabled = true;
+      b.textContent = 'Approval started — review each field below';
+      closeDraftCard('confirm');
+    });
+  });
 }
 
 /* ==========================================================================
@@ -174,7 +256,7 @@ function clarifyCard(text, onRetry){
        <span class="ckick">NEEDS CLARIFICATION</span>
        <div class="ctitle">Could you help me with this?</div>
        <div class="ctext">${esc(text)}</div>
-       <button class="cbtn" type="button">Let me try again</button>
+       <button class="cbtn" type="button">${icon('mic')} Let me try again</button>
        <div class="cnote">Nothing has been sent, and no payment has been created yet.</div>
      </div>`;
   chatEl.appendChild(d); scroll();
@@ -195,7 +277,7 @@ function clarifyCard(text, onRetry){
     if(!d.dataset.retried){
       d.dataset.retried='1';
       d.classList.add('done');
-      b.textContent='Try again below, or tap 🎤';
+      b.innerHTML = icon('mic') + ' Try again below, or tap the mic';
     }
   });
   return d;
@@ -229,7 +311,10 @@ function audit(text,cls){
   auditEl.appendChild(d); auditEl.scrollTop=auditEl.scrollHeight;
 }
 
-/* ---------- popup: Auntie appears in every popup ---------- */
+/* ---------- popup: a DBS verification sheet ----------
+   The header carries a clean icon badge (cfg.icon, default a shield) instead of a large
+   cartoon illustration, so the FaceID prompt reads like a biometric approval and the
+   field-by-field review reads like a confirmation sheet. */
 let popupResolve=null;
 function closePopup(v){
   const r=popupResolve; popupResolve=null;
@@ -241,7 +326,8 @@ function popup(cfg){
     popupResolve=res;
     const steps=cfg.steps;
     $('mcard').innerHTML=
-      `<div class="mtop"><span class="kicker">${cfg.kicker}</span><img src="${MASCOT}" alt="Auntie"></div>`+
+      `<div class="mtop"><span class="kicker">${cfg.kicker}</span>`+
+        `<div class="micon">${icon(cfg.icon||'shieldCheck')}</div></div>`+
       `<div class="mbody">
         <h3>${fill(cfg.title)}</h3>
         <p>${fill(cfg.body)}</p>
@@ -262,16 +348,21 @@ function popup(cfg){
 async function fieldReview(lang, d){
   const t=T[lang];
   const F=[
-    ['RECIPIENT','Recipient',  t.recipient(d.payee.displayName+' · '+d.payee.masked), 1],
-    ['AMOUNT','Amount',        t.amount(amountWord[lang]||amountWord.EN),              2],
-    ['SOURCE_ACCOUNT','Source',t.source(ACCOUNT.masked),                               3]
+    ['RECIPIENT','Recipient',  t.recipient(d.payee.displayName+' · '+d.payee.masked), 1, 'user'],
+    ['AMOUNT','Amount',        t.amount(amountWord[lang]||amountWord.EN),              2, 'receipt'],
+    ['SOURCE_ACCOUNT','Source',t.source(ACCOUNT.masked),                               3, 'card']
   ];
+  // Show the recognised draft first; the field walkthrough starts when the customer acts
+  // on that card. Nothing has been signed at this point either way.
+  const go = await draftCard(d);
+  if(go!=='confirm') return {cancelled:true};
   iface(t.intro); await sleep(600);
   for(let i=0;i<F.length;i++){
     const f=F[i];
     stage(11,'run');
     const a=await popup({
       kicker:`FIELD ${f[3]} OF 3 · ${f[0]}`, stepIdx:i, steps:F,
+      icon:f[4] || 'shieldCheck',
       title:f[1],
       body:f[2],
       fields: lang==='ZH'

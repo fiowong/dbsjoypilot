@@ -23,7 +23,7 @@ screened, confirmed field-by-field, and signed by deterministic code, never by t
 - The app's technical inspector panels — control chain, agent contracts, audit log, MECE
   failure map — show exactly what DBS's systems would see, and can be toggled off for a
   clean, full-width, customer-only view.
-- 20 scripted BRD demo scenarios (the happy path plus 19 MECE failure branches, A–G) are built
+- 21 scripted BRD demo scenarios (the happy path plus 20 MECE failure branches, A–H) are built
   in as one-click buttons, alongside genuinely live free-text/voice input wired to the real
   backend.
 
@@ -31,7 +31,7 @@ screened, confirmed field-by-field, and signed by deterministic code, never by t
 
 ```
 dbs-auntiejoy/
-  backend/     FastAPI backend — the 4 agents + the deterministic control chain
+  backend/     FastAPI backend — the 5 agents + the deterministic control chain
                (see backend/README.md for the full file-by-file breakdown)
   frontend/    The chat UI + technical inspector panels (plain HTML/CSS/JS, no build step)
 ```
@@ -43,7 +43,7 @@ dbs-auntiejoy/
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-python3 -m uvicorn app.main:app --host 127.0.0.1 --port 8077
+python3 -m uvicorn app.main:app --host 127.0.0.1 --port 8078
 ```
 This runs against a deterministic mock LLM by default. To connect a real LLM (Tencent Hunyuan
 via TokenHub, or any OpenAI-compatible endpoint), copy `backend/.env.example` to `backend/.env`
@@ -53,13 +53,28 @@ and fill in your own key — see `backend/README.md` for details.
 ```bash
 python3 -m http.server 8098
 ```
-Then open `http://127.0.0.1:8098` in your browser. The frontend expects the backend at
-`http://127.0.0.1:8077` by default.
+Then open `http://127.0.0.1:8098` in your browser. The frontend looks for the backend on
+**port 8078 of whatever host served the page** — so opening the app from a phone on the same
+Wi-Fi reaches the laptop's backend, not the phone's own localhost.
+
+If your backend is on a different port or machine, **no code change is needed** — append the
+address to the URL:
+
+```
+http://127.0.0.1:8098/?api=http://127.0.0.1:8077
+```
+
+The "LIVE BACKEND · <address>" line at the top of the audit timeline always shows which
+backend the page actually resolved to, which is the fastest way to spot a port mismatch.
+(A mismatch shows up immediately as `TURN_CALL_FAILED · Failed to fetch` in the same timeline —
+a connection to a port with nothing on it is refused instantly.)
 
 ## Live LLM mode
 
 By default the backend runs against a **deterministic mock LLM** — every scenario is 100%
-reproducible and the suite always passes: `python -m app.selftest --selftest` → **19/19**.
+reproducible and the suite always passes: `python -m app.selftest --selftest` → **21/21**.
+(If a `HUNYUAN_API_KEY` is set the suite runs against the live model instead, which makes ~80
+network calls and takes a couple of minutes — blank the key for the fast deterministic run.)
 
 To use a real model, set three env vars (any OpenAI-compatible endpoint — no code change):
 

@@ -12,6 +12,11 @@ let CUSTOMER_NAME = 'Auntie';    // updated from the trusted session.customer_pr
                                   // a live turn responds — never taken from anything the customer typed.
                                   // It fills the {name} placeholder in ui.js's fill(); the live path
                                   // arrives already addressed by the backend and needs no filling.
+let CUSTOMER_NAME_KNOWN = false; // false until the trusted session actually tells us the name.
+                                  // The intro card is drawn BEFORE the first turn, so it must not
+                                  // invent one — refreshNameSlots() leaves the greeting nameless
+                                  // until this flips, rather than addressing the customer as
+                                  // "Auntie", which reads like the assistant talking to itself.
 let PERSONALIZE_MODE = 'auto';   // 'auto' | 'on' | 'off' — 'auto' follows AUTO_PERSONALIZE
 let AUTO_PERSONALIZE = false;    // mirrors the backend's session.personalize_auto
 let LAST_PERSONALIZATION_DECISION = null;   // the Personalization Agent's own reason_code, for the settings popup
@@ -34,7 +39,13 @@ function updatePersonalizeBadge(){
 // flips — never retroactively, never silently.
 function syncPersonalization(session){
   if(!session) return;
-  if(session.customer_preferred_name) CUSTOMER_NAME = session.customer_preferred_name;
+  if(session.customer_preferred_name){
+    CUSTOMER_NAME = session.customer_preferred_name;
+    CUSTOMER_NAME_KNOWN = true;
+    // The intro card is drawn before the first turn, when the name is still unknown, so it
+    // renders an empty {name} slot rather than a frozen string. Fill it the moment it arrives.
+    if(typeof refreshNameSlots === 'function') refreshNameSlots();
+  }
   if(typeof session.personalize_auto !== 'boolean') return;
   const before = personalizeActive();
   AUTO_PERSONALIZE = session.personalize_auto;
