@@ -57,6 +57,12 @@ EXPECTED = {
     "F2":    {"state": "REJECTED", "outcome": "REJECTED", "ledger": "NOT_INVOKED"},
     "F3":    {"state": "REJECTED", "outcome": "REJECTED", "ledger": "RECORDED"},
     "G1":    {"state": "CLARIFICATION_REQUIRED", "outcome": "CLARIFY", "ledger": "NOT_INVOKED"},
+    # H1 (branch H, added after the original 20): the affordability safeguard fires
+    # deterministically at stage 3 — empathetic abort, the conversation stays open so the
+    # customer can name a smaller amount or drop it. No draft is created from an affordability
+    # statement alone, so the ledger is never invoked. See orchestrator.py's
+    # INSUFFICIENT_FUNDS_RE branch (sets state=CLARIFICATION_REQUIRED, outcome=INSUFFICIENT_FUNDS).
+    "H1":    {"state": "CLARIFICATION_REQUIRED", "outcome": "INSUFFICIENT_FUNDS", "ledger": "NOT_INVOKED"},
 }
 
 

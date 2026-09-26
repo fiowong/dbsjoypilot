@@ -50,7 +50,15 @@ class TurnRequest(BaseModel):
     session_id: str = Field(default_factory=lambda: f"sess_{uuid.uuid4().hex[:10]}")
     text: str
     via_voice: bool = True
+    # 0.96 is a PLACEHOLDER for "the engine reported nothing", not a measurement. It is only
+    # ever used when asr_confidence_source == "unreported"; anything that reads this number
+    # must read the source alongside it.
     asr_confidence: float = 0.96
+    # Where that number came from. "engine_reported" = the STT vendor gave a real score;
+    # "engine_stability" = derived from the vendor's per-word stable_flag;
+    # "unreported" = nothing was available and the placeholder above is in force.
+    asr_confidence_source: Literal["engine_reported", "engine_stability",
+                                   "unreported", "typed"] = "unreported"
     # The mock audio-risk adapter's verdict (§6.2). Mocked evidence, never claimed as production.
     voice_risk: Optional[Literal["OK", "SPEAKER_MISMATCH", "SYNTHETIC"]] = None
     # demo-only fault injection so judges can watch independent validation catch a bad draft
@@ -396,6 +404,10 @@ async def run_turn(req: TurnRequest) -> TurnResponse:
         "amount_disambiguated": session.amount_disambiguated,
         "evidence": list(session.evidence),
         "asr_confidence": req.asr_confidence,
+        # Carried alongside every use of asr_confidence so the audit trail can always tell a
+        # measured score from the 0.96 placeholder. Nothing downstream should read the number
+        # without this.
+        "asr_confidence_source": req.asr_confidence_source,
         # The trusted preferred name, so the mock agent's proposed question is rendered with
         # the same address the deterministic layer will use (§A.6 C3 — never the chat text).
         "customer_name": customer_name(session),

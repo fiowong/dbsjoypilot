@@ -1,6 +1,14 @@
-from fastapi import FastAPI
+import asyncio
+import json as _json
+
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, Response, StreamingResponse
+from pydantic import BaseModel
+
 from .config import Settings
+from .stt import ASRError, TencentRealtimeASR
+from .tts import TTSError, SAMPLE_RATE, synthesize_stream
 from .llm_client import check_llm_health
 from .session import STAGES, get_session
 from .data import POLICY
@@ -32,6 +40,14 @@ async def health() -> dict:
         "model": Settings.LLM_MODEL if configured else "deterministic-mock",
         "prompt_version": Settings.PROMPT_VERSION,
         "schema_version": Settings.SCHEMA_VERSION,
+        # Ears and mouth report mere CONFIGURATION here. A configured key does not mean the
+        # upstream is reachable, so /health must never claim "live" on key presence alone.
+        "asr_configured": Settings.LIVE_ASR,
+        "asr_engines": {"en": "16k_zh_en", "zh": "16k_zh_en", "bm": "16k_multi_lang"},
+        "asr_reports_confidence": False,   # Tencent realtime ASR has no confidence field
+        "tts_configured": Settings.LIVE_TTS,
+        "tts_model": Settings.TTS_MODEL or "sonic-latest",
+        "tts_voice_set": bool(Settings.TTS_VOICE_ID),
         "agents": ["GUARDRAILS AGENT", "INTENT CLASSIFIER", "PAYMENT AGENT",
                    "INDEPENDENT VALIDATION AGENT", "PERSONALIZATION AGENT"],
         "stages": len(STAGES),
@@ -96,6 +112,159 @@ async def audit(session_id: str) -> dict:
 @app.get("/session/{session_id}")
 async def session_detail(session_id: str) -> dict:
     return get_session(session_id).to_public()
+
+
+# =====================================================================
+# 14. Ears — streaming speech to text (Tencent Cloud realtime ASR)
+#
+# Protocol (browser -> server):
+#   {"type":"start","language":"en"}   open one ASR session for one utterance
+#   <binary frames>                    16 kHz, 16-bit, mono PCM, ~200 ms per frame
+#   {"type":"end"}                     utterance finished; server replies with the final
+# Server -> browser:
+#   {"type":"ready","live":bool}       on connect — tells the client whether ASR can run
+#   {"type":"started","engine":...}    session open
+#   {"type":"interim","text":...}      partial result
+#   {"type":"final","text":...,"confidence":..|null,"confidence_source":...}
+#   {"type":"error","message":...}     the browser should fall back to the Web Speech API
+# =====================================================================
+@app.websocket("/ws/stt")
+async def ws_stt(ws: WebSocket) -> None:
+    await ws.accept()
+    asr: TencentRealtimeASR | None = None
+    try:
+        await ws.send_json({"type": "ready", "live": Settings.LIVE_ASR})
+        while True:
+            msg = await ws.receive()
+            if msg.get("type") == "websocket.disconnect":
+                break
+
+            chunk = msg.get("bytes")
+            if chunk:
+                if asr is None:
+                    await ws.send_json({"type": "error",
+                                        "message": "send {\"type\":\"start\"} before audio"})
+                    continue
+                try:
+                    await asr.send_audio(chunk)
+                except ASRError as exc:
+                    await ws.send_json({"type": "error", "message": str(exc)})
+                    break
+                continue
+
+            raw = msg.get("text")
+            if not raw:
+                continue
+            try:
+                data = _json.loads(raw)
+            except ValueError:
+                continue
+
+            kind = data.get("type")
+            if kind == "start":
+                language = data.get("language") or Settings.ASR_LANGUAGE
+
+                def _send(payload: dict) -> None:
+                    # fire-and-forget: results must not block audio upload
+                    asyncio.create_task(ws.send_json(payload))
+
+                def on_interim(text: str) -> None:
+                    _send({"type": "interim", "text": text})
+
+                def on_final(result) -> None:
+                    _send({"type": "final", "text": result.text,
+                           "confidence": result.confidence,
+                           "confidence_source": result.confidence_source,
+                           "engine": result.engine})
+
+                asr = TencentRealtimeASR(language=language,
+                                         on_interim=on_interim, on_final=on_final)
+                try:
+                    await asr.connect()
+                except ASRError as exc:
+                    await ws.send_json({"type": "error", "message": str(exc)})
+                    asr = None
+                    continue
+                await ws.send_json({"type": "started", "engine": asr.engine,
+                                    "language": language})
+            elif kind == "end":
+                if asr is not None:
+                    result = await asr.finish()
+                    if result is not None:
+                        await ws.send_json({"type": "final", "text": result.text,
+                                            "confidence": result.confidence,
+                                            "confidence_source": result.confidence_source,
+                                            "engine": result.engine})
+                    else:
+                        await ws.send_json({"type": "final", "text": "",
+                                            "confidence": None,
+                                            "confidence_source": "unavailable",
+                                            "engine": asr.engine})
+                break
+    except WebSocketDisconnect:
+        pass
+    except Exception as exc:  # never let a probe take the server down
+        try:
+            await ws.send_json({"type": "error", "message": f"stt failed: {exc}"})
+        except Exception:
+            pass
+    finally:
+        if asr is not None:
+            await asr.close()
+
+
+# =====================================================================
+# 15. Mouth — text to speech (Cartesia Sonic), proxied so the key stays server-side.
+#
+# The browser POSTs the INTERFACE_LINE text (and language) here; we stream it from
+# Cartesia and return one WAV. The frontend never sees the Cartesia key.
+# =====================================================================
+class TTSRequest(BaseModel):
+    text: str
+    language: str = "en"   # EN | ZH | BM  (mapped to a Cartesia code in tts.py)
+
+
+@app.post("/tts")
+async def tts(req: TTSRequest) -> StreamingResponse:
+    """Stream Cartesia audio to the browser as it is synthesised.
+
+    The body is raw mono 16-bit signed little-endian PCM at SAMPLE_RATE Hz — no WAV
+    container — so the first byte the browser receives is the first byte of audio it
+    can play. The matching audio parameters are echoed in response headers so the
+    frontend knows what to feed into Web Audio without an out-of-band handshake.
+    """
+    if not Settings.LIVE_TTS or not Settings.TTS_VOICE_ID:
+        # Same contract as before — the frontend disables its mouth permanently on 503.
+        from fastapi import HTTPException
+        raise HTTPException(status_code=503, detail="tts not configured")
+
+    async def _pcm_stream():
+        try:
+            async for chunk in synthesize_stream(req.text, req.language):
+                yield chunk
+        except TTSError as exc:
+            # Once the response body has started, headers are already committed — we can't
+            # flip the status code. The browser logs the broken pipe and falls back; logging
+            # the upstream reason here keeps the audit trail honest.
+            import logging
+            logging.getLogger("auntiejoy.tts").warning("stream aborted: %s", exc)
+            return
+
+    return StreamingResponse(
+        _pcm_stream(),
+        media_type="application/octet-stream",
+        headers={
+            # Tell the browser exactly what format to expect — Cartesia's sonic-latest is
+            # always mono 16-bit little-endian PCM at the sample rate we asked for.
+            "X-Audio-Sample-Rate": str(SAMPLE_RATE),
+            "X-Audio-Channels": "1",
+            "X-Audio-Bit-Depth": "16",
+            "X-Audio-Encoding": "pcm_s16le",
+            # Disable proxy buffering so the first chunk reaches the browser ASAP.
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 # =====================================================================

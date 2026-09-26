@@ -52,6 +52,21 @@ class Settings:
     LLM_MODEL = os.getenv("AUNTIEJOY_LLM_MODEL", "tencent/Hunyuan-A13B-Instruct")
     LIVE_LLM = bool(LLM_API_KEY)
 
+    # ---- voice pipeline: the ears (ASR) and the mouth (TTS) ----
+    # Both are PROVIDERS. Neither decides anything — AuntieJoy's orchestrator does.
+    ASR_SECRET_ID = os.getenv("TENCENTCLOUD_SECRET_ID", "")
+    ASR_SECRET_KEY = os.getenv("TENCENTCLOUD_SECRET_KEY", "")
+    # Required: the realtime ASR URL puts the AppID in its path.
+    ASR_APPID = os.getenv("TENCENTCLOUD_APPID", "")
+    ASR_REGION = os.getenv("TENCENTCLOUD_REGION", "ap-singapore")
+    ASR_LANGUAGE = os.getenv("AUNTIEJOY_ASR_LANGUAGE", "en")   # en | zh | bm
+    LIVE_ASR = bool(ASR_SECRET_ID and ASR_SECRET_KEY and ASR_APPID)
+
+    TTS_API_KEY = os.getenv("CARTESIA_API_KEY", "")
+    TTS_MODEL = os.getenv("CARTESIA_MODEL", "sonic-3-2026-01-12")
+    TTS_VOICE_ID = os.getenv("CARTESIA_VOICE_ID", "")
+    LIVE_TTS = bool(TTS_API_KEY)
+
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")

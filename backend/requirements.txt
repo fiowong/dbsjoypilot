@@ -2,6 +2,7 @@ fastapi>=0.115.0
 uvicorn>=0.30.0
 httpx>=0.27.0
 pydantic>=2.9.0
-openai
-httpx
 python-dotenv
+# ears + mouth: streaming PCM to/from Tencent Cloud realtime ASR (stt.py) and
+# Cartesia TTS (tts.py) over WebSockets
+websockets>=13.0
