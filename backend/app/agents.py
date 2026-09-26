@@ -8,7 +8,10 @@ from .agent_runtime import AgentUnavailable, typed_call
 from .llm_client import llm_complete
 from .parsing import (detect_language, parse_amount, parse_payee_phrase,
                        parse_corrected_amount, last_committed_amount, parse_reference,
-                       ambiguous_amount_pair)
+                       ambiguous_amount_pair, parse_currency, parse_source_account_phrase,
+                       parse_biller_phrase, lookup_biller,
+                       parse_card_phrase, lookup_card, parse_own_account_phrase,
+                       lookup_own_account)
 from .messages import (interface_language, render, amount_pair, display_phrase,
                         FALLBACK_NAME)
 
@@ -33,6 +36,17 @@ INSUFFICIENT_FUNDS_RE = re.compile(
     r"short of (money|cash)|low on (cash|money)|haven'?t got enough|"
     r"tak cukup (duit|wang|cash)?|duit tak cukup|tak ada duit|wang tak cukup|"
     r"不够|钱不够|没有钱|没钱|余额不足)", re.IGNORECASE)
+
+# Shared deterministic cue for the SAFETY_HELP intent. The OLD trigger was the bare token
+# "help me", which froze an ordinary Singlish request like "Help me send fifty dollar to Ah Girl".
+# That is a false positive: "help me" is a polite opener, not a scam report. The genuine safety
+# signal is a scam / fraud / coercion word (or "help me" followed by a safety verb such as
+# report / check / avoid). Both the mock IntentClassifier and the orchestrator's safeguard use
+# THIS one regex, so live and mock can never diverge on what counts as help-with-a-scam.
+SAFETY_HELP_RE = re.compile(
+    r"\b(is this a scam|report a (scam|fraud)|coerc)\b"
+    r"|\bhelp me\b(?:\s+\w+){0,5}\s+(scam|fraud|cheat|trick|avoid|report|"
+    r"check|spot|identify|with)\b", re.IGNORECASE)
 
 # =====================================================================
 # 6. The four bounded agents — each a typed call, live or mock
@@ -122,7 +136,9 @@ Definitions and examples:
 - CANCEL_OR_STOP: the customer abandons the payment. Examples: "cancel", "stop", "batal",
   "forget it", "never mind", "tak jadi".
 
-- SAFETY_HELP: the customer asks about scams or help. Examples: "is this a scam?", "help me", "report".
+- SAFETY_HELP: the customer asks about scams or for help with a suspected scam. A polite
+  "help me send X" opener is NOT safety help — it is a PAYMENT. Examples: "is this a scam?",
+  "I think this is a scam", "report a scam", "help me check if this is a scam".
 
 - UNCLEAR: genuine ambiguity with no payment intent and no open question to answer. Use sparingly.
 
@@ -138,7 +154,7 @@ Convert the latest committed customer evidence into an UNTRUSTED payment proposa
 transaction: one SGD transfer to a saved payee.
 
 You may propose only: recipient_phrase, amount_minor (integer minor units), currency, source_account_phrase,
-clarification_field, clarification_question and advisory risk_flags.
+schedule_hint, clarification_field, clarification_question and advisory risk_flags.
 You must NOT generate beneficiary_id, destination_token, a trusted payee account number, bank-system status,
 a biometric result, a confirmation id, approval status, a signature, execution permission or a ledger result.
 
@@ -150,8 +166,18 @@ Amount rules (SGD 1 = 100 minor units):
 - If a material field (recipient or amount) is genuinely missing or ambiguous, return status
   NEEDS_CLARIFICATION with one short question in the customer's language. Never guess a material field.
 
+Future-time extraction (schedule_hint) — when the customer says WHEN to pay:
+- Restate the time they named in schedule_hint, using exactly one of these kinds:
+  today, tomorrow, weekday (give weekday and next), in_days (give days as a total day count — "two
+  weeks" is 14), day_of_month (give day and months_ahead), end_of_month (give months_ahead).
+- Put the hour as hour (0-23, 24-hour) and minute when they named a time of day.
+- NEVER put a date, a day-of-month, a month name or a year in schedule_hint. You do not know today's
+  date and must not guess one. Deterministic code computes the calendar date from your extraction,
+  and it will discard any hint it cannot validate.
+- If the customer named no future time, omit schedule_hint entirely. Do not invent one.
+
 Return only a JSON object with exactly these keys: status, detected_language, recipient_phrase, amount_minor,
-currency, source_account_phrase, clarification_field, clarification_question, risk_flags."""
+currency, source_account_phrase, schedule_hint, clarification_field, clarification_question, risk_flags."""
 
 VALIDATION_SYSTEM_PROMPT = """You are the Independent Validation Agent for AuntieJoy.
 Independently audit the current canonical payment draft against the committed customer evidence turns,
@@ -275,7 +301,7 @@ class IntentClassifierAgent:
         if re.search(r"\b(cancel|stop|batal|forget it|never mind|tak jadi)\b", text):
             return IntentResult(intent="CANCEL_OR_STOP", confidence=0.97,
                                 detected_language=lang, reason="Customer is abandoning the payment.")
-        if re.search(r"\b(is this a scam|help me|report|coerc)\b", text):
+        if SAFETY_HELP_RE.search(text):
             return IntentResult(intent="SAFETY_HELP", confidence=0.94,
                                 detected_language=lang, reason="Customer is asking for safety help.")
         if draft and re.search(r"\b(no|wrong|not|salah|bukan)\b", text) and \
@@ -287,7 +313,10 @@ class IntentClassifierAgent:
                                 detected_language=lang,
                                 reason=f"Customer answers the open {open_field} question.")
         amount, _ = parse_amount(turn)
-        if parse_payee_phrase(turn) or amount is not None:
+        if parse_payee_phrase(turn) or parse_biller_phrase(turn, ctx.get("customer_id")) \
+                or parse_card_phrase(turn, ctx.get("customer_id")) \
+                or parse_own_account_phrase(turn, ctx.get("customer_id")) \
+                or amount is not None:
             return IntentResult(intent="PAYMENT", confidence=0.96, detected_language=lang,
                                 reason="Customer is initiating a payment.")
         if re.search(r"[\u4e00-\u9fff]", turn) and re.search(r"(用中文|看不清楚|mandarin)", turn):
@@ -341,6 +370,77 @@ class PaymentAgent:
             if amount_minor is None:
                 amount_minor = last_committed_amount(evidence)
 
+        # A bill payment ("pay my StarHub bill") is a distinct transaction shape: the recipient
+        # is a biller from the biller directory, not a saved person, and the amount is the
+        # outstanding bill unless the customer stated a different one. Recognition is deterministic
+        # (a known biller name in the turn), so a live model cannot silently reclassify it as a
+        # person transfer. The amount the customer authorises is the bill amount shown back to
+        # them, never a silently-changed value.
+        biller_name = parse_biller_phrase(turn, ctx.get("customer_id"))
+        if biller_name:
+            biller = lookup_biller(ctx.get("customer_id"), biller_name)
+            # A bill payment pays the OUTSTANDING bill in full. The amount the customer
+            # authorises is the biller's latest amount, never a number they happened to say
+            # alongside the biller's name — showing a spoken amount as "your latest bill" would
+            # be a false read-back. (Partial bill payments are out of MVP scope.)
+            bill_amount = biller.latest_amount_minor if biller else amount_minor
+            if bill_amount is None:
+                return PaymentProposal(
+                    status="NEEDS_CLARIFICATION", detected_language=lang,
+                    recipient_phrase=biller_name, amount_minor=None, currency="SGD",
+                    clarification_field="AMOUNT",
+                    clarification_question=render("AMOUNT_MISSING", say_lang, name,
+                                                  phrase=display_phrase(biller_name)),
+                    risk_flags=[])
+            return PaymentProposal(
+                status="PROPOSAL_READY", detected_language=lang, recipient_phrase=biller_name,
+                amount_minor=bill_amount, currency=parse_currency(turn),
+                source_account_phrase=parse_source_account_phrase(turn),
+                transaction_type="BILL_PAYMENT",
+                clarification_field=None, clarification_question=None, risk_flags=[])
+
+        # A credit-card payment settles the customer's OWN card balance. As with a bill, the
+        # amount is the card's authoritative latest balance (PRODUCT_RULE), never a number the
+        # customer said alongside "credit card" — that would be a false read-back.
+        card_name = parse_card_phrase(turn, ctx.get("customer_id"))
+        if card_name:
+            card = lookup_card(ctx.get("customer_id"), card_name)
+            card_amount = card.latest_balance_minor if card else amount_minor
+            if card_amount is None:
+                return PaymentProposal(
+                    status="NEEDS_CLARIFICATION", detected_language=lang,
+                    recipient_phrase=card_name, amount_minor=None, currency="SGD",
+                    clarification_field="AMOUNT",
+                    clarification_question=render("AMOUNT_MISSING", say_lang, name,
+                                                  phrase=display_phrase(card_name)),
+                    risk_flags=[])
+            return PaymentProposal(
+                status="PROPOSAL_READY", detected_language=lang, recipient_phrase=card_name,
+                amount_minor=card_amount, currency=parse_currency(turn),
+                source_account_phrase=parse_source_account_phrase(turn),
+                transaction_type="CREDIT_CARD_PAYMENT",
+                clarification_field=None, clarification_question=None, risk_flags=[])
+
+        # An own-account move shifts money between the customer's own accounts (e.g. savings ->
+        # joint). Unlike a bill/card, the customer MUST state the amount — there is no single
+        # authoritative balance to fall back to — so a missing amount is a genuine clarification.
+        own_name = parse_own_account_phrase(turn, ctx.get("customer_id"))
+        if own_name:
+            if amount_minor is None:
+                return PaymentProposal(
+                    status="NEEDS_CLARIFICATION", detected_language=lang,
+                    recipient_phrase=own_name, amount_minor=None, currency="SGD",
+                    clarification_field="AMOUNT",
+                    clarification_question=render("AMOUNT_MISSING", say_lang, name,
+                                                  phrase=display_phrase(own_name)),
+                    risk_flags=[])
+            return PaymentProposal(
+                status="PROPOSAL_READY", detected_language=lang, recipient_phrase=own_name,
+                amount_minor=amount_minor, currency=parse_currency(turn),
+                source_account_phrase=parse_source_account_phrase(turn),
+                transaction_type="OWN_ACCOUNT_TRANSFER",
+                clarification_field=None, clarification_question=None, risk_flags=[])
+
         # A x1000 reading is only *materially* ambiguous when the audio was also uncertain.
         # parsing.ambiguous_amount_pair() is the single predicate for that — the orchestrator
         # calls the same one to render the question, so the two can never disagree.
@@ -373,9 +473,14 @@ class PaymentAgent:
                                               phrase=display_phrase(phrase)),
                 risk_flags=[])
 
+        # The currency and the source account are PROPOSED here as phrases, exactly like the
+        # recipient — deterministic code binds them to authoritative records at stage 6.
+        # Hardcoding "SGD" here is what made "Send US$200" silently become a Singapore-dollar
+        # payment: the one place a currency could have been carried was throwing it away.
         return PaymentProposal(
             status="PROPOSAL_READY", detected_language=lang, recipient_phrase=phrase,
-            amount_minor=amount_minor, currency="SGD", source_account_phrase=None,
+            amount_minor=amount_minor, currency=parse_currency(turn),
+            source_account_phrase=parse_source_account_phrase(turn),
             clarification_field=None, clarification_question=None, risk_flags=[])
 
     @staticmethod
@@ -408,29 +513,69 @@ class ValidationAgent:
         supersedes the original instruction.
         """
         evidence_amount = last_committed_amount(evidence)
-        evidence_phrase = None
-        for turn in evidence:
-            evidence_phrase = evidence_phrase or parse_payee_phrase(turn)
+        is_bill = draft.transaction_type == "BILL_PAYMENT"
+        is_card = draft.transaction_type == "CREDIT_CARD_PAYMENT"
+        is_own = draft.transaction_type == "OWN_ACCOUNT_TRANSFER"
 
         checks: List[FieldCheck] = []
 
-        recipient_ok = bool(evidence_phrase) and draft.payee_display.lower().startswith(
-            evidence_phrase.split()[0].lower())
+        # The "recipient" phrase comes from the right source for the transaction shape: a saved
+        # payee's name, a biller's name, a card's name, or an own-account's name. The draft is
+        # supported when it starts with what the customer actually said.
+        if is_bill:
+            evidence_phrase = None
+            for turn in evidence:
+                evidence_phrase = evidence_phrase or parse_biller_phrase(turn)
+            recipient_ok = bool(evidence_phrase) and draft.payee_display.lower().startswith(
+                evidence_phrase.lower())
+        elif is_card:
+            evidence_phrase = None
+            for turn in evidence:
+                evidence_phrase = evidence_phrase or parse_card_phrase(turn)
+            recipient_ok = bool(evidence_phrase) and draft.payee_display.lower().startswith(
+                evidence_phrase.lower())
+        elif is_own:
+            evidence_phrase = None
+            for turn in evidence:
+                evidence_phrase = evidence_phrase or parse_own_account_phrase(turn)
+            recipient_ok = bool(evidence_phrase) and draft.payee_display.lower().startswith(
+                evidence_phrase.lower())
+        else:
+            evidence_phrase = None
+            for turn in evidence:
+                evidence_phrase = evidence_phrase or parse_payee_phrase(turn)
+            recipient_ok = bool(evidence_phrase) and draft.payee_display.lower().startswith(
+                evidence_phrase.split()[0].lower())
         checks.append(FieldCheck(
             field_name="RECIPIENT", result="MATCH" if recipient_ok else "MISMATCH",
             evidence_source="TRANSCRIPT", evidence_value=evidence_phrase,
             draft_value=draft.payee_display))
 
-        amount_ok = evidence_amount is not None and evidence_amount == draft.amount_minor
+        # For a bill or credit-card payment the draft amount IS the authoritative outstanding
+        # balance (PRODUCT_RULE), so it always MATCHES — the customer need not (and usually does
+        # not) speak an amount, and any amount they did say never overrides the latest balance.
+        # An own-account move or saved-payee transfer carries an amount the customer stated, so
+        # it must equal what the evidence shows.
+        if is_bill or is_card:
+            amount_ok = True
+        else:
+            amount_ok = evidence_amount is not None and evidence_amount == draft.amount_minor
         checks.append(FieldCheck(
             field_name="AMOUNT", result="MATCH" if amount_ok else "MISMATCH",
             evidence_source="TRANSCRIPT",
             evidence_value=str(evidence_amount) if evidence_amount is not None else None,
             draft_value=str(draft.amount_minor)))
 
+        # The currency is now CHECKED rather than asserted. It used to hardcode SGD on both
+        # sides, so a US-dollar draft would have been "validated" against an evidence value
+        # nobody ever read. A currency is a material field: if the draft and the customer's
+        # words disagree about it, the amount the customer authorises is not the amount sent.
+        evidence_currency = parse_currency(evidence[-1]) if evidence else "SGD"
         checks.append(FieldCheck(
-            field_name="CURRENCY", result="MATCH", evidence_source="PRODUCT_RULE",
-            evidence_value="SGD", draft_value=draft.currency))
+            field_name="CURRENCY",
+            result="MATCH" if draft.currency == evidence_currency else "MISMATCH",
+            evidence_source="TRANSCRIPT", evidence_value=evidence_currency,
+            draft_value=draft.currency))
 
         checks.append(FieldCheck(
             field_name="SOURCE_ACCOUNT", result="MATCH", evidence_source="VERIFIED_SESSION_FACT",
@@ -438,7 +583,7 @@ class ValidationAgent:
 
         checks.append(FieldCheck(
             field_name="TRANSACTION_TYPE", result="MATCH", evidence_source="PRODUCT_RULE",
-            evidence_value="SAVED_PAYEE_TRANSFER", draft_value=draft.transaction_type))
+            evidence_value=draft.transaction_type, draft_value=draft.transaction_type))
 
         flags = [f"{c.field_name}_MISMATCH" for c in checks if c.result == "MISMATCH"]
         return ValidationResult(status="FREEZE" if flags else "PASS",

@@ -1,7 +1,10 @@
+import calendar
 import re
-from typing import List, Optional, Tuple
+from datetime import date, datetime, timedelta
+from typing import Dict, List, Optional, Tuple
 
 from .config import Settings
+from .data import BILLERS, CARDS, OWN_ACCOUNTS
 
 # =====================================================================
 # 4. Language + amount understanding (deterministic, multilingual)
@@ -185,21 +188,578 @@ def last_committed_amount(turns: List[str]) -> Optional[int]:
     return None
 
 
+# A spoken name is a run of CAPITALISED words: "Mei Ling", "John Doe", "Ah Girl". Capturing the
+# whole run (rather than one word) is what stops "Send S$50 to Mei Ling" from being reduced to
+# the alias "mei" and silently binding to Mei Tan — the customer named one person and the
+# payment went to another.
+#
+# "Capitalised" means capital-then-lowercase, NOT merely uppercase. That distinction is what
+# keeps a currency code from being read as a person: "Send US$200" used to capture "US" and ask
+# the customer whether they wanted to pay somebody called "Us".
+# The trailing \b stops the run landing in the MIDDLE of a CamelCase word: "Pay StarHub bill"
+# used to capture "Star" and ask the customer whether they meant a payee called Star.
+_NAME_RUN = r"[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b"
+
+
 def parse_payee_phrase(text: str) -> Optional[str]:
     lowered = text.lower()
+    # 1) The name the customer actually said, in full.
+    #    The CUE words are matched case-insensitively (a turn often starts "Send …" with a
+    #    capital S) but the NAME is not — a capitalised run is what tells us it is a name at
+    #    all, so lowercasing that would swallow ordinary words like "fifty dollar".
+    run = re.search(rf"(?i:kepada|to|给|pay|transfer to|send)\s+({_NAME_RUN})", text)
+    if run:
+        phrase = run.group(1).strip()
+        # A single-word name that IS a known alias still goes through the alias table, so
+        # "Mum" and "mother" both resolve to the same person the way they always did.
+        if phrase.lower() in PAYEE_ALIASES:
+            return PAYEE_ALIASES[phrase.lower()]
+        return phrase
+    # 2) Otherwise fall back to the alias table (lowercase nicknames like "mother").
     for alias in sorted(PAYEE_ALIASES, key=len, reverse=True):
         if re.search(rf"\b{re.escape(alias)}\b", lowered):
             return alias
-    match = re.search(r"(?:kepada|to|给|pay|transfer to)\s+([A-Z][a-zA-Z]+)", text)
-    if match:
-        return match.group(1)
+    return None
+
+
+# Which source account the customer named. The customer says "from savings", "from current",
+# "from my USD account"; deterministic code binds that phrase to an authoritative record.
+SOURCE_ACCOUNT_ALIASES = {
+    "savings": "savings", "saving": "savings", "savings account": "savings",
+    "current": "current", "current account": "current",
+    "multiplier": "multiplier", "multiplier account": "multiplier",
+    "usd": "usd", "usd account": "usd", "us dollar": "usd", "us dollar account": "usd",
+}
+
+# A currency the customer explicitly named. Anything not USD reads as SGD, because the demo
+# customer's everyday transfers are in Singapore dollars — but a currency they DID name must
+# never be silently converted into another one.
+CURRENCY_MARKERS = {
+    "USD": re.compile(r"\b(?:us\$|usd|us\s+dollars?)\b", re.I),
+}
+
+
+def parse_currency(text: str) -> str:
+    """The currency the customer named, defaulting to SGD.
+
+    "Send US$200" is a US-dollar instruction. Silently rendering it as S$200.00 changed the
+    value of the payment the customer was being asked to authorise, which is the one thing a
+    read-back must never do.
+    """
+    for code, pattern in CURRENCY_MARKERS.items():
+        if pattern.search(text):
+            return code
+    return "SGD"
+
+
+def parse_source_account_phrase(text: str) -> Optional[str]:
+    """Which of the customer's own accounts they named as the source, or None."""
+    lowered = text.lower()
+    for alias in sorted(SOURCE_ACCOUNT_ALIASES, key=len, reverse=True):
+        if re.search(rf"\b{re.escape(alias)}\b", lowered):
+            return SOURCE_ACCOUNT_ALIASES[alias]
     return None
 
 
 def parse_reference(text: str) -> Optional[str]:
-    match = re.search(r"\b(?:for|reference|ref)\s+([A-Za-z][A-Za-z ]{1,24})$", text.strip(), re.I)
+    """The reference the customer asked to attach, or None.
+
+    Trailing punctuation is not part of the reference. The old pattern anchored the capture
+    at the very end of the string, so "…for birthday." never matched — the final full stop
+    killed it and the reference was silently dropped from the read-back. Strip the punctuation
+    first, then anchor.
+    """
+    cleaned = re.sub(r"[\s.,;:!?]+$", "", text.strip())
+    match = re.search(r"\b(?:for|reference|ref)\s+([A-Za-z][A-Za-z ]{1,24})$", cleaned, re.I)
     if match:
         return match.group(1).strip().title()
     return None
+
+
+def _billers_for(customer_id: Optional[str]) -> List:
+    """The biller list for one customer, or every biller in the demo when customer_id is None
+    (a single-customer demo, so flattening is safe and lets the Intent classifier detect a bill
+    without knowing the session's customer_id)."""
+    if customer_id:
+        return BILLERS.get(customer_id, [])
+    return [b for lst in BILLERS.values() for b in lst]
+
+
+def parse_biller_phrase(text: str, customer_id: Optional[str] = None) -> Optional[str]:
+    """The canonical display name of a known biller mentioned in the turn, else None.
+
+    "Pay my StarHub bill" -> "StarHub". The match is on the full biller display name, so a
+    generic "pay my phone bill" with no named company is NOT picked up here — it correctly
+    falls through to clarification rather than being silently bound to the wrong biller.
+    """
+    lowered = text.lower()
+    for b in _billers_for(customer_id):
+        if re.search(rf"\b{re.escape(b.display_name.lower())}\b", lowered):
+            return b.display_name
+    return None
+
+
+def lookup_biller(customer_id: Optional[str], name: str):
+    """The authoritative Biller record for a named biller, or None."""
+    needle = (name or "").lower()
+    for b in _billers_for(customer_id):
+        if b.display_name.lower() == needle:
+            return b
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Credit-card + own-account (internal) destinations — the two remaining MVP
+# transaction shapes (IN-07 / IN-05). Same deterministic-directory pattern as
+# the biller: a known name in the turn resolves to an authoritative record.
+# ---------------------------------------------------------------------------
+def _cards_for(customer_id: Optional[str]) -> List:
+    if customer_id:
+        return CARDS.get(customer_id, [])
+    return [c for lst in CARDS.values() for c in lst]
+
+
+def _own_accounts_for(customer_id: Optional[str]) -> List:
+    if customer_id:
+        return OWN_ACCOUNTS.get(customer_id, [])
+    return [o for lst in OWN_ACCOUNTS.values() for o in lst]
+
+
+def parse_card_phrase(text: str, customer_id: Optional[str] = None) -> Optional[str]:
+    """The canonical display name of a known credit card mentioned in the turn, else None.
+
+    "Pay my credit card in full" -> "DBS Visa Credit Card" (the demo customer has one card, so a
+    generic "credit card" resolves to it). As with the biller, the match is on the full display
+    name, so a bare "card" that is not actually the customer's card is not silently bound.
+    """
+    lowered = text.lower()
+    for c in _cards_for(customer_id):
+        if re.search(rf"\b{re.escape(c.display_name.lower())}\b", lowered):
+            return c.display_name
+    if re.search(r"\b(credit card|my card|the card)\b", lowered):
+        cards = _cards_for(customer_id)
+        if cards:
+            return cards[0].display_name
+    return None
+
+
+def lookup_card(customer_id: Optional[str], name: str):
+    """The authoritative Card record for a named card, or None."""
+    needle = (name or "").lower()
+    for c in _cards_for(customer_id):
+        if c.display_name.lower() == needle:
+            return c
+    return None
+
+
+def parse_own_account_phrase(text: str, customer_id: Optional[str] = None) -> Optional[str]:
+    """The canonical display name of a known own (internal) account in the turn, else None.
+
+    "Move … to my joint account" -> "DBS Joint Account". Matched on the full display name, so a
+    generic "account" that is not an internal destination is not silently bound.
+    """
+    lowered = text.lower()
+    for oa in _own_accounts_for(customer_id):
+        if re.search(rf"\b{re.escape(oa.display_name.lower())}\b", lowered):
+            return oa.display_name
+    # A bare "joint" counts too: "move S$1,000 to joint" is how the instruction is actually
+    # spoken (IN-10). "joint" as a whole word never matches "join"/"jointly", so this stays tight.
+    if re.search(r"\bjoint\b", lowered):
+        oas = _own_accounts_for(customer_id)
+        if oas:
+            return oas[0].display_name
+    return None
+
+
+def lookup_own_account(customer_id: Optional[str], name: str):
+    """The authoritative OwnAccount record for a named internal account, or None."""
+    needle = (name or "").lower()
+    for oa in _own_accounts_for(customer_id):
+        if oa.display_name.lower() == needle:
+            return oa
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Schedule parsing (IN-08) — a future execution time the customer spoke.
+#
+# Deliberately split in two:
+#   * an EXTRACTOR says WHAT the customer meant — either the deterministic patterns below, or
+#     the Payment Agent's `schedule_hint` on the live path;
+#   * ONE computer, compute_schedule(), says WHEN that is, from the current date.
+#
+# A model never produces a date here. It has no clock, and a model that emitted a date would be
+# deciding when money moves — the same reason no other agent decides an amount. An extraction
+# may also be malformed or wrong, so every field is validated in compute_schedule() before it
+# can become a date.
+#
+# A turn with no day word yields None, so this never fires on an ordinary "send S$50 to Mei".
+# The vocabulary is English-only, matching the rest of the schedule feature (the surrounding
+# chat is trilingual, but a date phrase is not currently recognised in BM or Mandarin).
+# ---------------------------------------------------------------------------
+_WEEKDAYS = {
+    "monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3,
+    "friday": 4, "saturday": 5, "sunday": 6,
+}
+_WEEKDAY_NAMES = [name for name, _ in sorted(_WEEKDAYS.items(), key=lambda kv: kv[1])]
+
+# Ordinals as actually spoken — "the third of next month" — since a date phrase is usually said
+# aloud rather than typed as "3rd". The digit form is handled by the same pattern.
+_ORDINAL_WORDS = {
+    "first": 1, "second": 2, "third": 3, "fourth": 4, "fifth": 5, "sixth": 6, "seventh": 7,
+    "eighth": 8, "ninth": 9, "tenth": 10, "eleventh": 11, "twelfth": 12, "thirteenth": 13,
+    "fourteenth": 14, "fifteenth": 15, "sixteenth": 16, "seventeenth": 17, "eighteenth": 18,
+    "nineteenth": 19, "twentieth": 20, "twenty-first": 21, "twenty-second": 22,
+    "twenty-third": 23, "twenty-fourth": 24, "twenty-fifth": 25, "twenty-sixth": 26,
+    "twenty-seventh": 27, "twenty-eighth": 28, "twenty-ninth": 29, "thirtieth": 30,
+    "thirty-first": 31,
+}
+
+# The number forms accepted inside a day or offset phrase: digits, plus the spoken words small
+# enough to be a count of days. Deliberately NOT all of NUMBER_WORDS — "one hundred days" is not
+# a scheduling phrase, and every extra word is one more chance to match an amount by accident.
+_SMALL_NUMBER_WORDS = {w: v for w, v in NUMBER_WORDS.items()
+                       if 1 <= v <= 31 and w.isascii() and " " not in w}
+_NUM = (r"\d{1,3}|"
+        + "|".join(re.escape(w) for w in sorted(_SMALL_NUMBER_WORDS, key=len, reverse=True)))
+_HOUR_NUM = (r"\d{1,2}|" + "|".join(
+    re.escape(w) for w, v in sorted(_SMALL_NUMBER_WORDS.items(), key=lambda kv: -len(kv[0]))
+    if 1 <= v <= 12))
+# A day of the month can be spoken as a cardinal ("three") or an ordinal ("third"), so this one
+# accepts both, longest form first so "fifteenth" is never matched as "fifteen".
+_DAY_NUM = (r"\d{1,3}|" + "|".join(re.escape(w) for w in sorted(
+    set(_SMALL_NUMBER_WORDS) | set(_ORDINAL_WORDS), key=len, reverse=True)))
+
+_SCHEDULE_DAY_OF_MONTH_RE = re.compile(
+    rf"\b(?:on\s+)?(?:the\s+)?({_DAY_NUM})\s*(?:st|nd|rd|th)?\s*(?:of\s+)?(next|this)\s+month\b")
+_SCHEDULE_END_OF_MONTH_RE = re.compile(
+    r"\b(?:the\s+)?(?:end|last\s+day)\s+of\s+(?:(next|this)\s+)?(?:the\s+)?month\b"
+    r"|\bmonth[-\s]?end\b")
+_SCHEDULE_IN_WEEKS_RE = re.compile(rf"\bin\s+({_NUM})\s+weeks?(?:'s\s+time)?\b")
+_SCHEDULE_IN_DAYS_RE = re.compile(rf"\bin\s+({_NUM})\s+days?(?:'s\s+time)?\b")
+_SCHEDULE_IN_A_WEEK_RE = re.compile(r"\bin\s+a\s+week(?:'s\s+time)?\b")
+_SCHEDULE_FORTNIGHT_RE = re.compile(r"\bin\s+(?:a\s+)?fortnight(?:'s\s+time)?\b")
+
+# A bare number is only read as a TIME when the sentence says so. Without this cue
+# "send ten dollars tomorrow" was scheduled at 10:00 AM, because the amount word was read as an
+# hour — and extending the vocabulary to "in two weeks" would have made it worse.
+_SCHEDULE_AMPM_RE = re.compile(rf"\b({_HOUR_NUM})(?::(\d{{2}}))?\s*(am|pm)\b")
+_SCHEDULE_AT_HOUR_RE = re.compile(rf"\b(?:at|by)\s+({_HOUR_NUM})(?::(\d{{2}}))?\b")
+_SCHEDULE_OCLOCK_RE = re.compile(rf"\b({_HOUR_NUM})\s*o'?clock\b")
+_SCHEDULE_DAY_PART_RE = re.compile(r"\b(afternoon|evening|tonight|night|morning)\b")
+
+
+def _number_from(token: Optional[str]) -> Optional[int]:
+    """A spoken or written number in a date phrase -> its value, or None."""
+    token = (token or "").strip().lower()
+    if token.isdigit():
+        return int(token)
+    return _SMALL_NUMBER_WORDS.get(token) or _ORDINAL_WORDS.get(token)
+
+
+def _ordinal(n: int) -> str:
+    if 11 <= n % 100 <= 13:
+        suffix = "th"
+    else:
+        suffix = {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+    return f"{n}{suffix}"
+
+
+def _shift_month(year: int, month: int, months_ahead: int) -> Tuple[int, int]:
+    index = (year * 12 + (month - 1)) + months_ahead
+    return index // 12, index % 12 + 1
+
+
+def _time_spec_from_text(lowered: str) -> Dict[str, int]:
+    """The hour the customer named, or {} to mean "a day was named but no time — use the default".
+
+    An explicit am/pm wins; otherwise an "at"/"by"/"o'clock" cue qualifies a bare hour, and a
+    named part of the day ("tomorrow afternoon") supplies the meridiem. Anything else is not
+    treated as a time at all.
+    """
+    hour: Optional[int] = None
+    minute = 0
+    meridiem: Optional[str] = None
+
+    m = _SCHEDULE_AMPM_RE.search(lowered)
+    if m:
+        hour, meridiem, minute = _number_from(m.group(1)), m.group(3), int(m.group(2) or 0)
+    else:
+        part = _SCHEDULE_DAY_PART_RE.search(lowered)
+        if part:
+            meridiem = "am" if part.group(1) == "morning" else "pm"
+        m = _SCHEDULE_AT_HOUR_RE.search(lowered)
+        if m:
+            hour, minute = _number_from(m.group(1)), int(m.group(2) or 0)
+        else:
+            m = _SCHEDULE_OCLOCK_RE.search(lowered)
+            if m:
+                hour = _number_from(m.group(1))
+
+    if hour is None:
+        return {}
+    meridiem = meridiem or "am"          # a spoken hour with no qualifier is taken as morning
+    if meridiem == "pm" and hour < 12:
+        hour += 12
+    elif meridiem == "am" and hour == 12:
+        hour = 0
+    return {"hour": hour, "minute": minute}
+
+
+def schedule_spec_from_text(text: str) -> Optional[dict]:
+    """The deterministic EXTRACTOR: a spoken future time -> a day/time spec, or None.
+
+    It only says WHAT was meant. Turning that into a calendar date is compute_schedule()'s job,
+    so the two stay separable: the live Payment Agent may extract a spec these patterns cannot
+    reach, and it still never produces a date itself.
+    """
+    lowered = text.lower()
+    day: Optional[dict] = None
+
+    if re.search(r"\btoday\b", lowered):
+        day = {"kind": "today"}
+    elif re.search(r"\btomorrow\b", lowered):
+        day = {"kind": "tomorrow"}
+
+    if day is None:
+        m = _SCHEDULE_DAY_OF_MONTH_RE.search(lowered)
+        if m:
+            day = {"kind": "day_of_month", "day": _number_from(m.group(1)),
+                   "months_ahead": 1 if m.group(2) == "next" else 0}
+    if day is None:
+        m = _SCHEDULE_END_OF_MONTH_RE.search(lowered)
+        if m:
+            day = {"kind": "end_of_month", "months_ahead": 1 if m.group(1) == "next" else 0}
+    if day is None:
+        m = _SCHEDULE_IN_WEEKS_RE.search(lowered)
+        if m:
+            weeks = _number_from(m.group(1))
+            day = {"kind": "in_days", "days": weeks * 7} if weeks else None
+    if day is None:
+        m = _SCHEDULE_IN_DAYS_RE.search(lowered)
+        if m:
+            days = _number_from(m.group(1))
+            day = {"kind": "in_days", "days": days} if days else None
+    if day is None and _SCHEDULE_FORTNIGHT_RE.search(lowered):
+        day = {"kind": "in_days", "days": 14}
+    if day is None and _SCHEDULE_IN_A_WEEK_RE.search(lowered):
+        day = {"kind": "in_days", "days": 7}
+    if day is None:
+        for name, index in _WEEKDAYS.items():
+            if re.search(rf"\b{name}\b", lowered):
+                day = {"kind": "weekday", "weekday": index,
+                       "next": bool(re.search(rf"\bnext\s+{name}\b", lowered))}
+                break
+    if day is None:
+        return None
+
+    day.update(_time_spec_from_text(lowered))
+    return day
+
+
+def schedule_spec_from_hint(hint) -> Optional[dict]:
+    """A model-EXTRACTED hint -> a validated spec, or None.
+
+    Every field is checked here, so a hallucinated or malformed hint is dropped rather than
+    turned into a date. A hint carrying a date of its own is ignored on that point: only
+    compute_schedule() decides dates.
+    """
+    if hint is None:
+        return None
+    if hasattr(hint, "model_dump"):
+        hint = hint.model_dump()
+    if not isinstance(hint, dict):
+        return None
+
+    spec: dict = {}
+    kind = str(hint.get("kind") or "").strip().lower()
+    if kind in ("today", "tomorrow"):
+        spec["kind"] = kind
+    elif kind == "weekday":
+        name = str(hint.get("weekday") or "").strip().lower()
+        if name not in _WEEKDAYS:
+            return None
+        spec.update(kind="weekday", weekday=_WEEKDAYS[name], next=bool(hint.get("next")))
+    elif kind == "in_days":
+        days = hint.get("days")
+        if isinstance(days, bool) or not isinstance(days, int) or not 1 <= days <= 366:
+            return None
+        spec.update(kind="in_days", days=days)
+    elif kind == "day_of_month":
+        day_of_month = hint.get("day")
+        if (isinstance(day_of_month, bool) or not isinstance(day_of_month, int)
+                or not 1 <= day_of_month <= 31):
+            return None
+        spec.update(kind="day_of_month", day=day_of_month,
+                    months_ahead=1 if hint.get("months_ahead") else 0)
+    elif kind == "end_of_month":
+        spec.update(kind="end_of_month", months_ahead=1 if hint.get("months_ahead") else 0)
+    else:
+        return None
+
+    for field, low, high in (("hour", 0, 23), ("minute", 0, 59)):
+        value = hint.get(field)
+        if isinstance(value, int) and not isinstance(value, bool) and low <= value <= high:
+            spec[field] = value
+    return spec
+
+
+def compute_schedule(spec: Optional[dict], today: Optional[date] = None) -> Optional[Dict[str, str]]:
+    """The ONE place a day/time spec becomes a calendar date -> {"relative","absolute","time"}.
+
+    The relative phrase is built here too, from the spec's own numbers — never taken from the
+    extractor — so an extraction can only ever say WHAT was meant, and every customer-facing word
+    in the SCHEDULE clause still comes from deterministic code.
+
+    Returns None for a spec it cannot trust (unknown kind, out-of-range day, a "this month" day
+    that has already passed), which leaves the payment unscheduled rather than silently moved.
+    """
+    if not spec:
+        return None
+    base = today or datetime.now().date()
+    kind = str(spec.get("kind") or "").lower()
+    target: Optional[date] = None
+    relative: Optional[str] = None
+
+    if kind == "today":
+        target, relative = base, "today"
+    elif kind == "tomorrow":
+        target, relative = base + timedelta(days=1), "tomorrow"
+    elif kind == "weekday":
+        index = spec.get("weekday")
+        if isinstance(index, bool) or not isinstance(index, int) or not 0 <= index <= 6:
+            return None
+        ahead = (index - base.weekday()) % 7 or 7
+        is_next = bool(spec.get("next"))
+        if is_next:
+            ahead += 7
+        target = base + timedelta(days=ahead)
+        name = _WEEKDAY_NAMES[index]
+        relative = f"next {name}" if is_next else name
+    elif kind == "in_days":
+        days = spec.get("days")
+        if isinstance(days, bool) or not isinstance(days, int) or not 1 <= days <= 366:
+            return None
+        target = base + timedelta(days=days)
+        if days % 7 == 0:
+            weeks = days // 7
+            relative = f"in {weeks} week" + ("" if weeks == 1 else "s")
+        else:
+            relative = f"in {days} day" + ("" if days == 1 else "s")
+    elif kind == "day_of_month":
+        day_of_month = spec.get("day")
+        months_ahead = spec.get("months_ahead") or 0
+        if (isinstance(day_of_month, bool) or not isinstance(day_of_month, int)
+                or not 1 <= day_of_month <= 31 or months_ahead not in (0, 1)):
+            return None
+        year, month = _shift_month(base.year, base.month, months_ahead)
+        if day_of_month > calendar.monthrange(year, month)[1]:
+            return None
+        target = date(year, month, day_of_month)
+        if target <= base:
+            # "the 3rd of this month" said on the 26th is in the past. Rather than silently
+            # scheduling a date that has gone, leave it unscheduled — the read-back then carries
+            # no date, and the customer hears that their date was not understood.
+            return None
+        relative = (f"the {_ordinal(day_of_month)} of "
+                    + ("next month" if months_ahead else "this month"))
+    elif kind == "end_of_month":
+        months_ahead = spec.get("months_ahead") or 0
+        if months_ahead not in (0, 1):
+            return None
+        year, month = _shift_month(base.year, base.month, months_ahead)
+        target = date(year, month, calendar.monthrange(year, month)[1])
+        relative = "the end of " + ("next month" if months_ahead else "this month")
+    else:
+        return None
+
+    hour = spec.get("hour")
+    minute = spec.get("minute") or 0
+    if isinstance(hour, bool) or not isinstance(hour, int) or not 0 <= hour <= 23:
+        hour = 9                          # a day named but no time: default to 9:00
+    if isinstance(minute, bool) or not isinstance(minute, int) or not 0 <= minute <= 59:
+        minute = 0
+
+    display_hour = hour % 12 or 12
+    ampm = "AM" if hour < 12 else "PM"
+    return {"relative": relative, "absolute": target.strftime("%d %B %Y"),
+            "time": f"{display_hour}:{minute:02d} {ampm}"}
+
+
+def parse_schedule(text: str, today: Optional[date] = None) -> Optional[Dict[str, str]]:
+    """A spoken future time -> {"relative","absolute","time"} or None.
+
+    "tomorrow morning at nine"  -> relative="tomorrow", absolute="27 September 2026",
+                                    time="9:00 AM"  (absolute computed from today).
+    "in two weeks"              -> relative="in 2 weeks", the date 14 days out.
+    "the 3rd of next month"     -> relative="the 3rd of next month", that date.
+    "end of the month"          -> relative="the end of this month", the last day of this month.
+
+    The absolute date is computed from the phrase plus the current date, so it stays correct
+    whenever the demo is run. `today` is injectable so tests can freeze the clock.
+    """
+    return compute_schedule(schedule_spec_from_text(text), today)
+
+
+def schedule_from_hint(hint, today: Optional[date] = None) -> Optional[Dict[str, str]]:
+    """A Payment Agent schedule_hint -> {"relative","absolute","time"} or None.
+
+    The fallback extractor for a phrasings the patterns above cannot reach ("after the school
+    holidays", "when my salary comes in"). The hint says what was meant; the date is still
+    computed here, from the current date.
+    """
+    return compute_schedule(schedule_spec_from_hint(hint), today)
+
+
+# ---------------------------------------------------------------------------
+# Multiple independent instructions in one breath (IN-10)
+# Split a single turn such as
+#   "Pay StarHub S$86.40 from savings, send Ah Girl S$50, and move S$1,000 to joint"
+# into its separate instructions so each can be drafted and reviewed on its own.
+#
+# Only splits when the turn names 2+ DISTINCT payment targets (a biller, the customer's own
+# card, their own account, or a saved payee). A plain single payment — even one that happens
+# to contain the word "and" — returns [text] unchanged, so the ordinary one-draft path is
+# untouched. Two saved payees in one breath is handled upstream by detect_multiple_recipients
+# (one transfer at a time), so this only ever splits genuinely independent instructions.
+# ---------------------------------------------------------------------------
+_INSTRUCTION_SEP = re.compile(r",\s+|\s+and\s+|\s+then\s+|;", re.I)
+_LEADING_CONJ = re.compile(r"^(?:and|then|also|and then)\s+", re.I)
+
+
+def split_instructions(text: str, customer_id: Optional[str] = None) -> List[str]:
+    """The distinct instructions in a turn, or [text] when there is only one.
+
+    The split is conservative: it first confirms the whole turn names 2+ different payment
+    targets, then cuts on connectors (", " / " and " / " then " / ";") and keeps only the
+    pieces that still resolve to a target. A number like "S$1,000" is never cut because its
+    comma is not followed by whitespace.
+    """
+    def _targets(t: str) -> set:
+        found = set()
+        if parse_biller_phrase(t, customer_id):
+            found.add("BILL")
+        if parse_card_phrase(t, customer_id):
+            found.add("CARD")
+        if parse_own_account_phrase(t, customer_id):
+            found.add("OWN")
+        pp = parse_payee_phrase(t)
+        if pp:
+            found.add("PAYEE:" + pp)
+        return found
+
+    if len(_targets(text)) < 2:
+        return [text]
+
+    pieces = [p.strip() for p in _INSTRUCTION_SEP.split(text) if p and p.strip()]
+    resolved: List[str] = []
+    for p in pieces:
+        p = _LEADING_CONJ.sub("", p).strip()
+        if not p:
+            continue
+        if (parse_biller_phrase(p, customer_id) or parse_card_phrase(p, customer_id)
+                or parse_own_account_phrase(p, customer_id) or parse_payee_phrase(p)):
+            resolved.append(p)
+    return resolved if len(resolved) >= 2 else [text]
 
 

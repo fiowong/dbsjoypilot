@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from .config import Settings, now_iso, money
 from .models import (Draft, Confirmation, PaymentProposal, ValidationResult, GuardrailResult,
                       REQUIRED_VALIDATION_FIELDS)
-from .data import CUSTOMERS, SAVED_PAYEES, POLICY
+from .data import CUSTOMERS, SAVED_PAYEES, BILLERS, CARDS, OWN_ACCOUNTS, POLICY
 from .parsing import PAYEE_ALIASES
 
 # 7. Deterministic controls — the half that is allowed to move money
@@ -76,6 +76,95 @@ def resolve_payee_and_account(customer_id: str, proposal: PaymentProposal,
                                        clarification_field=proposal.clarification_field,
                                        clarification_key="RECIPIENT_MISSING")
 
+    # A bill payment binds a biller from the biller directory, not a saved person. The amount
+    # comes from the proposal (the outstanding bill), and the source account is chosen exactly
+    # as for a saved-payee transfer.
+    if proposal.transaction_type == "BILL_PAYMENT":
+        billers = BILLERS.get(customer_id, [])
+        needle = (payee_phrase or proposal.recipient_phrase or "").lower()
+        biller = next((b for b in billers
+                       if b.display_name.lower().startswith(needle)
+                       or needle in b.display_name.lower()), None)
+        if not biller:
+            return DeterministicResolution(outcome="NEEDS_CLARIFICATION",
+                                           clarification_field="RECIPIENT",
+                                           clarification_key="PAYEE_NOT_FOUND")
+        eligible = [a for a in CUSTOMERS[customer_id]["accounts"] if a.eligible]
+        if not eligible:
+            return DeterministicResolution(outcome="FREEZE", reason="NO_ELIGIBLE_SOURCE_ACCOUNT",
+                                           payee_display=biller.display_name)
+        want = (proposal.source_account_phrase or "").lower()
+        account = next((a for a in eligible if want and want in a.display_name.lower()), None)
+        if account is None:
+            account = eligible[0]
+        return DeterministicResolution(outcome="RESOLVED", draft=Draft(
+            draft_id="dr_pending", version=1,
+            transaction_type="BILL_PAYMENT",
+            source_account_id=account.account_id, beneficiary_id=biller.biller_id,
+            destination_token=biller.masked,
+            amount_minor=proposal.amount_minor or biller.latest_amount_minor, currency=proposal.currency,
+            reference="", payee_display=biller.display_name, payee_masked=biller.masked,
+            account_masked=account.masked))
+
+    # A credit-card payment settles the customer's own card balance from a source account. The
+    # amount is the card's latest balance (PRODUCT_RULE) — a number they happened to say alongside
+    # "credit card" is never the amount; that would be a false read-back, exactly as for a bill.
+    if proposal.transaction_type == "CREDIT_CARD_PAYMENT":
+        cards = CARDS.get(customer_id, [])
+        needle = (payee_phrase or proposal.recipient_phrase or "").lower()
+        card = next((c for c in cards
+                     if c.display_name.lower().startswith(needle)
+                     or needle in c.display_name.lower()), None)
+        if not card:
+            return DeterministicResolution(outcome="NEEDS_CLARIFICATION",
+                                           clarification_field="RECIPIENT",
+                                           clarification_key="PAYEE_NOT_FOUND")
+        eligible = [a for a in CUSTOMERS[customer_id]["accounts"] if a.eligible]
+        if not eligible:
+            return DeterministicResolution(outcome="FREEZE", reason="NO_ELIGIBLE_SOURCE_ACCOUNT",
+                                           payee_display=card.display_name)
+        want = (proposal.source_account_phrase or "").lower()
+        account = next((a for a in eligible if want and want in a.display_name.lower()), None)
+        if account is None:
+            account = eligible[0]
+        return DeterministicResolution(outcome="RESOLVED", draft=Draft(
+            draft_id="dr_pending", version=1,
+            transaction_type="CREDIT_CARD_PAYMENT",
+            source_account_id=account.account_id, beneficiary_id=card.card_id,
+            destination_token=card.masked,
+            amount_minor=proposal.amount_minor or card.latest_balance_minor, currency=proposal.currency,
+            reference="", payee_display=card.display_name, payee_masked=card.masked,
+            account_masked=account.masked))
+
+    # An own-account move shifts money between the customer's own accounts (e.g. savings -> joint).
+    # The destination is an internal account, so it uses BODY_MOVE, not BODY_TRANSFER.
+    if proposal.transaction_type == "OWN_ACCOUNT_TRANSFER":
+        oas = OWN_ACCOUNTS.get(customer_id, [])
+        needle = (payee_phrase or proposal.recipient_phrase or "").lower()
+        oa = next((o for o in oas
+                   if o.display_name.lower().startswith(needle)
+                   or needle in o.display_name.lower()), None)
+        if not oa:
+            return DeterministicResolution(outcome="NEEDS_CLARIFICATION",
+                                           clarification_field="RECIPIENT",
+                                           clarification_key="PAYEE_NOT_FOUND")
+        eligible = [a for a in CUSTOMERS[customer_id]["accounts"] if a.eligible]
+        if not eligible:
+            return DeterministicResolution(outcome="FREEZE", reason="NO_ELIGIBLE_SOURCE_ACCOUNT",
+                                           payee_display=oa.display_name)
+        want = (proposal.source_account_phrase or "").lower()
+        account = next((a for a in eligible if want and want in a.display_name.lower()), None)
+        if account is None:
+            account = eligible[0]
+        return DeterministicResolution(outcome="RESOLVED", draft=Draft(
+            draft_id="dr_pending", version=1,
+            transaction_type="OWN_ACCOUNT_TRANSFER",
+            source_account_id=account.account_id, beneficiary_id=oa.account_id,
+            destination_token=oa.masked,
+            amount_minor=proposal.amount_minor or 0, currency=proposal.currency,
+            reference="", payee_display=oa.display_name, payee_masked=oa.masked,
+            account_masked=account.masked))
+
     payees = SAVED_PAYEES.get(customer_id, [])
     needle = (payee_phrase or proposal.recipient_phrase or "").lower()
     matches = [p for p in payees
@@ -103,17 +192,25 @@ def resolve_payee_and_account(customer_id: str, proposal: PaymentProposal,
                                        reason="UNTRUSTED_PAYEE_METADATA_DETECTED",
                                        payee_display=payee.display_name)
 
-    account = next((a for a in CUSTOMERS[customer_id]["accounts"] if a.eligible), None)
-    if account is None:
+    eligible = [a for a in CUSTOMERS[customer_id]["accounts"] if a.eligible]
+    if not eligible:
         return DeterministicResolution(outcome="FREEZE", reason="NO_ELIGIBLE_SOURCE_ACCOUNT",
                                        payee_display=payee.display_name)
+
+    # The agent proposes a phrase ("usd", "savings", "current"); deterministic code binds the
+    # authoritative record. A phrase nothing matches — or no phrase at all — falls back to the
+    # customer's FIRST eligible account, which is the one the demo's everyday transfers use.
+    want = (proposal.source_account_phrase or "").lower()
+    account = next((a for a in eligible if want and want in a.display_name.lower()), None)
+    if account is None:
+        account = eligible[0]
 
     return DeterministicResolution(outcome="RESOLVED", draft=Draft(
         draft_id="dr_pending", version=1,
         source_account_id=account.account_id, beneficiary_id=payee.beneficiary_id,
         destination_token=payee.destination_token,
-        amount_minor=proposal.amount_minor or 0, currency="SGD",
-        reference="Lunch", payee_display=payee.display_name, payee_masked=payee.masked,
+        amount_minor=proposal.amount_minor or 0, currency=proposal.currency,
+        reference="", payee_display=payee.display_name, payee_masked=payee.masked,
         account_masked=account.masked))
 
 

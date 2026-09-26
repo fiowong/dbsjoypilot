@@ -112,6 +112,20 @@ MESSAGES: Dict[str, Dict[str, str]] = {
         "BM": "Tiada bayaran yang menunggu pengesahan sekarang, {name}. Beritahu saya penerima "
               "dan jumlahnya, kita mula semula.",
     },
+    # The same UNCLEAR intent, but a payment IS waiting — on the approval card, which is the one
+    # control a typed or spoken answer cannot satisfy. That is the point of the control chain (a
+    # generic "yes" must never mint a signature), so it is not a fault to apologise for; but
+    # "there's no payment waiting for your confirmation" would be plainly false here. This state
+    # therefore gets its own sentence that says what is actually true and where to act.
+    "APPROVAL_PENDING": {
+        "EN": "{name}, nothing has been sent — that payment is still waiting for you to approve "
+              "it. It's on the card on your screen: tap Confirm and I'll take you through the "
+              "review one step at a time.",
+        "ZH": "{name}，还没有付款。那笔付款仍在等您批准——就在您屏幕上的卡片里。请点按「Confirm」，"
+              "我带您一步步核对。",
+        "BM": "{name}, belum ada apa-apa dihantar — bayaran itu masih menunggu kelulusan anda. Ia "
+              "ada pada kad di skrin anda: tekan Confirm dan saya bawa anda semak satu-satu.",
+    },
     "CANCELLED": {
         "EN": "No problem, {name}. I've cancelled that payment, and nothing has been sent.",
         "ZH": "没关系，{name}。这笔付款已经取消，钱没有汇出。",
@@ -207,6 +221,15 @@ MESSAGES: Dict[str, Dict[str, str]] = {
         "BM": "Baik {name}. {amount} kepada {payee}, daripada akaun {account}. Jom kita semak "
               "satu demi satu.",
     },
+    # The initiation read-back — what the customer hears the moment a payment has been
+    # understood, BEFORE any field is confirmed. Its text is COMPOSED from the fragments in
+    # READBACK_PARTS below; see the note there for why this one entry is assembled rather than
+    # fixed. It still records as INITIATION_READBACK in the audit trail.
+    "INITIATION_READBACK": {
+        "EN": "{prefix}{body}{reference}{schedule}. {closer}",
+        "ZH": "{prefix}{body}{reference}{schedule}。{closer}",
+        "BM": "{prefix}{body}{reference}{schedule}. {closer}",
+    },
     "STEP_UP_REQUIRED": {
         "EN": "{name}, this is a larger amount, so I'll ask you to confirm it extra carefully, "
               "one field at a time, before anything is sent.",
@@ -250,6 +273,16 @@ MESSAGES: Dict[str, Dict[str, str]] = {
         "BM": "Selesai, {name}. {amount} telah dihantar kepada {payee}. Nombor rujukan ialah "
               "{reference}.",
     },
+
+    # ---------- IN-10 — several independent instructions in one breath ----------
+    # The summary line is composed elsewhere (readback_multi) from the MULTI_ITEM_* fragments and
+    # handed in as {text}; this key exists only so the composed sentence is rendered + audited
+    # through the normal catalogue path like every other customer-facing line.
+    "MULTI_REVIEW_INTRO": {
+        "EN": "{text}",
+        "ZH": "{text}",
+        "BM": "{text}",
+    },
     "IDEMPOTENT_RETRY_DONE": {
         "EN": "{name}, this is the same payment we already sent — nothing new was sent. "
               "Your original reference number is {reference}.",
@@ -258,6 +291,320 @@ MESSAGES: Dict[str, Dict[str, str]] = {
               "dihantar. Nombor rujukan asal anda ialah {reference}.",
     },
 }
+
+
+# =====================================================================
+# The initiation read-back — what the customer hears the moment a payment has been understood,
+# BEFORE anything is drafted for approval ("You want to send S$50.00 from Savings ending 1234
+# to Mei Tan ending 7788. I can prepare this payment for you to review. Is that correct?").
+#
+# This is the ONE place a sentence is assembled from parts, and that is deliberate. The same
+# read-back has to survive 6 transaction shapes x optional reference x optional schedule
+# x 4 closers. One catalogue key per combination would be ~50 near-identical sentences — and
+# near-identical sentences are exactly how wording drifts apart, which is the defect this
+# section exists to remove. The SHAPE and the PARTS both live here; customer-facing prose
+# still exists nowhere else in the codebase.
+#
+# Three consistency rules, encoded in readback() below so no caller can get them wrong:
+#   1. ONE closer per situation. The BRD table used five wordings ("for you to review", "for
+#      your review", "for review", "this payment for review", "it for review") for two
+#      situations. There are two: the customer stated everything, or we supplied the amount.
+#   2. A nickname always ends with the person check, never the generic "Is that correct?".
+#      Confirming the PERSON is the whole point of naming the nickname — that is the moment a
+#      wrong match would move money to the wrong account.
+#   3. A nickname preamble already names the payee and its ending digits, so the body must NOT
+#      name it again. (The BRD's own IN-08 read "I found Ah Girl as Mei Ling, account ending
+#      7284. You want to send S$50.00 to Mei Ling ending 7284 tomorrow…" — the payee twice.)
+# =====================================================================
+# The sentence shape lives in MESSAGES["INITIATION_READBACK"], not here — one definition, so the
+# orchestrator's normal render path and readback() below can never disagree about the shape.
+
+READBACK_PARTS: Dict[str, Dict[str, str]] = {
+    # --- who we resolved the nickname to ---
+    "PREFIX_NICKNAME": {
+        "EN": "I found {nickname} as {name}, account ending {masked}.",
+        "ZH": "我找到「{nickname}」就是 {name}，账号尾号 {masked}。",
+        "BM": "Saya jumpa {nickname} ialah {name}, akaun berakhir {masked}.",
+    },
+
+    # --- the body, one per transaction shape. Verb differs: send / move / pay ---
+    # Each shape carries a variant for a MISSING slot. A body that reads "You want to send
+    # S$50.00 from Savings ending 1234 to ." is worse than the double-naming it replaced, so a
+    # missing slot selects a variant that omits the whole clause rather than stranding the
+    # preposition. BODY_VARIANTS below records which variants each shape actually defines.
+    "BODY_TRANSFER": {
+        "EN": "You want to send {amount} from {source} to {destination}",
+        "ZH": "您想从 {source} 转 {amount} 给 {destination}",
+        "BM": "Anda nak hantar {amount} dari {source} kepada {destination}",
+    },
+    "BODY_TRANSFER_NODST": {
+        "EN": "You want to send {amount} from {source}",
+        "ZH": "您想从 {source} 转 {amount}",
+        "BM": "Anda nak hantar {amount} dari {source}",
+    },
+    "BODY_TRANSFER_NOSRC": {
+        "EN": "You want to send {amount} to {destination}",
+        "ZH": "您想转 {amount} 给 {destination}",
+        "BM": "Anda nak hantar {amount} kepada {destination}",
+    },
+    "BODY_TRANSFER_MIN": {
+        "EN": "You want to send {amount}",
+        "ZH": "您想转 {amount}",
+        "BM": "Anda nak hantar {amount}",
+    },
+    "BODY_MOVE": {
+        "EN": "You want to move {amount} from {source} to {destination}",
+        "ZH": "您想从 {source} 转 {amount} 到 {destination}",
+        "BM": "Anda nak pindahkan {amount} dari {source} ke {destination}",
+    },
+    "BODY_MOVE_NODST": {
+        "EN": "You want to move {amount} from {source}",
+        "ZH": "您想从 {source} 转 {amount}",
+        "BM": "Anda nak pindahkan {amount} dari {source}",
+    },
+    "BODY_MOVE_NOSRC": {
+        "EN": "You want to move {amount} to {destination}",
+        "ZH": "您想转 {amount} 到 {destination}",
+        "BM": "Anda nak pindahkan {amount} ke {destination}",
+    },
+    "BODY_MOVE_MIN": {
+        "EN": "You want to move {amount}",
+        "ZH": "您想转 {amount}",
+        "BM": "Anda nak pindahkan {amount}",
+    },
+    "BODY_BILL": {
+        "EN": "Your latest {biller} bill is {amount}. You want to pay it from {source}",
+        "ZH": "您最新的 {biller} 账单是 {amount}。您想从 {source} 支付",
+        "BM": "Bil {biller} terkini anda ialah {amount}. Anda nak bayar dari {source}",
+    },
+    "BODY_BILL_NOSRC": {
+        "EN": "Your latest {biller} bill is {amount}",
+        "ZH": "您最新的 {biller} 账单是 {amount}",
+        "BM": "Bil {biller} terkini anda ialah {amount}",
+    },
+    "BODY_CARD": {
+        "EN": "Your current credit-card balance is {amount}. You want to pay this amount from {source}",
+        "ZH": "您目前的信用卡余额是 {amount}。您想从 {source} 支付这笔金额",
+        "BM": "Baki kad kredit anda sekarang ialah {amount}. Anda nak bayar jumlah ini dari {source}",
+    },
+    "BODY_CARD_NOSRC": {
+        "EN": "Your current credit-card balance is {amount}",
+        "ZH": "您目前的信用卡余额是 {amount}",
+        "BM": "Baki kad kredit anda sekarang ialah {amount}",
+    },
+
+    # --- optional clauses ---
+    "REFERENCE": {
+        "EN": ", with the reference '{reference}'",
+        "ZH": "，备注是「{reference}」",
+        "BM": ", dengan rujukan '{reference}'",
+    },
+    "SCHEDULE": {
+        "EN": " {relative}, {absolute} at {time} Singapore time",
+        "ZH": " {relative}，{absolute} {time}（新加坡时间）",
+        "BM": " {relative}, {absolute} pada {time} waktu Singapura",
+    },
+
+    # --- closers ---
+    "CLOSE_REVIEW": {
+        "EN": "I can prepare this payment for you to review. Is that correct?",
+        "ZH": "我可以先准备好这笔付款让您核对。对吗？",
+        "BM": "Saya boleh sediakan bayaran ini untuk anda semak. Betul ke?",
+    },
+    "CLOSE_SYSTEM_AMOUNT": {
+        "EN": "Shall I prepare this payment for review?",
+        "ZH": "要我准备这笔付款让您核对吗？",
+        "BM": "Nak saya sediakan bayaran ini untuk semakan?",
+    },
+    "CLOSE_PERSON": {
+        "EN": "Is {person} the correct person?",
+        "ZH": "这位是 {person}，对吗？",
+        "BM": "Betul ke orang ini {person}?",
+    },
+    "ASK_SOURCE": {
+        "EN": "Which account should the money come from?",
+        "ZH": "这笔钱要从哪个账户扣？",
+        "BM": "Duit ini nak keluar dari akaun mana?",
+    },
+
+    # --- multiple instructions in one breath ---
+    # The items are bare-verb clauses, NOT the single-instruction body. "I heard three
+    # instructions: Your latest StarHub bill is S$86.40. You want to pay it from…" is not
+    # something a person says out loud; "I heard three instructions: pay StarHub S$86.40
+    # from…; send…; and move…" is.
+    "MULTI_ITEM_SEND": {
+        "EN": "send {amount} from {source} to {destination}",
+        "ZH": "从 {source} 转 {amount} 给 {destination}",
+        "BM": "hantar {amount} dari {source} kepada {destination}",
+    },
+    "MULTI_ITEM_MOVE": {
+        "EN": "move {amount} from {source} to {destination}",
+        "ZH": "从 {source} 转 {amount} 到 {destination}",
+        "BM": "pindahkan {amount} dari {source} ke {destination}",
+    },
+    "MULTI_ITEM_PAY_BILL": {
+        "EN": "pay {biller} {amount} from {source}",
+        "ZH": "从 {source} 支付 {biller} {amount}",
+        "BM": "bayar {biller} {amount} dari {source}",
+    },
+    "MULTI_ITEM_PAY_CARD": {
+        "EN": "pay your credit-card balance {amount} from {source}",
+        "ZH": "从 {source} 支付信用卡余额 {amount}",
+        "BM": "bayar baki kad kredit {amount} dari {source}",
+    },
+    "MULTI_HEAD": {
+        "EN": "I heard {count} instructions: ",
+        "ZH": "我听到 {count} 个指示：",
+        "BM": "Saya dengar {count} arahan: ",
+    },
+    "MULTI_SEP_MID": {"EN": "; ", "ZH": "；", "BM": "; "},
+    "MULTI_SEP_LAST": {"EN": "; and ", "ZH": "；还有", "BM": "; dan "},
+    "MULTI_TAIL": {
+        "EN": ". I can prepare them separately and let you review them one at a time. "
+              "Is that correct?",
+        "ZH": "。我可以分开准备，让您一笔一笔核对。对吗？",
+        "BM": ". Saya boleh sediakan satu-satu untuk anda semak. Betul ke?",
+    },
+}
+
+# Which body variants each transaction shape defines. The composer consults this so it can never
+# select a fragment that does not exist — a missing fragment would render an EMPTY body, which
+# is the worst possible failure for a line the customer has to authorise.
+BODY_VARIANTS: Dict[str, tuple] = {
+    "BODY_TRANSFER": ("", "_NODST", "_NOSRC", "_MIN"),
+    "BODY_MOVE": ("", "_NODST", "_NOSRC", "_MIN"),
+    "BODY_BILL": ("", "_NOSRC"),
+    "BODY_CARD": ("", "_NOSRC"),
+}
+
+# "I heard three instructions" — spelled out, because "I heard 3 instructions" is not speech.
+COUNT_WORDS: Dict[str, Dict[int, str]] = {
+    "EN": {2: "two", 3: "three", 4: "four", 5: "five"},
+    "ZH": {2: "两", 3: "三", 4: "四", 5: "五"},
+    "BM": {2: "dua", 3: "tiga", 4: "empat", 5: "lima"},
+}
+
+# Closers that ASK FOR A MISSING FIELD. These suppress the nickname preamble: the customer is
+# being asked exactly one question, and a "by the way, Ah Girl is Mei Tan" would make it two.
+ASK_CLOSERS = frozenset({"ASK_SOURCE"})
+
+
+def _part(key: str, lang: str, **slots) -> str:
+    """One read-back fragment in the requested language, filled with its slots."""
+    table = READBACK_PARTS.get(key)
+    if not table:
+        return ""
+    template = table.get(lang) or table.get("EN") or ""
+    return template.format(**slots) if template else ""
+
+
+def _body_variant(body: str, source: str, destination: str) -> str:
+    """The body variant that fits the slots we actually have.
+
+    Never returns a key outside BODY_VARIANTS[body], so the rendered body is never empty and
+    never leaves a preposition stranded on a missing value.
+    """
+    allowed = BODY_VARIANTS.get(body, ("",))
+    if body in ("BODY_BILL", "BODY_CARD"):
+        suffix = "" if source else "_NOSRC"          # a bill has no destination
+    elif source and destination:
+        suffix = ""
+    elif source:
+        suffix = "_NODST"
+    elif destination:
+        suffix = "_NOSRC"
+    else:
+        suffix = "_MIN"
+    if suffix not in allowed:
+        suffix = "_MIN" if "_MIN" in allowed else allowed[-1]
+    return body + suffix
+
+
+def readback_item(lang: str, *, body: str, amount: str, source: str = "", destination: str = "",
+                  biller: str = "", reference: Optional[str] = None,
+                  schedule: Optional[Dict[str, str]] = None) -> str:
+    """One instruction's clause, without its closer."""
+    key = _body_variant(body, source, destination)
+    return (_part(key, lang, amount=amount, source=source, destination=destination, biller=biller)
+            + (_part("REFERENCE", lang, reference=reference) if reference else "")
+            + (_part("SCHEDULE", lang, **schedule) if schedule else ""))
+
+
+def multi_item(lang: str, *, shape: str, amount: str, source: str = "", destination: str = "",
+               biller: str = "") -> str:
+    """One bare-verb clause for a multi-instruction read-back.
+
+    shape is one of MULTI_ITEM_SEND / MULTI_ITEM_MOVE / MULTI_ITEM_PAY_BILL /
+    MULTI_ITEM_PAY_CARD. Deliberately a different fragment set from the single-instruction
+    body — see the note on the MULTI_ITEM_* entries above.
+    """
+    return _part(shape, lang, amount=amount, source=source, destination=destination,
+                 biller=biller)
+
+
+def readback_parts(lang: str, *, body: str, closer: str, amount: str, source: str = "",
+                   destination: str = "", biller: str = "", reference: Optional[str] = None,
+                   schedule: Optional[Dict[str, str]] = None,
+                   nickname: Optional[Dict[str, str]] = None,
+                   person: str = "") -> Dict[str, str]:
+    """The assembled fragments of one initiation read-back, as render() params.
+
+    body      BODY_TRANSFER | BODY_MOVE | BODY_BILL | BODY_CARD
+    closer    CLOSE_REVIEW | CLOSE_SYSTEM_AMOUNT | CLOSE_PERSON | ASK_SOURCE
+    schedule  {"relative": "tomorrow", "absolute": "27 September 2026", "time": "9:00 AM"}
+    nickname  {"nickname": "Ah Girl", "name": "Mei Tan", "masked": "7788"}
+
+    The orchestrator passes these straight to say_line("INITIATION_READBACK", …), so the
+    sentence goes through the normal catalogue render path and is audited like any other line.
+
+    Rules 2 and 3 from the section header are applied HERE rather than left to the caller, so
+    the nickname handling cannot drift back out of alignment.
+    """
+    prefix = ""
+    if closer in ASK_CLOSERS:
+        # One question at a time: the missing field IS the question, so no preamble.
+        nickname = None
+    elif nickname:
+        prefix = _part("PREFIX_NICKNAME", lang, **nickname) + " "
+        destination = ""                 # the preamble already named the payee and its digits
+        closer = "CLOSE_PERSON"          # a nickname is exactly when the person must be confirmed
+        person = person or nickname.get("name", "")
+
+    return {
+        "prefix": prefix,
+        "body": readback_item(lang, body=body, amount=amount, source=source,
+                              destination=destination, biller=biller, reference=reference,
+                              schedule=schedule),
+        "reference": "",                 # already folded into the body clause above
+        "schedule": "",
+        "closer": _part(closer, lang, person=person),
+    }
+
+
+def readback(lang: str, **parts) -> str:
+    """Render the initiation read-back in full — for tests and previews.
+
+    The orchestrator renders the same sentence through the catalogue (say_line) using
+    readback_parts(); this helper exists so the composer can be exercised without an emit.
+    """
+    table = MESSAGES.get("INITIATION_READBACK") or {}
+    shape = table.get(lang) or table.get("EN") or ""
+    return shape.format(**readback_parts(lang, **parts)).strip()
+
+
+def readback_multi(lang: str, items: List[str]) -> str:
+    """The read-back for several independent instructions in one breath.
+
+    Each item comes from multi_item(), so the per-instruction wording cannot drift away from
+    the single-instruction case by being written twice.
+    """
+    if not items:
+        return ""
+    count = COUNT_WORDS.get(lang, COUNT_WORDS["EN"]).get(len(items), str(len(items)))
+    mid = _part("MULTI_SEP_MID", lang)
+    last = _part("MULTI_SEP_LAST", lang)
+    joined = items[0] if len(items) == 1 else mid.join(items[:-1]) + last + items[-1]
+    return (_part("MULTI_HEAD", lang, count=count) + joined + _part("MULTI_TAIL", lang)).strip()
 
 
 def interface_language(turn: str, detected: Optional[str] = None) -> str:
@@ -282,6 +629,22 @@ def customer_name(session) -> str:
     """The trusted preferred name for this session's customer (§A.6 C3)."""
     record = CUSTOMERS.get(getattr(session, "customer_id", None)) or {}
     return record.get("preferred_name") or FALLBACK_NAME
+
+
+def source_account_phrase(customer_id: Optional[str],
+                          source_account_id: Optional[str]) -> str:
+    """"DBS Savings ending 1234" — built from the trusted customer record, never from chat.
+
+    The draft carries only account_masked; the display name lives on the authoritative record,
+    so it is looked up here rather than taken from anything the customer said (§A.6 C3).
+    Returns "" when the account is not on the record, so the read-back omits the clause rather
+    than inventing a name.
+    """
+    record = CUSTOMERS.get(customer_id) or {}
+    for account in record.get("accounts", []):
+        if account.account_id == source_account_id:
+            return f"{account.display_name} {account.masked}".strip()
+    return ""
 
 
 def join_options(parts: List[str], lang: str) -> str:

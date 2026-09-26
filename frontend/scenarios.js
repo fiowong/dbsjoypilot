@@ -116,7 +116,7 @@ function executeChain(lang, d, opts){
       body:'AuntieJoy is asking for a <b>transaction-specific</b> biometric confirmation on the registered device.',
       fields:`<div class="fr"><span class="k">Confirmation</span><span class="v">${d.confirmation_id}</span></div>
               <div class="fr"><span class="k">Bound to draft</span><span class="v">${d.draft_id} · v${d.version}</span></div>
-              <div class="fr big"><span class="k">Amount</span><span class="v">${money(d.amount_minor)}</span></div>`,
+              <div class="fr big"><span class="k">Amount</span><span class="v">${money(d.amount_minor, d.currency)}</span></div>`,
       acts:[{id:'ok',label:icon('faceid')+' Confirm with Face ID',kind:'yes'}],
       icon:'faceid',
       note:'Simulated. The prototype does not claim production FaceID integration (BRD §7.4).'}},
@@ -143,7 +143,7 @@ function executeChain(lang, d, opts){
     // Same DBS receipt the live path renders, from the same draft the review walked through.
     {t:'receipt', o:{ stamp: new Date().toLocaleString('en-SG',{day:'2-digit',month:'short',
         year:'numeric',hour:'2-digit',minute:'2-digit'}),
-      amount: money(d.amount_minor),
+      amount: money(d.amount_minor, d.currency),
       to:     d.payee.displayName+' · '+d.payee.masked,
       from:   'DBS Savings · '+ACCOUNT.masked,
       ref:    'txn_00'+draftSeq }}
@@ -175,7 +175,7 @@ const SC = {};
 
 /* ---- A.10 Happy path (Mandarin, verbatim from the BRD) ---- */
 SC.HAPPY = () => {
-  const d=newDraft(PAYEES.mei,5000,1,'Lunch');
+  const d=newDraft(PAYEES.mei,5000,1,'');
   return [
     {t:'state',v:'CAPTURED'},
     {t:'auntie',v:'帮我 transfer 五十块给 Mei.'},
@@ -187,7 +187,7 @@ SC.HAPPY = () => {
       body:'Fifty Singapore dollars has been paid to <b>Mei Tan</b>.',
       fields:`<div class="fr"><span class="k">Transaction</span><span class="v">txn_00${draftSeq}</span></div>
               <div class="fr"><span class="k">Beneficiary</span><span class="v">${PAYEES.mei.beneficiary_id}</span></div>
-              <div class="fr big"><span class="k">Amount</span><span class="v">SGD 50.00</span></div>`,
+              <div class="fr big"><span class="k">Amount</span><span class="v">S$50.00</span></div>`,
       acts:[{id:'ok',label:'Done',kind:'ok2'}],
       note:'One sentence in, one review, one biometric. The agents never held the money.'}}
   ];
@@ -273,13 +273,13 @@ SC.B1 = () => [
   {t:'agent',name:'PAYMENT AGENT',
     v:{status:'NEEDS_CLARIFICATION',detected_language:'MIXED',recipient_phrase:'Mei',amount_minor:null,
        currency:'SGD',source_account_phrase:null,clarification_field:'AMOUNT',
-       clarification_question:'{name}, maksudkan SGD 50.00 atau SGD 50,000.00?',risk_flags:[]}},
+       clarification_question:'{name}, maksudkan S$50.00 atau S$50,000.00?',risk_flags:[]}},
   {t:'stage',n:5,s:'fail'},
   {t:'sys',v:'State: CLARIFICATION_REQUIRED · Open clarification field: AMOUNT · Canonical draft: NOT_CREATED'},
   {t:'hit',b:'B',n:'B1'},
   {t:'state',v:'CLARIFICATION_REQUIRED'},{t:'draft',v:'NOT_CREATED'},{t:'outcome',v:'CLARIFY',c:'warn'},
   {t:'audit',v:'AMOUNT_AMBIGUOUS · clarification opened · draft NOT_CREATED',c:'warn'},
-  {t:'iface',v:'{name}, maksudkan SGD 50.00 atau SGD 50,000.00?'},
+  {t:'iface',v:'{name}, maksudkan S$50.00 atau S$50,000.00?'},
   {t:'auntie',v:'Aiyoh, lima puluh saja lah.'},
   {t:'stage',n:3,s:'run'},{t:'stage',n:4,s:'run'},
   {t:'agent',name:'INTENT CLASSIFIER',v:{intent:'PAYMENT_CLARIFICATION',confidence:0.99,detected_language:'MIXED',reason:'Customer selected the amount in response to the open AMOUNT question.'}},
@@ -306,7 +306,7 @@ SC.B1 = () => [
   {t:'sys',v:'Deterministic comparator: PASS · Risk policy: PASS · Next state: CONFIRMATION_READY'},
   {t:'audit',v:'CLARIFICATION_ANSWERED · new evidence turn · revalidated',c:'ok'},
   {t:'state',v:'CONFIRMATION_READY'},{t:'outcome',v:'ALLOW',c:'ok'},
-  {t:'iface',v:'Baik {name}. SGD 50.00 kepada Mei Tan ending 7788, daripada akaun ending 1234. Jom kita semak satu demi satu.'},
+  {t:'iface',v:'Anda nak hantar S$50.00 dari DBS Savings ending 1234 kepada Mei Tan ending 7788. Saya boleh sediakan bayaran ini untuk anda semak. Betul ke?'},
   {t:'popup',d:150,cfg:{kicker:'BRANCH B · B1 — AMBIGUITY',title:'The system did not guess',
     body:'It asked <b>fifty dollars or fifty thousand dollars?</b> The answer became a new evidence turn and the draft was validated afterwards.',
     acts:[{id:'ok',label:'Understood',kind:'ok2'}],
@@ -352,7 +352,7 @@ SC.B2 = () => [
       risk_flags:[]}},
   {t:'stage',n:8,s:'pass'},{t:'stage',n:9,s:'pass'},{t:'stage',n:10,s:'pass'},
   {t:'state',v:'CONFIRMATION_READY'},{t:'outcome',v:'ALLOW',c:'ok'},
-  {t:'iface',v:"Good, {name}. That's SGD 20.00 to John Doe ending 4521, from your account ending 1234. Let's check it together, one step at a time."},
+  {t:'iface',v:"You want to send S$20.00 from DBS Savings ending 1234 to John Doe ending 4521. I can prepare this payment for you to review. Is that correct?"},
   {t:'popup',d:150,cfg:{kicker:'BRANCH B · B2 — DUPLICATE PAYEE',title:'The LLM never picked the payee',
     body:'The Payment Agent extracted the phrase <b>“John”</b>. Deterministic code found two matches and asked Auntie to choose. The <code>beneficiary_id</code> is bound from the repository, never generated.',
     fields:`<div class="fr"><span class="k">Chosen</span><span class="v">${PAYEES.john_doe.beneficiary_id}</span></div>
@@ -393,7 +393,7 @@ SC.B3 = () => [
   {t:'popup',d:150,cfg:{kicker:'BRANCH B · B3 — DRAFT MISMATCH',title:'Independent validation caught it',
     body:'The Payment Agent and the Validation Agent are <b>separate model calls</b>. The Validation Agent audits the draft against immutable evidence — it never sees the Payment Agent’s reasoning.',
     fields:`<div class="fr"><span class="k">Transcript</span><span class="v">fifteen dollars</span></div>
-            <div class="fr"><span class="k">Draft</span><span class="v">SGD 50.00</span></div>
+            <div class="fr"><span class="k">Draft</span><span class="v">S$50.00</span></div>
             <div class="fr"><span class="k">Comparator</span><span class="v">FAIL · AMOUNT_MISMATCH</span></div>`,
     acts:[{id:'ok',label:'Understood',kind:'dan'}],
     note:'Confirmation is never displayed. The draft stays frozen.'}}
@@ -534,7 +534,7 @@ SC.D3 = () => [
 
 /* ---- E1 Accessible field-by-field review (BM) ---- */
 SC.E1 = () => {
-  const d=newDraft(PAYEES.mei,5000,1,'Lunch');
+  const d=newDraft(PAYEES.mei,5000,1,'');
   return [
     {t:'state',v:'CAPTURED'},
     {t:'auntie',v:'Hantar lima puluh dolar kepada Mei.'},
@@ -556,8 +556,8 @@ SC.E1 = () => {
 
 /* ---- E2 Auntie corrects the amount during review ---- */
 SC.E2 = () => {
-  const d=newDraft(PAYEES.mei,5000,1,'Lunch');
-  const d2=newDraft(PAYEES.mei,1500,2,'Lunch');
+  const d=newDraft(PAYEES.mei,5000,1,'');
+  const d2=newDraft(PAYEES.mei,1500,2,'');
   return [
     {t:'state',v:'CAPTURED'},
     {t:'auntie',v:'帮我 transfer 五十块给 Mei.'},
@@ -592,15 +592,15 @@ SC.E2 = () => {
     {t:'sys',v:'Deterministic comparator: PASS · Risk policy: PASS · Old field confirmations reused: NO · Next state: FRESH_CONFIRMATION_REQUIRED'},
     {t:'hit',b:'E',n:'E2'},
     {t:'state',v:'FRESH_CONFIRMATION_REQUIRED'},{t:'outcome',v:'EDIT_APPLIED',c:'brand'},
-    {t:'iface',v:"Good, {name}. That's SGD 15.00 to Mei Tan ending 7788, from your account ending 1234. Let's check it together, one step at a time."},
+    {t:'iface',v:"You want to send S$15.00 from DBS Savings ending 1234 to Mei Tan ending 7788. I can prepare this payment for you to review. Is that correct?"},
     {t:'review',lang:'EN',d:d2},
     ...executeChain('EN',d2),
-    {t:'iface',v:T.EN.done('SGD 15.00','Mei Tan','txn_00'+draftSeq)},
+    {t:'iface',v:T.EN.done('S$15.00','Mei Tan','txn_00'+draftSeq)},
     {t:'popup',d:200,cfg:{kicker:'BRANCH E · E2 — EDIT INVALIDATION',title:'A correction is not a patch',
       body:'The old confirmation and signature were destroyed, a new draft version was created, and the complete review restarted. The system never says “I changed it — approve with FaceID.”',
       fields:`<div class="fr"><span class="k">Draft v1</span><span class="v">SUPERSEDED</span></div>
               <div class="fr"><span class="k">Signature v1</span><span class="v">INVALIDATED</span></div>
-              <div class="fr"><span class="k">Draft v2</span><span class="v">SGD 15.00 · revalidated</span></div>`,
+              <div class="fr"><span class="k">Draft v2</span><span class="v">S$15.00 · revalidated</span></div>`,
       acts:[{id:'ok',label:'Done',kind:'ok2'}],
       note:'BRD §8.11.3 — a material edit invalidates the confirmation, the signature and the draft version.'}}
   ];
@@ -608,12 +608,12 @@ SC.E2 = () => {
 
 /* ---- E3 Language mismatch ---- */
 SC.E3 = () => {
-  const d=newDraft(PAYEES.mei,5000,1,'Lunch');
+  const d=newDraft(PAYEES.mei,5000,1,'');
   return [
   {t:'state',v:'CAPTURED'},
   {t:'auntie',v:'Send fifty dollars to Mei.'},
   ...happyChain('EN','mei',5000,{phrase:'Mei',draftId:d.draft_id}),
-  {t:'iface',v:'Recipient: Mei Tan. Amount: SGD 50. Source: Savings ending 1234.'},
+  {t:'iface',v:'Recipient: Mei Tan. Amount: S$50. Source: Savings ending 1234.'},
   {t:'auntie',v:'可以用中文吗？我看不清楚。'},
   {t:'stage',n:3,s:'run'},{t:'stage',n:4,s:'run'},
   {t:'agent',name:'GUARDRAILS AGENT',v:gAllow('ZH')},
@@ -662,7 +662,7 @@ SC.F1 = () => [
 
 /* ---- F2 Amount changed after signing ---- */
 SC.F2 = () => {
-  const d=newDraft(PAYEES.mei,5000,1,'Lunch');
+  const d=newDraft(PAYEES.mei,5000,1,'');
   const pay=canonical(d), s=hmac(pay), hh=hashOf(pay);
   return [
     {t:'state',v:'CAPTURED'},
@@ -686,10 +686,10 @@ SC.F2 = () => {
     {t:'hit',b:'F',n:'F2'},
     {t:'state',v:'REJECTED'},{t:'sig',v:'INVALID'},{t:'ledger',v:'NOT_INVOKED'},{t:'outcome',v:'REJECTED',c:'stop'},
     {t:'iface',v:'This payment no longer matches the payment that was reviewed and signed. It has been rejected. No money was sent.'},
-    {t:'popup',d:150,cfg:{kicker:'BRANCH F · F2 — PAYLOAD BINDING',title:'SGD 50.00 ≠ SGD 5,000.00',
+    {t:'popup',d:150,cfg:{kicker:'BRANCH F · F2 — PAYLOAD BINDING',title:'S$50.00 ≠ S$5,000.00',
       body:'The signature covers the <b>exact canonical payload</b> — draft id, version, confirmation id, beneficiary, destination token, amount, currency, reference, nonce and idempotency key.',
-      fields:`<div class="fr"><span class="k">Signed</span><span class="v">SGD 50.00</span></div>
-              <div class="fr"><span class="k">Submitted</span><span class="v">SGD 5,000.00</span></div>
+      fields:`<div class="fr"><span class="k">Signed</span><span class="v">S$50.00</span></div>
+              <div class="fr"><span class="k">Submitted</span><span class="v">S$5,000.00</span></div>
               <div class="fr"><span class="k">Reason</span><span class="v">SIGNATURE_PAYLOAD_MISMATCH</span></div>`,
       acts:[{id:'ok',label:'Understood',kind:'dan'}],
       note:'Approval is bound to the reviewed transaction, not to a generic “yes”.'}}
@@ -698,7 +698,7 @@ SC.F2 = () => {
 
 /* ---- F3 Expired, replayed or duplicate request ---- */
 SC.F3 = () => {
-  const d=newDraft(PAYEES.mei,5000,1,'Lunch');
+  const d=newDraft(PAYEES.mei,5000,1,'');
   return [
     {t:'state',v:'CAPTURED'},
     {t:'auntie',v:'帮我 transfer 五十块给 Mei.'},

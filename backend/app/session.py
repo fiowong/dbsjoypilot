@@ -38,6 +38,15 @@ class Session:
         self.draft: Optional[Draft] = None
         self.draft_versions: List[int] = []
         self.current_draft_version: int = 0
+        # IN-10 — a queue of independent instructions raised in one breath. Each entry is a
+        # fully-resolved, validated draft reviewed and confirmed one at a time. session.draft
+        # always points at the instruction currently being confirmed (pending_drafts[draft_index]).
+        self.pending_drafts: List[Draft] = []
+        self.pending_validations: List[ValidationResult] = []
+        self.pending_schedules: List[Optional[dict]] = []
+        self.pending_references: List[Optional[str]] = []
+        self.draft_index: int = 0
+        self.multi_total: int = 0
         self.confirmation: Optional[Confirmation] = None
         self.validation: Optional[ValidationResult] = None
         self.open_clarification_field: Optional[str] = None
@@ -101,6 +110,11 @@ class Session:
             "evidence_ids": self.evidence_ids,
             "draft": self.draft.model_dump() if self.draft else None,
             "current_draft_version": self.current_draft_version,
+            # How many further independent instructions are still queued behind the current one
+            # (IN-10). Drives the frontend's "review one at a time" loop; 0 means a single draft
+            # or the last of a multi-instruction batch.
+            "pending_remaining": max(0, len(self.pending_drafts) - self.draft_index - 1),
+            "multi_total": self.multi_total,
             "confirmation": self.confirmation.model_dump() if self.confirmation else None,
             "open_clarification_field": self.open_clarification_field,
             "frozen": self.frozen,

@@ -72,7 +72,25 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def money(minor: int) -> str:
-    return f"SGD {minor / 100:,.2f}"
+# Spoken currency symbols. SGD and USD are the only two the demo uses; the rest are here so a
+# new one is a one-line addition rather than a silent fall-through to SGD.
+CURRENCY_SYMBOLS = {"SGD": "S$", "USD": "US$", "MYR": "RM", "CNY": "¥", "HKD": "HK$"}
+
+
+def money(minor: int, currency: str = "SGD") -> str:
+    """Amount as the customer hears it.
+
+    "SGD 50.00" is a system identifier; nobody says it out loud. The customer hears
+    "S$50.00", so the ISO code is mapped to its spoken symbol here — the one place an
+    amount becomes text. Thousands are separated and the minor units are always shown
+    ("S$1,000.00"), because a bare "$1000" is easy to misread on a phone.
+
+    An unrecognised currency degrades to the code plus a space rather than silently
+    rendering as Singapore dollars, so a future currency can never be mislabelled as SGD.
+    """
+    code = (currency or "SGD").upper()
+    symbol = CURRENCY_SYMBOLS.get(code)
+    prefix = symbol if symbol else f"{code} "
+    return f"{prefix}{minor / 100:,.2f}"
 
 

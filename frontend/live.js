@@ -78,7 +78,7 @@ async function liveFieldReview(lang, d){
   const t=tt(lang);
   const F=[
     ['RECIPIENT','Recipient', t.recipient(`${d.payee_display} · ${d.payee_masked}`), 1, 'user'],
-    ['AMOUNT','Amount',       t.amount(money(d.amount_minor)),                        2, 'receipt'],
+    ['AMOUNT','Amount',       t.amount(money(d.amount_minor, d.currency)),            2, 'receipt'],
     ['SOURCE_ACCOUNT','Source', t.source(d.account_masked),                           3, 'card']
   ];
   // No spoken intro here: the backend already said the REVIEW_READY line from its catalogue
@@ -124,34 +124,67 @@ async function liveFieldReview(lang, d){
 
 // Field review → mock FaceID → real POST /confirm → render whatever the
 // backend actually decided (sign, gateway, ledger — or a freeze/reject).
+//
+// IN-10: one turn can carry several independent instructions. The backend queues them, and
+// after each one executes it advances session.draft to the NEXT queued instruction and reads
+// that one back itself (event NEXT_INSTRUCTION_QUEUED). So this walkthrough has to run once
+// per queued draft. Without the loop the customer is left with no card to act on for
+// instruction 2, and the "yes" they type instead travels to /turn as a fresh turn — which the
+// backend answers by restarting the review, so the same read-back is heard twice.
 async function liveConfirmFlow(session, lang, my){
+  const offered = new Set();
+  let cur = session;
+  while(my===RUN && cur && cur.draft){
+    // The backend hands over the next queued instruction by leaving the session in
+    // CONFIRMATION_READY with session.draft pointing at a DIFFERENT draft — it has already
+    // re-read that draft back itself. Anything else means this flow is done: EXECUTED, a
+    // freeze or a reject (the last instruction), or a review re-opened on the SAME draft.
+    //
+    // Deliberately keyed on the draft's identity and not on a counter: `pending_remaining`
+    // counts the instructions queued BEHIND the current one, so it is already 0 while the
+    // final draft still needs confirming. Identity is also what makes a stalled queue
+    // unable to spin.
+    const id = cur.draft.draft_id;
+    if(id && offered.has(id)) return;
+    if(id) offered.add(id);
+    const next = await liveConfirmOnce(cur, lang, my);
+    if(my!==RUN || !next) return;
+    if(!(next.state==='CONFIRMATION_READY' && next.draft)) return;
+    cur = next;
+  }
+}
+
+// ONE draft's approval walkthrough. Returns the session snapshot to carry on with when the
+// backend queued another instruction behind this one, or null when the flow should stop here
+// (cancelled, a rejected field, an unreachable backend, or a newer run superseding this one).
+async function liveConfirmOnce(session, lang, my){
   const d = session.draft;
   // Present the recognised draft in the transcript first. The approval walkthrough begins
   // only when the customer acts on that card, so the card is a real control rather than
   // decoration. A new run resolves it as 'cancelled' and this flow unwinds.
   const go = await draftCard(d);
-  if(my!==RUN || go!=='confirm') return;
+  if(my!==RUN || go!=='confirm') return null;
   const r = await liveFieldReview(lang, d);
-  if(my!==RUN || r.cancelled) return;
+  if(my!==RUN || r.cancelled) return null;
   // A rejected field already produced the backend's FIELD_EDIT_REQUESTED line via
   // /field_signal, so there is nothing to say here — just wait for the next turn.
-  if(r.edit) return;
+  if(r.edit) return null;
   // This lead-in belongs to the simulated FaceID popup below, which is frontend chrome (like
   // the field-review popups), not a conversation line the backend decides.
   iface(tt(lang).ready); await sleep(500);
-  if(my!==RUN) return;
+  if(my!==RUN) return null;
   stage(12,'run');
   const a = await popup({
     kicker:'MOCK FACEID · SIMULATED', title:'Face ID',
     body:'AuntieJoy is asking for a <b>transaction-specific</b> biometric confirmation on the registered device.',
     fields:`<div class="fr"><span class="k">Draft</span><span class="v">${d.draft_id} · v${d.version}</span></div>
-            <div class="fr big"><span class="k">Amount</span><span class="v">${money(d.amount_minor)}</span></div>`,
+            <div class="fr big"><span class="k">Amount</span><span class="v">${money(d.amount_minor, d.currency)}</span></div>`,
     acts:[{id:'ok',label:icon('faceid')+' Confirm with Face ID',kind:'yes'}],
     icon:'faceid',
     note:'Simulated. The prototype does not claim production FaceID integration (BRD §7.4).'
   });
-  if(my!==RUN){ return; }
-  if(a==='cancelled'){ stage(12,''); return; }
+  if(my!==RUN) return null;
+  if(a==='cancelled'){ stage(12,''); return null; }
   audit('MOCK_FACEID_SUCCESS (local) · calling /confirm…','ok');
   let resp;
   try{
@@ -162,29 +195,36 @@ async function liveConfirmFlow(session, lang, my){
   }catch(err){
     audit('CONFIRM_CALL_FAILED · '+err.message,'stop');
     iface('Sorry, I could not reach the payment system just now. Please try again.');
-    return;
+    return null;
   }
-  if(my!==RUN) return;
+  if(my!==RUN) return null;
   syncPersonalization(resp.session);
   const seenStages=new Set();
   const steps = eventsToSteps(resp.events, seenStages).concat(finalStateSteps(resp.session));
   await play(steps, my);
-  if(my!==RUN) return;
+  if(my!==RUN) return null;
   // A real executed payment gets the full DBS receipt treatment, so the confirmation reads
   // as a digibank record rather than as a chat message claiming success. The SPOKEN line is
   // still the backend's own reviewed INTERFACE_LINE (played above) — this card only SHOWS it,
   // and every value on it comes from the canonical draft and the execution record.
-  if(resp.session.state==='EXECUTED'){
+  //
+  // Keyed off the ledger record THIS confirmation produced rather than off the session's final
+  // state: in a multi-instruction turn the backend has already advanced to the next draft by
+  // the time this response lands, so the state reads CONFIRMATION_READY even though a payment
+  // was just recorded. The event is what actually tells the two apart, and for a single
+  // payment it coincides with state==='EXECUTED' exactly as before.
+  if(resp.events.some(e => e.event_type === 'LEDGER_RECORDED')){
     const txn = (resp.session.execution && resp.session.execution.transaction_id) || d.draft_id;
     receiptCard({
       stamp: new Date().toLocaleString('en-SG',{day:'2-digit',month:'short',year:'numeric',
               hour:'2-digit',minute:'2-digit'}),
-      amount: money(d.amount_minor),
+      amount: money(d.amount_minor, d.currency),
       to:     d.payee_display + (d.payee_masked ? ' · ' + d.payee_masked : ''),
       from:   'DBS Savings · ' + (d.account_masked || 'ending 1234'),
       ref:    txn
     });
   }
+  return resp.session;
 }
 
 // asrConfidence: the REAL confidence the speech engine reported for this utterance, or null

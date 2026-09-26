@@ -12,10 +12,14 @@ from .models import (SessionState, Draft, Confirmation, ValidationResult, Guardr
 from .data import CUSTOMERS, SAVED_PAYEES, POLICY
 from .parsing import (parse_amount, parse_corrected_amount, last_committed_amount,
                        parse_payee_phrase, parse_reference, detect_language,
-                       ambiguous_amount_pair)
+                       ambiguous_amount_pair, parse_card_phrase, parse_own_account_phrase,
+                       parse_schedule, parse_currency, parse_biller_phrase,
+                       parse_source_account_phrase, split_instructions, lookup_biller,
+                       schedule_from_hint,
+                       lookup_card, lookup_own_account)
 from .agents import (GuardrailsAgent, IntentClassifierAgent, PaymentAgent, ValidationAgent,
                      PersonalizationAgent, CONFIRMATION_BYPASS_RE, LANGUAGE_SWITCH_RE,
-                     AFFIRMATION_RE, INSUFFICIENT_FUNDS_RE)
+                     AFFIRMATION_RE, INSUFFICIENT_FUNDS_RE, SAFETY_HELP_RE)
 from .agent_runtime import AgentUnavailable
 from .controls import (resolve_payee_and_account, compare_validation_result, evaluate_risk,
                         evaluate_safety_policy, canonical_payload, payload_hash, sign_payload,
@@ -23,7 +27,8 @@ from .controls import (resolve_payee_and_account, compare_validation_result, eva
                         RiskDecision, RiskOutcome, _not_expired, freeze_message_key,
                         detect_multiple_recipients)
 from .messages import (say, interface_language, candidate_options, amount_pair,
-                        customer_name, display_phrase, join_options)
+                        customer_name, display_phrase, join_options,
+                        readback_parts, source_account_phrase, multi_item, readback_multi)
 from .audit import AUDIT
 from .session import STAGES, Session, SESSIONS, get_session
 
@@ -298,6 +303,7 @@ async def run_turn(req: TurnRequest) -> TurnResponse:
     # ---------- Stage 4 — Intent Classifier ----------
     intent, engine = await IntentClassifierAgent.run(req.text, {
         "open_clarification_field": session.open_clarification_field,
+        "customer_id": session.customer_id,
         "draft": {"payee_phrase": session.payee_phrase,
                   "amount_minor": session.draft.amount_minor if session.draft else None} if session.draft or session.payee_phrase else None,
     })
@@ -332,6 +338,40 @@ async def run_turn(req: TurnRequest) -> TurnResponse:
                               "threshold": Settings.INTENT_CONFIDENCE_THRESHOLD})
     session.note_intent(intent.intent)   # feeds the Personalization Agent's stalled_intent signal
 
+    # Deterministic safeguard (safety-help false positive, IN-02): a turn that merely opens
+    # with "help me" to request a payment (e.g. Singlish "Help me send fifty dollar to Ah Girl
+    # from savings, can?") must never freeze the session. The live model can mis-read "help me"
+    # as a scam report; this relaxes such a turn to PAYMENT. A genuine scam/help turn still
+    # carries the tokens in SAFETY_HELP_RE, so this can only ever undo an over-trigger — it
+    # never weakens the control. Mirrors the mock IntentClassifier exactly.
+    if intent.intent == "SAFETY_HELP" and not SAFETY_HELP_RE.search(req.text):
+        intent = IntentResult(intent="PAYMENT", confidence=0.90,
+                              detected_language=detect_language(req.text),
+                              reason="SAFETY_HELP relaxed to PAYMENT by deterministic safeguard "
+                                     "(no genuine scam/help tokens found).")
+        engine = "deterministic-safeguard"
+        emit("INTENT_RESULT", 4, {"engine": engine, **intent.model_dump(),
+                                  "threshold": Settings.INTENT_CONFIDENCE_THRESHOLD,
+                                  "note": "live SAFETY_HELP relaxed to PAYMENT by deterministic safeguard"})
+
+    # Deterministic safeguard (IN-07 / IN-05): a turn that names the customer's own credit card
+    # or own internal account as the destination is unambiguously a PAYMENT intent. The live
+    # model may not know these transaction shapes and could return UNCLEAR; relax it to PAYMENT
+    # so it reaches the Payment Agent, which resolves the shape deterministically. Mirrors the
+    # other intent safeguards — it can only ever undo an over-trigger, never weaken a control.
+    if intent.intent in ("UNCLEAR", "PAYMENT_CLARIFICATION") and session.draft is None and (
+            parse_card_phrase(req.text, session.customer_id)
+            or parse_own_account_phrase(req.text, session.customer_id)):
+        intent = IntentResult(intent="PAYMENT", confidence=0.95,
+                              detected_language=detect_language(req.text),
+                              reason="card/own-account destination relaxed to PAYMENT by "
+                                     "deterministic safeguard (transaction shape is a payment).")
+        engine = "deterministic-safeguard"
+        emit("INTENT_RESULT", 4, {"engine": engine, **intent.model_dump(),
+                                  "threshold": Settings.INTENT_CONFIDENCE_THRESHOLD,
+                                  "note": "live UNCLEAR relaxed to PAYMENT for card/own-account "
+                                          "by deterministic safeguard"})
+
     if intent.intent == "CANCEL_OR_STOP":
         session.state, session.cancelled, session.outcome = SessionState.CANCELLED, True, "CANCEL"
         emit("PAYMENT_CANCELLED", 4, {"draft_discarded": bool(session.draft),
@@ -358,13 +398,23 @@ async def run_turn(req: TurnRequest) -> TurnResponse:
         say_line("SAFETY_HELP", 4)
         return await finish()
     if intent.intent == "UNCLEAR":
+        # A payment may already be sitting on the approval card. A typed or spoken answer still
+        # authorises NOTHING — that is the control working, not a fault — but "there's no payment
+        # waiting for your confirmation" is plainly untrue while a confirmation is open, and it
+        # reads to a customer as "I don't understand you". This state gets its own sentence.
+        # Nothing else about the turn changes: still no challenge, still no signature.
+        approval_pending = bool(session.draft is not None and session.confirmation is not None
+                                and not session.frozen and not session.cancelled)
         session.state, session.outcome = SessionState.CLARIFICATION_REQUIRED, "CLARIFY"
+        # The INTENT genuinely is unclear, so the personalization signal keeps its existing name —
+        # repeated typed "yes" turns must still count as a repeated clarification.
         session.note_clarification("INTENT_UNCLEAR")
         emit("NO_ACTIVE_CHALLENGE", 4, {
             "active_confirmation_challenge": None, "active_signing_challenge": None,
             "execution_permission": "DENIED", "signature_creatable": False,
+            "approval_pending_on_screen": approval_pending,
             "reason": "A generic or replayed “yes” cannot create a signature."})
-        say_line("INTENT_UNCLEAR", 4)
+        say_line("APPROVAL_PENDING" if approval_pending else "INTENT_UNCLEAR", 4)
         return await finish()
 
     # ---------- EDIT_PAYMENT invalidates everything downstream (§8.11.3) ----------
@@ -401,6 +451,7 @@ async def run_turn(req: TurnRequest) -> TurnResponse:
     # ---------- Stage 5 — Payment Agent ----------
     ctx = {
         "open_clarification_field": session.open_clarification_field,
+        "customer_id": session.customer_id,
         "amount_disambiguated": session.amount_disambiguated,
         "evidence": list(session.evidence),
         "asr_confidence": req.asr_confidence,
@@ -450,6 +501,14 @@ async def run_turn(req: TurnRequest) -> TurnResponse:
         say_line("MULTIPLE_RECIPIENTS", 5, recipients=join_options(multi, lang))
         return await finish()
 
+    # ---------- IN-10: multiple independent instructions in one breath ----------
+    # "Pay StarHub S$86.40, send Ah Girl S$50, and move S$1,000 to joint" names three distinct
+    # payment targets. split_instructions only returns >=2 when that is genuinely the case, so
+    # ordinary single payments (and two-saved-payee turns, handled above) are untouched.
+    instructions = split_instructions(req.text, session.customer_id)
+    if len(instructions) >= 2:
+        return await run_multi_turn(req, session, lang, instructions, emit, say_line, finish)
+
     if proposal.status != "PROPOSAL_READY":
         session.state, session.outcome = SessionState.CLARIFICATION_REQUIRED, "CLARIFY"
         session.open_clarification_field = proposal.clarification_field
@@ -464,6 +523,26 @@ async def run_turn(req: TurnRequest) -> TurnResponse:
         return await finish()
 
     # ---------- Stage 6 — deterministic payee and account resolution ----------
+    # A spoken future-execution time (IN-08) is attached to the draft and rendered into the
+    # read-back's SCHEDULE clause. TWO extractors feed ONE date computer:
+    #   * the deterministic patterns in parsing (primary — they need no model at all), and
+    #   * the Payment Agent's schedule_hint (a fallback for a phrasing the patterns cannot reach).
+    # Neither produces a date. compute_schedule() does, from today's date, and it discards a hint
+    # it cannot validate — so the model can never decide when money moves.
+    schedule_dict = parse_schedule(req.text)
+    schedule_source = "deterministic patterns (no model involved)" if schedule_dict else None
+    if schedule_dict is None and proposal.schedule_hint is not None:
+        schedule_dict = schedule_from_hint(proposal.schedule_hint)
+        schedule_source = ("payment agent extracted the phrase; deterministic code computed the date"
+                           if schedule_dict else None)
+    if schedule_dict:
+        emit("SCHEDULE_RESOLVED", 6, {
+            "extracted_by": schedule_source,
+            "spoken": schedule_dict["relative"],
+            "computed_by": "deterministic code (parsing.compute_schedule)",
+            "absolute_date": schedule_dict["absolute"], "time": schedule_dict["time"],
+            "note": "The extractor said WHAT was meant; code decided WHEN. No model produced a "
+                    "date, and a hint that failed validation was dropped rather than used."})
     session.payee_phrase = (session.payee_phrase or parse_payee_phrase(req.text)
                             or proposal.recipient_phrase)
     resolution = resolve_payee_and_account(session.customer_id, proposal, session.payee_phrase)
@@ -509,6 +588,8 @@ async def run_turn(req: TurnRequest) -> TurnResponse:
     draft.version = session.current_draft_version
     draft.reference = parse_reference(req.text) or draft.reference
     draft.evidence_ids = list(session.evidence_ids)
+    if schedule_dict:
+        draft.scheduled_for = f"{schedule_dict['absolute']} {schedule_dict['time']} Singapore time"
     session.draft = draft
     session.draft_versions.append(draft.version)
     session.state = SessionState.DRAFT_READY
@@ -583,10 +664,197 @@ async def run_turn(req: TurnRequest) -> TurnResponse:
         "note": "One “yes” confirms only the displayed field. It never signs and never calls the gateway."})
     # The read-back is generated from the canonical draft — the same values the customer will
     # be asked to confirm one field at a time, so what they hear and what they review agree.
-    say_line("REVIEW_READY", 10, amount=money(draft.amount_minor),
-             payee=f"{draft.payee_display} {draft.payee_masked}".strip(),
-             account=draft.account_masked)
+    #
+    # It speaks INITIATION_READBACK, the shape the test table specifies for a valid payment
+    # initiation: "You want to send S$50.00 from DBS Savings ending 1234 to Mei Tan ending
+    # 7788. I can prepare this payment for you to review. Is that correct?"
+    #
+    # This is NOT a clarification. The state here is CONFIRMATION_READY; the customer's answer
+    # reaches us through /confirm and /field_signal, and a "no" is classified as EDIT_PAYMENT.
+    # The closing question is a cue that review is starting, not a question that reopens one.
+    # The read-back shape follows the transaction type. A bill payment reads back the biller
+    # and the outstanding amount; a saved-payee transfer reads back the person and destination.
+    _emit_draft_readback(draft, parse_reference(req.text) or None, schedule_dict,
+                         lang, session.customer_id, emit, say_line)
 
+    return await finish()
+
+
+# =====================================================================
+# 10a. Initiation read-back — one helper, so the single-instruction path and the
+# multi-instruction path (IN-10) speak the SAME sentence from the SAME catalogue.
+# =====================================================================
+def _emit_draft_readback(draft: Draft, reference: Optional[str], schedule_dict: Optional[dict],
+                         lang: str, customer_id: str, emit, say_line) -> None:
+    """Emit the INITIATION_READBACK for a canonical draft.
+
+    The read-back SHAPE follows the transaction type — a bill/card reads back the outstanding
+    balance, an own-account move reads back both accounts, a saved-payee transfer reads back the
+    person and destination. The wording comes from messages.readback_parts, so this stays the one
+    place a customer-facing sentence is assembled.
+    """
+    if draft.transaction_type == "BILL_PAYMENT":
+        body, biller, destination = "BODY_BILL", draft.payee_display, ""
+    elif draft.transaction_type == "CREDIT_CARD_PAYMENT":
+        body, biller, destination = "BODY_CARD", draft.payee_display, ""
+    elif draft.transaction_type == "OWN_ACCOUNT_TRANSFER":
+        body, biller, destination = ("BODY_MOVE", "",
+                                     f"{draft.payee_display} {draft.payee_masked}".strip())
+    else:
+        body, biller, destination = ("BODY_TRANSFER", "",
+                                     f"{draft.payee_display} {draft.payee_masked}".strip())
+    say_line("INITIATION_READBACK", 10, **readback_parts(
+        lang, body=body, closer="CLOSE_REVIEW",
+        amount=money(draft.amount_minor, draft.currency),
+        source=source_account_phrase(customer_id, draft.source_account_id),
+        destination=destination, biller=biller,
+        reference=reference,
+        schedule=schedule_dict if schedule_dict else None))
+
+
+def _instruction_proposal(text: str, customer_id: str) -> Optional[PaymentProposal]:
+    """A PaymentProposal for ONE instruction, using the SAME deterministic detection order as the
+    single-instruction Payment Agent mock (bill → card → own-account → saved payee). Returns None
+    when the piece names no supported target."""
+    biller_name = parse_biller_phrase(text, customer_id)
+    if biller_name:
+        biller = lookup_biller(customer_id, biller_name)
+        return PaymentProposal(
+            status="PROPOSAL_READY", detected_language=detect_language(text),
+            recipient_phrase=biller_name,
+            amount_minor=biller.latest_amount_minor if biller else None,
+            currency=parse_currency(text),
+            source_account_phrase=parse_source_account_phrase(text),
+            transaction_type="BILL_PAYMENT")
+    card_name = parse_card_phrase(text, customer_id)
+    if card_name:
+        card = lookup_card(customer_id, card_name)
+        return PaymentProposal(
+            status="PROPOSAL_READY", detected_language=detect_language(text),
+            recipient_phrase=card_name,
+            amount_minor=card.latest_balance_minor if card else None,
+            currency=parse_currency(text),
+            source_account_phrase=parse_source_account_phrase(text),
+            transaction_type="CREDIT_CARD_PAYMENT")
+    own_name = parse_own_account_phrase(text, customer_id)
+    if own_name:
+        amount, _ = parse_amount(text)
+        return PaymentProposal(
+            status="PROPOSAL_READY", detected_language=detect_language(text),
+            recipient_phrase=own_name, amount_minor=amount,
+            currency=parse_currency(text),
+            source_account_phrase=parse_source_account_phrase(text),
+            transaction_type="OWN_ACCOUNT_TRANSFER")
+    payee_phrase = parse_payee_phrase(text)
+    if payee_phrase:
+        amount, _ = parse_amount(text)
+        return PaymentProposal(
+            status="PROPOSAL_READY", detected_language=detect_language(text),
+            recipient_phrase=payee_phrase, amount_minor=amount,
+            currency=parse_currency(text),
+            source_account_phrase=parse_source_account_phrase(text))
+    return None
+
+
+def _multi_clause(lang: str, draft: Draft, customer_id: str) -> str:
+    """One bare-verb clause for the multi-instruction read-back, from a resolved draft."""
+    amount = money(draft.amount_minor, draft.currency)
+    source = source_account_phrase(customer_id, draft.source_account_id)
+    destination = f"{draft.payee_display} {draft.payee_masked}".strip()
+    if draft.transaction_type == "BILL_PAYMENT":
+        return multi_item(lang, shape="MULTI_ITEM_PAY_BILL", amount=amount,
+                          source=source, biller=draft.payee_display)
+    if draft.transaction_type == "CREDIT_CARD_PAYMENT":
+        return multi_item(lang, shape="MULTI_ITEM_PAY_CARD", amount=amount, source=source)
+    if draft.transaction_type == "OWN_ACCOUNT_TRANSFER":
+        return multi_item(lang, shape="MULTI_ITEM_MOVE", amount=amount, source=source,
+                          destination=destination)
+    return multi_item(lang, shape="MULTI_ITEM_SEND", amount=amount, source=source,
+                      destination=destination)
+
+
+async def run_multi_turn(req: TurnRequest, session, lang: str, instructions: List[str],
+                         emit, say_line, finish) -> TurnResponse:
+    """IN-10 — several independent instructions in one breath.
+
+    Each instruction is resolved to its own canonical draft and queued; the customer reviews and
+    confirms them one at a time (session.draft always points at the instruction under review). The
+    first response reads ALL of them back, so the customer can confirm the system understood the
+    whole breath before anything is prepared.
+    """
+    drafts: List[Draft] = []
+    validations: List[ValidationResult] = []
+    schedules: List[Optional[dict]] = []
+    references: List[Optional[str]] = []
+    clauses: List[str] = []
+
+    for text in instructions:
+        proposal = _instruction_proposal(text, session.customer_id)
+        if proposal is None or proposal.amount_minor is None:
+            continue
+        resolution = resolve_payee_and_account(session.customer_id, proposal,
+                                               proposal.recipient_phrase)
+        if resolution.outcome != "RESOLVED" or resolution.draft is None:
+            continue
+        draft = resolution.draft
+        draft.draft_id = f"dr_{len(drafts) + 1:03d}"
+        draft.version = len(drafts) + 1
+        draft.reference = parse_reference(text) or ""
+        draft.evidence_ids = list(session.evidence_ids)
+        sched = parse_schedule(text)
+        if sched:
+            draft.scheduled_for = f"{sched['absolute']} {sched['time']} Singapore time"
+        # Deterministic mock validation (the reference policy) — the multi-instruction read-back is
+        # about the SPLIT, and each draft is still validated independently before it is queued.
+        validation = ValidationAgent.mock(draft, [text], {
+            "account_masked": draft.account_masked, "payee_masked": draft.payee_masked,
+            "payee_display": draft.payee_display, "transaction_type": draft.transaction_type})
+        if validation.status != "PASS":
+            continue
+        drafts.append(draft)
+        validations.append(validation)
+        schedules.append(sched)
+        references.append(parse_reference(text) or None)
+        clauses.append(_multi_clause(lang, draft, session.customer_id))
+
+    if len(drafts) < 2:
+        # Nothing safely splittable after resolution — say so rather than silently dropping one.
+        session.state, session.outcome = SessionState.CLARIFICATION_REQUIRED, "CLARIFY"
+        emit("MULTI_INSTRUCTION_UNRESOLVED", 5, {
+            "resolved": len(drafts), "requested": len(instructions),
+            "canonical_draft": "NOT_CREATED"})
+        say_line("INTENT_UNCLEAR", 5)
+        return await finish()
+
+    session.pending_drafts = drafts
+    session.pending_validations = validations
+    session.pending_schedules = schedules
+    session.pending_references = references
+    session.multi_total = len(drafts)
+    session.draft_index = 0
+    session.draft = drafts[0]
+    session.validation = validations[0]
+    session.current_draft_version = drafts[0].version
+    session.draft_versions = [d.version for d in drafts]
+    session.confirmation = Confirmation(
+        confirmation_id=f"cnf_{drafts[0].version:03d}", draft_id=drafts[0].draft_id,
+        draft_version=drafts[0].version, language=session.confirmation_language)
+    session.state, session.outcome = SessionState.CONFIRMATION_READY, "MULTI_INSTRUCTION"
+
+    emit("MULTI_INSTRUCTION_DETECTED", 5, {
+        "count": len(drafts),
+        "instructions": [{"draft_id": d.draft_id, "transaction_type": d.transaction_type,
+                          "amount_minor": d.amount_minor, "payee": d.payee_display}
+                         for d in drafts],
+        "note": "One breath split into independent instructions; reviewed and confirmed one at a "
+                "time. Each is validated independently before it is queued."})
+    for d, v in zip(drafts, validations):
+        emit("CANONICAL_DRAFT_CREATED", 7, {
+            "draft": d.model_dump(), "schema_validation": "PASS", "version": d.version,
+            "previous_versions_superseded": False})
+        emit("VALIDATION_RESULT", 8, {"engine": "mock", **v.model_dump(),
+                                      "scope": "independent — no Payment Agent reasoning supplied"})
+    say_line("MULTI_REVIEW_INTRO", 5, text=readback_multi(lang, clauses))
     return await finish()
 
 
@@ -826,6 +1094,28 @@ async def run_confirmation(req: ConfirmRequest) -> TurnResponse:
                                  "direct_agent_or_browser_calls": "REJECTED"})
     say_line("EXECUTED", 15, amount=money(draft.amount_minor),
              payee=f"{draft.payee_display} {draft.payee_masked}".strip(), reference=txn_id)
+
+    # IN-10 — if more independent instructions are queued behind this one, advance to the next and
+    # read it back, so the customer confirms them one at a time. A fresh signature is required for
+    # the new draft (the old payload is bound to the previous draft version).
+    if session.pending_drafts and session.draft_index + 1 < len(session.pending_drafts):
+        session.draft_index += 1
+        nxt = session.pending_drafts[session.draft_index]
+        session.draft = nxt
+        session.validation = session.pending_validations[session.draft_index]
+        session.current_draft_version = nxt.version
+        session.confirmation = Confirmation(
+            confirmation_id=f"cnf_{nxt.version:03d}", draft_id=nxt.draft_id,
+            draft_version=nxt.version, language=session.confirmation_language)
+        session._payload, session._signature = None, None
+        session.state, session.outcome = SessionState.CONFIRMATION_READY, "MULTI_INSTRUCTION"
+        emit("NEXT_INSTRUCTION_QUEUED", 15, {
+            "draft_index": session.draft_index, "multi_total": session.multi_total,
+            "remaining": len(session.pending_drafts) - session.draft_index - 1,
+            "next_draft_id": nxt.draft_id, "transaction_type": nxt.transaction_type})
+        _emit_draft_readback(nxt, session.pending_references[session.draft_index],
+                             session.pending_schedules[session.draft_index], req.language,
+                             session.customer_id, emit, say_line)
     return TurnResponse(session=session.to_public(), events=events)
 
 

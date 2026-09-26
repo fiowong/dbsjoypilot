@@ -193,8 +193,12 @@ function closeDraftCard(v){
   const r = draftResolve; draftResolve = null;
   if(r) r(v || 'cancelled');
 }
-// "ending 1234" -> "•••• 1234", matching how the dashboard masks the account.
-const maskAcct = s => String(s==null?'':s).replace(/^ending\s+/i, '•••• ');
+// The account string now passes through as the backend gave it ("ending 1234").
+// It used to be rewritten to "•••• 1234" here, which put two different renderings of the SAME
+// account on screen at once — the INTERFACE line said "ending 1234" while the draft card said
+// "•••• 1234". The backend owns the masked string, so the client renders it verbatim; the
+// dashboard's bullet style is a separate display choice, not something to re-derive here.
+const maskAcct = s => String(s == null ? '' : s);
 
 function draftCard(d){
   const esc = s => String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;');
@@ -202,7 +206,10 @@ function draftCard(d){
   const payeeDetail = d.payee_masked  || (d.payee && d.payee.masked)      || '';
   const acctName    = (typeof ACCOUNT!=='undefined' && ACCOUNT.displayName) || 'DBS Savings';
   const acctDetail  = maskAcct(d.account_masked || (typeof ACCOUNT!=='undefined' && ACCOUNT.masked));
-  const amt         = (typeof d.amount_minor === 'number') ? money(d.amount_minor) : '—';
+  // d.currency travels with the draft, so a non-SGD draft renders US$ rather than silently
+  // falling back to S$ — the same rule the backend's config.money() applies.
+  const amt         = (typeof d.amount_minor === 'number')
+    ? money(d.amount_minor, d.currency) : '—';
 
   return new Promise(res=>{
     draftResolve = res;
@@ -403,7 +410,7 @@ let draftSeq=0;
 function newDraft(payee,amountMinor,version,reference){
   draftSeq++;
   return { draft_id:'dr_'+String(draftSeq).padStart(3,'0'), version:version||1,
-    payee, amount_minor:amountMinor, currency:'SGD', reference:reference||'Lunch',
+    payee, amount_minor:amountMinor, currency:'SGD', reference:reference||'',
     confirmation_id:'cnf_'+String(draftSeq).padStart(3,'0'),
     nonce:'nonce_'+String(draftSeq).padStart(3,'0')+'_a1',
     idempotency_key:'idem_'+String(draftSeq).padStart(3,'0') };

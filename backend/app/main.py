@@ -51,7 +51,10 @@ async def health() -> dict:
         "agents": ["GUARDRAILS AGENT", "INTENT CLASSIFIER", "PAYMENT AGENT",
                    "INDEPENDENT VALIDATION AGENT", "PERSONALIZATION AGENT"],
         "stages": len(STAGES),
-        "branches": "A–G / 19 nodes",
+        # The MECE failure map is branches A–H. Counted from SCENARIOS so it can never drift
+        # out of sync with the UI rail (which labels the map "A–H / 20 NODES"). The HAPPY
+        # path is recorded under branch "—", so it is excluded from the A–H total.
+        "branches": f"A–H / {sum(1 for v in SCENARIOS.values() if v.get('branch') in 'ABCDEFGH')} scenarios",
         "disclosure": POLICY["disclosure"],
         "audit_db": Settings.DB_PATH,
     }
