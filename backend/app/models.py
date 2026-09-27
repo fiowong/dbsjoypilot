@@ -183,6 +183,13 @@ class Payee(BaseModel):
     destination_token: str
     verified_saved_payee: bool = True
     untrusted_note: Optional[str] = None       # external, untrusted — never authoritative (§8.3.2)
+    # The names the customer actually uses for this person out loud ("mother", "mum", "Ah Girl",
+    # "my daughter"). One payee may carry several, and they are matched case-insensitively —
+    # spoken ASR gives "send ah girl $100" in lowercase, which never matches a display name.
+    # These live on the TRUSTED record on purpose: a nickname is a redirect rule pointing at
+    # this beneficiary_id, so it may only ever be bound to a payee that already exists here.
+    # A nickname is never a destination, and a destination is never taken from chat.
+    nicknames: List[str] = []
 
 
 class Biller(BaseModel):

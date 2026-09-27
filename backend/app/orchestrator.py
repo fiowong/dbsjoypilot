@@ -17,12 +17,18 @@ from .parsing import (parse_amount, parse_corrected_amount, last_committed_amoun
                        parse_source_account_phrase, split_instructions, lookup_biller,
                        schedule_from_hint,
                        is_schedule_correction, schedule_named_but_unusable,
+                       unknown_payee_phrase,
                        lookup_card, lookup_own_account)
 from .agents import (GuardrailsAgent, IntentClassifierAgent, PaymentAgent, ValidationAgent,
                      PersonalizationAgent, CONFIRMATION_BYPASS_RE, LANGUAGE_SWITCH_RE,
-                     AFFIRMATION_RE, INSUFFICIENT_FUNDS_RE, SAFETY_HELP_RE,
+                     AFFIRMATION_RE, NEGATION_RE, INSUFFICIENT_FUNDS_RE, SAFETY_HELP_RE,
                      MANDATORY_CONTROL_RE)
 from .agent_runtime import AgentUnavailable
+# The learned-nickname store. Imported here (not via parsing) because the audit event needs to
+# attribute the match itself: parsing converts a nickname to its display name before the resolver
+# sees it, so only the store can say "the customer said a nickname, and it was this one". `teach`
+# is the single write path, and it refuses any beneficiary that is not already a saved payee.
+from .nicknames import match_in_text as nickname_match, teach as teach_nickname
 from .controls import (resolve_payee_and_account, compare_validation_result, evaluate_risk,
                         evaluate_safety_policy, canonical_payload, payload_hash, sign_payload,
                         Ledger, gateway_verify, GatewayDecision, GatewayResult, ComparatorResult,
@@ -96,6 +102,68 @@ def _say_payment_clarification(req: "TurnRequest", session: Session, proposal: P
         say_line("AMOUNT_MISSING", 5, phrase=proposal.recipient_phrase or "?")
         return
     say_line("RECIPIENT_MISSING", 5)
+
+
+# =====================================================================
+# 9a. Nicknames — the ask / confirm / teach turns
+# =====================================================================
+# A nickname is a REDIRECT RULE: "ah girl" points at a beneficiary the customer already holds. The
+# three helpers below serve the three turns of that conversation, and none of them can invent a
+# destination — every candidate comes from SAVED_PAYEES, and the store itself refuses to bind
+# anything else (see app/nicknames.py).
+def _ending(masked: str) -> str:
+    """The digits of a masked destination, for a sentence that already says "account ending".
+
+    The trusted record stores "ending 7788"; a template reading "account ending {masked}" must be
+    handed "7788", or the customer hears "account ending ending 7788".
+    """
+    digits = re.sub(r"\D", "", masked or "")
+    return digits or (masked or "").replace("ending", "").strip()
+
+
+def _payee_by_id(customer_id: str, beneficiary_id: str):
+    return next((p for p in SAVED_PAYEES.get(customer_id, [])
+                 if p.beneficiary_id == beneficiary_id), None)
+
+
+def _payees_named_in(text: str, customer_id: str) -> List:
+    """The saved payees the customer named in an ANSWER — by full name, first name, or a nickname.
+
+    Used only to read the reply to "who is Ah Girl?" — never to bind a destination on its own. An
+    answer naming two payees stays a question; an answer naming none binds nothing.
+
+    The three readings are tried in PRECEDENCE, not together: a full name settles the question
+    outright, so "john doe" names John Doe and must not also drag in John Smith merely because they
+    share a first name. Only when no full name appears does a first name get a say — which is what
+    an elderly customer usually says ("mei"), and which is exactly why two Johns must stay a
+    question rather than being guessed at.
+    """
+    lowered = (text or "").lower()
+    payees = SAVED_PAYEES.get(customer_id, [])
+
+    def named(phrase: str) -> bool:
+        return bool(re.search(rf"\b{re.escape(phrase.lower())}\b", lowered))
+
+    full = [p for p in payees if named(p.display_name)]
+    if full:
+        return full
+
+    nickname_hit = nickname_match(customer_id, text)
+    if nickname_hit:
+        return [nickname_hit[1]]
+
+    return [p for p in payees if named(p.display_name.split()[0])]
+
+
+def _saved_payee_options(customer_id: str) -> List[dict]:
+    """The customer's saved payees, in the shape candidate_options() renders.
+
+    Deliberately the same shape the duplicate-payee question uses, so "which one do you mean?" is
+    worded by one function whether the ambiguity came from two identical names or from a name Joy
+    has never heard before.
+    """
+    return [{"beneficiary_id": p.beneficiary_id, "displayName": p.display_name,
+             "maskedDestination": p.masked} for p in SAVED_PAYEES.get(customer_id, [])]
 
 
 async def run_turn(req: TurnRequest) -> TurnResponse:
@@ -483,6 +551,125 @@ async def run_turn(req: TurnRequest) -> TurnResponse:
                                   "note": "live UNCLEAR relaxed to PAYMENT for card/own-account "
                                           "by deterministic safeguard"})
 
+    # ---------- The nickname question, once it is open ----------
+    # Two turns, both handled here rather than by the agents, because neither turn is a payment:
+    #   1. the customer answers WHO the name means  -> bind it, then ask to remember it;
+    #   2. the customer answers whether to REMEMBER -> teach it, then let the payment proceed.
+    # The second turn deliberately falls back INTO the normal pipeline once the name is taught: from
+    # then on "ah girl" is an ordinary nickname, so the Payment Agent reads it as the person it was
+    # bound to and recovers the amount from the committed evidence. Teaching first and then reusing
+    # the pipeline is what stops this becoming a second, divergent way to pay somebody.
+    #
+    # Placed after every intent relaxer so the intent is fully settled, and guarded against a stop or
+    # a safety report — "cancel" and "help me, this is a scam" must never be read as an answer to a
+    # nickname question.
+    if (session.open_clarification_field == "PAYEE_NICKNAME" and session.pending_nickname
+            and intent.intent not in ("CANCEL_OR_STOP", "SAFETY_HELP")):
+        pending = session.pending_nickname
+        nickname = pending["nickname"]
+
+        if not pending.get("beneficiary_id"):
+            # Turn 1 — who does the customer mean?
+            matches = _payees_named_in(req.text, session.customer_id)
+            if len(matches) == 1:
+                payee = matches[0]
+                session.pending_nickname = {**pending, "beneficiary_id": payee.beneficiary_id}
+                emit("NICKNAME_ANSWERED", 4, {
+                    "nickname": nickname,
+                    "beneficiary_id": payee.beneficiary_id,
+                    "display_name": payee.display_name,
+                    "bound": False,
+                    "note": "The customer said who the name means. Nothing is written down yet — "
+                            "the binding is confirmed first."})
+                say_line("NICKNAME_CONFIRM", 4, nickname=display_phrase(nickname),
+                         payee=payee.display_name, masked=_ending(payee.masked))
+                return await finish()
+            if len(matches) > 1:
+                options = [{"beneficiary_id": p.beneficiary_id, "displayName": p.display_name,
+                            "maskedDestination": p.masked} for p in matches]
+                # Name the word that actually collided, not the nickname. The customer said "john"
+                # and two saved payees share it, so "2 saved payees called John" is the question —
+                # "2 saved payees called Ah Girl" would name a payee that does not exist. The two
+                # matches always share the token they were found by (this branch is only reachable
+                # from the first-name reading), so the first match supplies it.
+                collided = display_phrase(matches[0].display_name.split()[0])
+                session.note_clarification("NICKNAME_AMBIGUOUS")
+                emit("NICKNAME_UNRESOLVED", 4, {
+                    "nickname": nickname, "reason": "MULTIPLE_PAYEES_NAMED",
+                    "matched_on": collided, "candidates": options, "bound": False,
+                    "note": "The answer named more than one saved payee, so it binds nothing."})
+                say_line("PAYEE_AMBIGUOUS", 4, count=len(matches),
+                         phrase=collided, options=candidate_options(options, lang))
+                return await finish()
+            session.note_clarification("NICKNAME_UNKNOWN")
+            emit("NICKNAME_UNRESOLVED", 4, {
+                "nickname": nickname, "reason": "NO_SAVED_PAYEE_NAMED", "bound": False,
+                "note": "The answer named nobody on the saved-payee list. No binding was created."})
+            say_line("PAYEE_NOT_FOUND", 4, phrase=display_phrase(nickname))
+            return await finish()
+
+        # Turn 2 — shall Joy remember it?
+        payee = _payee_by_id(session.customer_id, pending["beneficiary_id"])
+        if payee is None:
+            # The payee was removed while the question was open. Drop the binding rather than
+            # resurrect it — a nickname may only ever point at a payee that still exists.
+            session.pending_nickname, session.open_clarification_field = None, None
+            emit("NICKNAME_UNRESOLVED", 4, {
+                "nickname": nickname, "reason": "PAYEE_NO_LONGER_SAVED", "bound": False})
+            say_line("PAYEE_NOT_FOUND", 4, phrase=display_phrase(nickname))
+            return await finish()
+
+        if AFFIRMATION_RE.match(req.text.strip().lower()):
+            taught = teach_nickname(session.customer_id, nickname, payee.beneficiary_id)
+            session.pending_nickname, session.open_clarification_field = None, None
+            if taught is not None:
+                session.nickname_used = nickname
+            emit("NICKNAME_LEARNED", 4, {
+                "nickname": nickname,
+                "beneficiary_id": payee.beneficiary_id,
+                "display_name": payee.display_name,
+                "confirmed_by_customer": True,
+                "stored": taught is not None,
+                "destination_from": "trusted saved-payee repository",
+                "note": "The customer confirmed the binding, so it was written to the nickname "
+                        "store. That store holds only a beneficiary id — never a name, an ending "
+                        "or a destination token — and the record always comes from SAVED_PAYEES."})
+            session.payee_phrase = payee.display_name
+        elif NEGATION_RE.match(req.text.strip().lower()):
+            session.pending_nickname, session.open_clarification_field = None, None
+            emit("NICKNAME_DECLINED", 4, {
+                "nickname": nickname, "beneficiary_id": payee.beneficiary_id,
+                "stored": False, "confirmed_by_customer": False,
+                "note": "The customer declined to have the name remembered. Nothing was written. "
+                        "The payment continues — refusing to save a preference must not cost them "
+                        "the payment they asked for."})
+            say_line("NICKNAME_DECLINED", 4)
+            session.payee_phrase = payee.display_name
+        else:
+            # Neither yes nor no — an unclear answer must not silently drop a binding the customer
+            # has already half-made, so the same question is asked again.
+            session.note_clarification("NICKNAME_CONFIRM_UNCLEAR")
+            emit("CLARIFICATION_OPENED", 4, {
+                "clarification_field": "PAYEE_NICKNAME",
+                "clarification_key": "NICKNAME_CONFIRM_UNCLEAR",
+                "canonical_draft": "NOT_CREATED"})
+            say_line("NICKNAME_CONFIRM", 4, nickname=display_phrase(nickname),
+                     payee=payee.display_name, masked=_ending(payee.masked))
+            return await finish()
+
+        # The name is settled, so this is now an ordinary payment turn. Routing it back through the
+        # normal stages (rather than assembling a draft here) is what keeps stage 6-10 unchanged:
+        # "ah girl" resolves, the amount comes from the committed evidence, and the draft, the
+        # validation, the risk check and the read-back all run exactly as they do for any payment.
+        intent = IntentResult(intent="PAYMENT", confidence=0.95,
+                              detected_language=detect_language(req.text),
+                              reason="deterministic nickname safeguard (the name has just been "
+                                     "taught, so the original instruction resolves)")
+        engine = "deterministic-safeguard"
+        emit("INTENT_RESULT", 4, {"engine": engine, **intent.model_dump(),
+                                  "threshold": Settings.INTENT_CONFIDENCE_THRESHOLD,
+                                  "note": "routed back to PAYMENT after the nickname was resolved"})
+
     if intent.intent == "CANCEL_OR_STOP":
         session.state, session.cancelled, session.outcome = SessionState.CANCELLED, True, "CANCEL"
         emit("PAYMENT_CANCELLED", 4, {"draft_discarded": bool(session.draft),
@@ -634,6 +821,35 @@ async def run_turn(req: TurnRequest) -> TurnResponse:
         return await run_multi_turn(req, session, lang, instructions, emit, say_line, finish)
 
     if proposal.status != "PROPOSAL_READY":
+        # ---------- A name the customer used that we hold nobody for ----------
+        # "Send Ah Girl S$100" arrives here as a payment with no recipient, because nothing in the
+        # turn binds to a saved payee. Answering "who should I pay?" throws away the one thing the
+        # customer did tell us, so when the turn names an unknown person we ask who THAT is, and
+        # list the people we do hold. Once they answer, the name is remembered (see the nickname
+        # block at stage 4, and app/nicknames.py).
+        #
+        # Only when the missing field IS the recipient: an unknown name alongside a missing amount
+        # is a different question, and asking two at once is worse than asking one.
+        unknown_name = (unknown_payee_phrase(req.text, session.customer_id)
+                        if proposal.clarification_field == "RECIPIENT" else None)
+        if unknown_name:
+            options = _saved_payee_options(session.customer_id)
+            session.state, session.outcome = SessionState.CLARIFICATION_REQUIRED, "CLARIFY"
+            session.open_clarification_field = "PAYEE_NICKNAME"
+            session.pending_nickname = {"nickname": unknown_name}
+            session.note_clarification("NICKNAME_UNKNOWN")
+            emit("NICKNAME_LOOKUP_OPENED", 5, {
+                "nickname": unknown_name,
+                "candidates": options,
+                "open_clarification_field": "PAYEE_NICKNAME",
+                "canonical_draft": "NOT_CREATED",
+                "note": "The customer used a name for a person that is not on their saved-payee "
+                        "list. Nothing is guessed: a destination can only come from a payee the "
+                        "customer already holds, and the binding is confirmed before it is saved."})
+            say_line("NICKNAME_UNKNOWN", 5, nickname=display_phrase(unknown_name),
+                     options=candidate_options(options, lang))
+            return await finish()
+
         session.state, session.outcome = SessionState.CLARIFICATION_REQUIRED, "CLARIFY"
         session.open_clarification_field = proposal.clarification_field
         session.note_clarification(proposal.clarification_field or "PAYMENT_UNCLEAR")
@@ -689,8 +905,15 @@ async def run_turn(req: TurnRequest) -> TurnResponse:
         say_line("SCHEDULE_UNCLEAR", 6)
         return await finish()
 
-    session.payee_phrase = (session.payee_phrase or parse_payee_phrase(req.text)
+    # customer_id is passed so a nickname the customer says out loud ("ah girl") is recognised
+    # even when ASR hands it to us in lowercase — parse_payee_phrase checks nicknames first.
+    session.payee_phrase = (session.payee_phrase
+                            or parse_payee_phrase(req.text, session.customer_id)
                             or proposal.recipient_phrase)
+    # How the payee was bound, and the nickname the customer actually used (if any). The nickname
+    # travels to the read-back, which is where "I found Ah Girl as Mei Tan" is spoken.
+    matched_via: Optional[str] = None
+    nickname_used: Optional[str] = None
     if date_correction:
         # Carry the resolution forward rather than re-deriving it. Re-deriving re-binds the source
         # account by a name match, and a near miss there would silently move the money from a
@@ -703,11 +926,33 @@ async def run_turn(req: TurnRequest) -> TurnResponse:
                     "are the ones already resolved and shown to the customer."})
     else:
         resolution = resolve_payee_and_account(session.customer_id, proposal, session.payee_phrase)
+        # Attribute the match honestly. parse_payee_phrase resolves a nickname to its display name
+        # BEFORE the resolver sees it, so the resolver reports "display_name" even when the
+        # customer never said that name. If a nickname they DID say points at this same payee,
+        # then the nickname was the lookup key — and the audit should say so, because that is the
+        # claim being made to a judge: the nickname supplied the key, never the destination.
+        nickname_hit = nickname_match(session.customer_id, req.text)
+        if nickname_hit is None and session.nickname_used:
+            # The customer confirmed the binding in THIS turn ("yes"), so the name is not among the
+            # words of this turn — it is in the instruction that opened the question.
+            nickname_hit = nickname_match(session.customer_id, session.nickname_used)
+        if (nickname_hit and resolution.outcome == "RESOLVED" and resolution.draft is not None
+                and resolution.draft.beneficiary_id == nickname_hit[1].beneficiary_id):
+            matched_via, nickname_used = "nickname", nickname_hit[0]
+        if matched_via == "nickname":
+            # Carry it to the read-back. This is the OTHER half of the nickname feature: a name the
+            # customer TAUGHT in an earlier turn (or an earlier session) still gets "I found Ah Girl
+            # as Mei Tan" spoken back, not just a name taught moments ago in the same turn.
+            session.nickname_used = nickname_used
         emit("PAYEE_RESOLUTION", 6, {
             "outcome": resolution.outcome, "reason": resolution.reason,
             "candidates": resolution.candidates,
+            "matched_via": matched_via,
+            "nickname": nickname_used,
             "llm_generated_beneficiary_id": False,
-            "note": "The LLM proposed a phrase. Deterministic code bound the authoritative record."})
+            "note": "The LLM proposed a phrase. Deterministic code bound the authoritative record."
+                    + (" A nickname supplied the lookup key only; the destination came from the "
+                       "trusted repository." if matched_via == "nickname" else "")})
 
     if resolution.outcome == "FREEZE":
         session.state, session.frozen, session.outcome = SessionState.FROZEN, True, "FREEZE"
@@ -762,7 +1007,8 @@ async def run_turn(req: TurnRequest) -> TurnResponse:
                 "payee_masked": draft.payee_masked,
                 "payee_display": draft.payee_display,
                 "transaction_type": draft.transaction_type}
-    validation, engine = await ValidationAgent.run(draft, session.evidence, verified)
+    validation, engine = await ValidationAgent.run(draft, session.evidence, verified,
+                                                   session.customer_id)
     session.validation = validation
     emit("VALIDATION_RESULT", 8, {"engine": engine, **validation.model_dump(),
                                   "scope": "independent — no Payment Agent reasoning supplied"})
@@ -835,7 +1081,12 @@ async def run_turn(req: TurnRequest) -> TurnResponse:
     # The read-back shape follows the transaction type. A bill payment reads back the biller
     # and the outstanding amount; a saved-payee transfer reads back the person and destination.
     _emit_draft_readback(draft, parse_reference(req.text) or None, schedule_dict,
-                         lang, session.customer_id, emit, say_line)
+                         lang, session.customer_id, emit, say_line,
+                         nickname=session.nickname_used)
+    # Consumed. The nickname belongs to the payment that produced it; a later payment in the same
+    # session must not inherit "I found Ah Girl as Mei Tan" because an earlier one was reached
+    # through that name.
+    session.nickname_used = None
 
     return await finish()
 
@@ -845,13 +1096,20 @@ async def run_turn(req: TurnRequest) -> TurnResponse:
 # multi-instruction path (IN-10) speak the SAME sentence from the SAME catalogue.
 # =====================================================================
 def _emit_draft_readback(draft: Draft, reference: Optional[str], schedule_dict: Optional[dict],
-                         lang: str, customer_id: str, emit, say_line) -> None:
+                         lang: str, customer_id: str, emit, say_line,
+                         nickname: Optional[str] = None) -> None:
     """Emit the INITIATION_READBACK for a canonical draft.
 
     The read-back SHAPE follows the transaction type — a bill/card reads back the outstanding
     balance, an own-account move reads back both accounts, a saved-payee transfer reads back the
     person and destination. The wording comes from messages.readback_parts, so this stays the one
     place a customer-facing sentence is assembled.
+
+    `nickname` is the name the customer used for the payee ("ah girl"). When it is set the read-back
+    opens with "I found Ah Girl as Mei Tan, account ending 7788" and closes by asking whether that
+    is the right person — readback_parts enforces both, and suppresses the destination in the body
+    so the payee is not named twice. It only applies to a saved-payee transfer: a bill, a card or
+    the customer's own account is never reached by a nickname.
     """
     if draft.transaction_type == "BILL_PAYMENT":
         body, biller, destination = "BODY_BILL", draft.payee_display, ""
@@ -863,13 +1121,18 @@ def _emit_draft_readback(draft: Draft, reference: Optional[str], schedule_dict: 
     else:
         body, biller, destination = ("BODY_TRANSFER", "",
                                      f"{draft.payee_display} {draft.payee_masked}".strip())
+    nickname_part = None
+    if nickname and draft.transaction_type == "SAVED_PAYEE_TRANSFER":
+        nickname_part = {"nickname": display_phrase(nickname), "name": draft.payee_display,
+                         "masked": _ending(draft.payee_masked)}
     say_line("INITIATION_READBACK", 10, **readback_parts(
         lang, body=body, closer="CLOSE_REVIEW",
         amount=money(draft.amount_minor, draft.currency),
         source=source_account_phrase(customer_id, draft.source_account_id),
         destination=destination, biller=biller,
         reference=reference,
-        schedule=schedule_dict if schedule_dict else None))
+        schedule=schedule_dict if schedule_dict else None,
+        nickname=nickname_part))
 
 
 def _proposal_from_existing_draft(draft: Draft, lang: str) -> PaymentProposal:
@@ -920,7 +1183,7 @@ def _instruction_proposal(text: str, customer_id: str) -> Optional[PaymentPropos
             currency=parse_currency(text),
             source_account_phrase=parse_source_account_phrase(text),
             transaction_type="OWN_ACCOUNT_TRANSFER")
-    payee_phrase = parse_payee_phrase(text)
+    payee_phrase = parse_payee_phrase(text, customer_id)
     if payee_phrase:
         amount, _ = parse_amount(text)
         return PaymentProposal(
@@ -1314,7 +1577,11 @@ async def run_confirmation(req: ConfirmRequest) -> TurnResponse:
             "next_draft_id": nxt.draft_id, "transaction_type": nxt.transaction_type})
         _emit_draft_readback(nxt, session.pending_references[session.draft_index],
                              session.pending_schedules[session.draft_index], req.language,
-                             session.customer_id, emit, say_line)
+                             session.customer_id, emit, say_line,
+                             nickname=session.nickname_used)
+        # Consumed by the first instruction that used it: in a multi-instruction turn the nickname
+        # belongs to ONE of the payments, and the next one is a different person.
+        session.nickname_used = None
     return TurnResponse(session=session.to_public(), events=events)
 
 

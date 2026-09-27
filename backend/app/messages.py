@@ -163,6 +163,34 @@ MESSAGES: Dict[str, Dict[str, str]] = {
         "BM": "{name}, maksudkan {option_a} atau {option_b}?",
     },
 
+    # ---------- Stage 5 — a name Joy does not know yet ----------
+    # "Send Ah Girl S$100": the customer has a name for their daughter and expects Joy to know it.
+    # "Who should I pay?" is unanswerable for somebody who has just said exactly who they meant, so
+    # the question names the unknown name AND lists the people we DO hold — the customer only has to
+    # recognise one of them. `nickname` is the customer's own word for the person; `payee` (not
+    # `name`, which is the customer's own preferred name) is the saved payee it turned out to be.
+    "NICKNAME_UNKNOWN": {
+        "EN": "{name}, I don't know who {nickname} is. Which of your saved payees is {nickname} — "
+              "{options}?",
+        "ZH": "{name}，我不知道「{nickname}」是谁。您保存的收款人当中，哪一位是 {nickname}——{options}？",
+        "BM": "{name}, saya tidak kenal {nickname}. Yang mana penerima simpanan {name} ialah "
+              "{nickname} — {options}?",
+    },
+    # The binding is confirmed BEFORE it is remembered. A nickname is a redirect to somebody's
+    # money, so Joy says which person and which account she is about to bind it to, and waits.
+    "NICKNAME_CONFIRM": {
+        "EN": "So {nickname} is {payee}, account ending {masked}. Shall I remember that for next "
+              "time?",
+        "ZH": "所以 {nickname} 就是 {payee}，账号尾号 {masked}。要我记住吗？下次您这样说我就知道了。",
+        "BM": "Jadi {nickname} ialah {payee}, akaun berakhir {masked}. Nak saya ingat untuk lain "
+              "kali?",
+    },
+    "NICKNAME_DECLINED": {
+        "EN": "No problem, {name}. I won't remember it, and I'll ask you again next time.",
+        "ZH": "没关系，{name}。我不记下来了，下次再问您。",
+        "BM": "Tiada masalah, {name}. Saya tak akan ingat, lain kali saya tanya lagi.",
+    },
+
     # ---------- Stage 6 — payee resolution (§8.3.2) ----------
     "PAYEE_AMBIGUOUS": {
         "EN": "{name}, I found {count} saved payees called {phrase} — {options}. "

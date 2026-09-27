@@ -46,6 +46,10 @@ class Settings:
     SIGNING_SECRET = os.getenv("AUNTIEJOY_SIGNING_SECRET", "demo-only-not-a-production-hsm")
     PAYLOAD_TTL_SECONDS = 120
     DB_PATH = os.getenv("AUNTIEJOY_DB", "auntiejoy_audit.db")
+    # Nicknames the customer taught us ("ah girl" -> a beneficiary_id). Deliberately a SEPARATE
+    # file from the audit log: the audit is hash-chained and append-only, while this is mutable
+    # customer preference. Override in tests so a run never touches the real file.
+    NICKNAMES_PATH = os.getenv("AUNTIEJOY_NICKNAMES", "nicknames.json")
 
     LLM_API_KEY = os.getenv("HUNYUAN_API_KEY") or os.getenv("SILICONFLOW_API_KEY") or ""
     LLM_BASE_URL = os.getenv("AUNTIEJOY_LLM_BASE", "https://api.siliconflow.cn/v1")

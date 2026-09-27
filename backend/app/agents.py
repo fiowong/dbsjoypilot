@@ -1,5 +1,5 @@
 import re
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 from .config import Settings
 from .models import (GuardrailDecision, RiskCategory, GuardrailResult, IntentResult,
                       PaymentProposal, FieldCheck, ValidationResult, Draft,
@@ -27,6 +27,13 @@ LANGUAGE_SWITCH_RE = re.compile(
 AFFIRMATION_RE = re.compile(
     r"^(yes|ya|ok|okay|confirm|confirmed|proceed|sure|betul|saja|correct|right|"
     r"yup|yep|bai|setuju)\b", re.IGNORECASE)
+# The other half of AFFIRMATION_RE, and only used where a question was genuinely asked — "shall I
+# remember that?". Deliberately narrow: it must not swallow "no, make it S$60", which is a
+# correction of a DIFFERENT field and is handled by its own safeguard. Trilingual, because the
+# customer answers in whichever language they were spoken to.
+NEGATION_RE = re.compile(
+    r"^(no|nope|nah|don'?t|do not|not|never|tak|tidak|jangan|bukan|"
+    r"不用|不要|不必|不是|no need)\b", re.IGNORECASE)
 # Shared deterministic cue for the affordability / insufficient-funds situation: a customer who
 # volunteers they cannot cover the amount is answered with an empathetic, non-pressuring response.
 # Trilingual because Auntie switches between EN / BM / ZH mid-conversation.
@@ -330,7 +337,8 @@ class IntentClassifierAgent:
             return IntentResult(intent="PAYMENT", confidence=0.97, detected_language=lang,
                                 reason="Customer answers the open SCHEDULE question with a date.")
         amount, _ = parse_amount(turn)
-        if parse_payee_phrase(turn) or parse_biller_phrase(turn, ctx.get("customer_id")) \
+        if parse_payee_phrase(turn, ctx.get("customer_id")) \
+                or parse_biller_phrase(turn, ctx.get("customer_id")) \
                 or parse_card_phrase(turn, ctx.get("customer_id")) \
                 or parse_own_account_phrase(turn, ctx.get("customer_id")) \
                 or amount is not None:
@@ -376,7 +384,11 @@ class PaymentAgent:
         name = ctx.get("customer_name") or FALLBACK_NAME
 
         # The recipient is a phrase found across the committed evidence, not a trusted id.
-        phrase = parse_payee_phrase(turn) or parse_payee_phrase(joined)
+        # customer_id is passed so a nickname the customer uses ("ah girl", "husband") is read as
+        # the person it was bound to. Without it the agent proposed no recipient at all for a
+        # nickname and the turn fell through to a generic "who should I pay?".
+        phrase = (parse_payee_phrase(turn, ctx.get("customer_id"))
+                  or parse_payee_phrase(joined, ctx.get("customer_id")))
 
         # An explicit correction wins over everything already committed (§A.8 E2).
         corrected = parse_corrected_amount(turn)
@@ -523,7 +535,8 @@ class ValidationAgent:
     schema = ValidationResult
 
     @staticmethod
-    def mock(draft: Draft, evidence: List[str], verified: dict) -> ValidationResult:
+    def mock(draft: Draft, evidence: List[str], verified: dict,
+             customer_id: Optional[str] = None) -> ValidationResult:
         """Compare the canonical draft against immutable evidence. Independent of the Payment Agent.
 
         The expected amount is the effective one — a later correction or clarification answer
@@ -558,9 +571,13 @@ class ValidationAgent:
             recipient_ok = bool(evidence_phrase) and draft.payee_display.lower().startswith(
                 evidence_phrase.lower())
         else:
+            # customer_id so a nickname in the evidence resolves to the same person the draft
+            # names. Without it "send ah girl $100" produced no evidence phrase at all, the
+            # RECIPIENT check came back MISMATCH, and the comparator FROZE the payment — the
+            # customer was told the amount did not match what they said.
             evidence_phrase = None
             for turn in evidence:
-                evidence_phrase = evidence_phrase or parse_payee_phrase(turn)
+                evidence_phrase = evidence_phrase or parse_payee_phrase(turn, customer_id)
             recipient_ok = bool(evidence_phrase) and draft.payee_display.lower().startswith(
                 evidence_phrase.split()[0].lower())
         checks.append(FieldCheck(
@@ -607,7 +624,11 @@ class ValidationAgent:
                                 field_checks=checks, risk_flags=flags)
 
     @staticmethod
-    async def run(draft: Draft, evidence: List[str], verified: dict) -> Tuple[ValidationResult, str]:
+    async def run(draft: Draft, evidence: List[str], verified: dict,
+                  customer_id: Optional[str] = None) -> Tuple[ValidationResult, str]:
+        # customer_id is a mock-only argument: it is deliberately NOT added to `verified`, because
+        # that dict is sent to the live model as display facts and a trusted identifier has no
+        # business in that prompt.
         if Settings.LIVE_LLM:
             try:
                 raw = await llm_complete(ValidationAgent.prompt, {
@@ -619,7 +640,7 @@ class ValidationAgent:
                 return typed_call(raw, ValidationResult), "live"
             except AgentUnavailable:
                 pass
-        return ValidationAgent.mock(draft, evidence, verified), "mock"
+        return ValidationAgent.mock(draft, evidence, verified, customer_id), "mock"
 
 
 class PersonalizationAgent:

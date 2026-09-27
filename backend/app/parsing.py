@@ -4,7 +4,10 @@ from datetime import date, datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 
 from .config import Settings
-from .data import BILLERS, CARDS, OWN_ACCOUNTS
+from .data import BILLERS, CARDS, OWN_ACCOUNTS, SAVED_PAYEES
+# Imported under a local name so the call site reads as a question about the turn, not as a
+# module reference. nicknames.py reads its file lazily, so importing it here costs no I/O.
+from .nicknames import match_in_text as nickname_match
 
 # =====================================================================
 # 4. Language + amount understanding (deterministic, multilingual)
@@ -206,8 +209,18 @@ def last_committed_amount(turns: List[str]) -> Optional[int]:
 _NAME_RUN = r"[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b"
 
 
-def parse_payee_phrase(text: str) -> Optional[str]:
+def parse_payee_phrase(text: str, customer_id: Optional[str] = None) -> Optional[str]:
     lowered = text.lower()
+    # 0) A NICKNAME the customer uses out loud — "ah girl", "mum", "my daughter". Checked FIRST
+    #    and case-insensitively, because spoken ASR hands us "send ah girl $100" in lowercase and
+    #    the capitalised-name rule below cannot see lowercase words at all. This returns the
+    #    CANONICAL display name, never the nickname: the resolver matches phrases against display
+    #    names only, which is exactly why "send mother $50" used to fail even though "mother" was
+    #    a known alias.
+    if customer_id:
+        hit = nickname_match(customer_id, text)
+        if hit:
+            return hit[1].display_name
     # 1) The name the customer actually said, in full.
     #    The CUE words are matched case-insensitively (a turn often starts "Send …" with a
     #    capital S) but the NAME is not — a capitalised run is what tells us it is a name at
@@ -221,10 +234,131 @@ def parse_payee_phrase(text: str) -> Optional[str]:
             return PAYEE_ALIASES[phrase.lower()]
         return phrase
     # 2) Otherwise fall back to the alias table (lowercase nicknames like "mother").
+    #    Return the CANONICAL name the alias maps to, not the alias itself — returning "may"
+    #    instead of "mei" left the resolver with a phrase that matched no display name, so
+    #    "send may $50" was answered with "I couldn't find a saved payee called May" even though
+    #    "may" had been in this table the whole time.
     for alias in sorted(PAYEE_ALIASES, key=len, reverse=True):
         if re.search(rf"\b{re.escape(alias)}\b", lowered):
-            return alias
+            return PAYEE_ALIASES[alias]
     return None
+
+
+# ---------------------------------------------------------------------------
+# A name the customer used that we hold nobody for — "ah girl", "husband", "my boss".
+#
+# "Send Ah Girl S$100" used to be answered with the generic "Mei Ling, who should I pay?", which
+# is unanswerable for a customer who has just said exactly who they meant. The useful question is
+# "who is Ah Girl?" together with the list of people we DO hold, and once the customer tells us,
+# the name is remembered (see app/nicknames.py).
+#
+# This is deliberately the most conservative detector in the file. It fires ONLY once every other
+# reading of the turn has been ruled out — no saved payee, no nickname, no alias, no biller, no
+# card, no own account, no source account — because a false positive asks an elderly customer to
+# define a name they never used. The implementation is therefore subtraction: remove everything we
+# DO understand from the sentence, then ask whether a name-shaped leftover remains.
+# ---------------------------------------------------------------------------
+# Words a payment instruction can carry WITHOUT naming a person. This is a NOISE list (what to
+# ignore), not a recognition list: widening it can only make the detector quieter, never louder.
+_PERSON_NOISE_WORDS = (
+    # politeness, filler, and the customer referring to themselves
+    "please", "pls", "kindly", "can", "could", "would", "help", "me", "i", "you", "we",
+    "my", "our", "the", "a", "an", "some", "any", "own", "want", "wanted", "like", "need",
+    "just", "only", "already", "again", "now", "instead", "first", "really", "then", "and",
+    "if", "it", "that", "there", "here", "back", "over", "about", "how", "much", "many",
+    # the payment verbs, in all three languages
+    "send", "sends", "sending", "transfer", "transfers", "pay", "pays", "move", "moves",
+    "give", "make", "hantar", "bayar", "pindah", "kepada", "tolong", "saya", "nak", "mahu",
+    # the prepositions a payment instruction is built from
+    "to", "for", "from", "into", "at", "on", "by", "with",
+    # money, and the words for an amount
+    "money", "cash", "amount", "sum", "total", "dollar", "dollars", "ringgit", "yuan",
+    "cent", "cents", "sen", "thousand", "hundred", "million", "ribu", "ratus", "juta",
+    # accounts, bills and cards — each of these has its own detector
+    "savings", "saving", "current", "multiplier", "usd", "account", "akaun",
+    "bill", "bills", "invoice", "card", "credit",
+    # when it should run
+    "next", "this", "today", "tomorrow", "tonight",
+    "morning", "afternoon", "evening", "night", "week", "weeks", "month", "months",
+    "day", "days", "am", "pm", "oclock", "clock",
+)
+
+
+def _person_noise_re() -> "re.Pattern[str]":
+    """Every word a payment instruction can carry without naming a person.
+
+    Built from the live vocabularies rather than a hand-copied list, so a weekday or a month added
+    to `_WEEKDAYS` / `_MONTHS` is ignored here too. The alternative is a name detector that starts
+    reading "monday" as somebody's nickname — "send ah girl next monday" would become "ah girl
+    monday" and be taught as a nickname.
+    """
+    words = set(_PERSON_NOISE_WORDS)
+    words |= set(NUMBER_WORDS) | set(SCALE_WORDS) | set(AMBIGUOUS_SCALES)
+    words |= set(_WEEKDAYS) | set(_MONTHS) | set(_ORDINAL_WORDS)
+    return re.compile(
+        r"\b(?:" + "|".join(re.escape(w) for w in sorted(words, key=len, reverse=True)
+                            if w.strip()) + r")\b", re.IGNORECASE)
+
+
+def is_known_payee_phrase(phrase: Optional[str], customer_id: Optional[str] = None) -> bool:
+    """Whether a phrase names a payee we actually hold — a nickname, a full name, or a first name.
+
+    Mirrors the resolver's own matching (display_name, then first name) closely enough that it
+    never disagrees with it: when this says unknown, resolution says unknown too. Used to tell "the
+    customer said a name I know" apart from "the customer said a name I don't", which
+    parse_payee_phrase alone cannot do — it returns a capitalised name either way.
+    """
+    if not phrase:
+        return False
+    key = phrase.strip().lower()
+    if key in PAYEE_ALIASES:
+        return True
+    if customer_id and nickname_match(customer_id, phrase):
+        return True
+    for payee in SAVED_PAYEES.get(customer_id or "", []):
+        name = payee.display_name.lower()
+        if key == name or key == name.split()[0]:
+            return True
+    return False
+
+
+def unknown_payee_phrase(text: str, customer_id: Optional[str] = None) -> Optional[str]:
+    """The name-shaped phrase in the turn that we hold nobody for, or None.
+
+    Returns the phrase lowercased, the way the customer would say it back ("ah girl", "husband").
+    None means "there is no unknown name here" — either the customer named somebody we know, or
+    named no person at all, or said something we understand as a bill/card/account instead.
+    """
+    if not customer_id or not text:
+        return None
+
+    named = parse_payee_phrase(text, customer_id)
+    if named is not None:
+        # A capitalised name or a known alias. Known → not our problem. Unknown → this IS the name.
+        return None if is_known_payee_phrase(named, customer_id) else named.strip().lower()
+
+    leftover = mask_dates(text)
+    leftover = re.sub(r"\d[\d,.]*", " ", leftover)
+    leftover = _person_noise_re().sub(" ", leftover)
+    leftover = re.sub(r"[^A-Za-z' ]+", " ", leftover)
+    words = [w for w in leftover.split() if len(w) >= 2]
+    # One to three words is a name or a nickname ("ah girl", "my boss"). Anything longer is prose
+    # we failed to understand, and guessing a nickname out of it would be worse than asking the
+    # generic question.
+    if not words or len(words) > 3:
+        return None
+    phrase = " ".join(words).lower()
+
+    # The leftover might BE something we understand rather than a person. Ask each of the other
+    # detectors about the LEFTOVER, not about the whole turn: one turn can legitimately name both a
+    # source account and a person — "help me send fifty to ah girl from savings" — and vetoing on
+    # the word "savings" would silently swallow the name the customer actually used.
+    if (parse_biller_phrase(phrase, customer_id) or parse_card_phrase(phrase, customer_id)
+            or parse_own_account_phrase(phrase, customer_id)
+            or parse_source_account_phrase(phrase)
+            or is_known_payee_phrase(phrase, customer_id)):
+        return None
+    return phrase
 
 
 # Which source account the customer named. The customer says "from savings", "from current",

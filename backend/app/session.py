@@ -51,6 +51,14 @@ class Session:
         self.validation: Optional[ValidationResult] = None
         self.open_clarification_field: Optional[str] = None
         self.payee_phrase: Optional[str] = None
+        # The nickname question, while it is open. `{"nickname": "ah girl"}` once Joy has asked who
+        # that is; `beneficiary_id` is added once the customer has answered, and the second turn
+        # (the confirm) is what actually writes it to the store. Cleared the moment it is resolved,
+        # so a stale binding can never leak into a later, unrelated payment.
+        self.pending_nickname: Optional[dict] = None
+        # The nickname this draft was reached through ("ah girl"), carried to the read-back so Joy
+        # can say "I found Ah Girl as Mei Tan" — and carried in the audit so the claim is checkable.
+        self.nickname_used: Optional[str] = None
         self.amount_disambiguated: bool = False
         self.review_restarted: bool = False
         self.frozen: bool = False

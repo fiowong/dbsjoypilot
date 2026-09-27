@@ -11,6 +11,7 @@ from .models import (Draft, Confirmation, PaymentProposal, ValidationResult, Gua
                       REQUIRED_VALIDATION_FIELDS)
 from .data import CUSTOMERS, SAVED_PAYEES, BILLERS, CARDS, OWN_ACCOUNTS, POLICY
 from .parsing import PAYEE_ALIASES
+from . import nicknames
 
 # 7. Deterministic controls — the half that is allowed to move money
 # =====================================================================
@@ -26,6 +27,10 @@ class DeterministicResolution(BaseModel):
     reason: Optional[str] = None
     # Set on the FREEZE path so the customer can be told *which* record was suspicious.
     payee_display: Optional[str] = None
+    # "display_name" or "nickname" — how the payee was bound. Audited on PAYEE_RESOLUTION so the
+    # inspector can show that a nickname pointed at a trusted beneficiary, and that the nickname
+    # itself never supplied the destination.
+    matched_via: Optional[str] = None
 
 
 # Freeze reasons -> the catalogue key that explains them to the customer. Kept here because
@@ -51,6 +56,7 @@ def detect_multiple_recipients(text: str, customer_id: str) -> Optional[List[str
     """
     payees = SAVED_PAYEES.get(customer_id, [])
     lowered = text.lower()
+    nick_index = nicknames.index(customer_id)
     found: List[str] = []
     for p in payees:
         hit = p.display_name.lower() in lowered
@@ -58,6 +64,13 @@ def detect_multiple_recipients(text: str, customer_id: str) -> Optional[List[str
             for alias, canon in PAYEE_ALIASES.items():
                 if " " in alias and canon == p.display_name.lower() \
                         and re.search(rf"\b{re.escape(alias)}\b", lowered):
+                    hit = True
+                    break
+        if not hit:
+            # A nickname counts as naming that payee, so "pay mum and john" is still two people.
+            for word, owner in nick_index.items():
+                if owner.beneficiary_id == p.beneficiary_id \
+                        and re.search(rf"\b{re.escape(word)}\b", lowered):
                     hit = True
                     break
         if hit:
@@ -169,6 +182,14 @@ def resolve_payee_and_account(customer_id: str, proposal: PaymentProposal,
     needle = (payee_phrase or proposal.recipient_phrase or "").lower()
     matches = [p for p in payees
                if p.display_name.lower().startswith(needle) or needle in p.display_name.lower()]
+    matched_via = "display_name"
+    if not matches and needle:
+        # A NICKNAME the customer uses out loud. The nickname supplies the LOOKUP KEY only — the
+        # payee record, its masked ending and its destination token all come from the trusted
+        # repository, so a nickname can never introduce a destination of its own.
+        by_nickname = nicknames.find(customer_id, needle)
+        if by_nickname is not None:
+            matches, matched_via = [by_nickname], "nickname"
 
     if not matches:
         return DeterministicResolution(outcome="NEEDS_CLARIFICATION",
@@ -211,7 +232,7 @@ def resolve_payee_and_account(customer_id: str, proposal: PaymentProposal,
         destination_token=payee.destination_token,
         amount_minor=proposal.amount_minor or 0, currency=proposal.currency,
         reference="", payee_display=payee.display_name, payee_masked=payee.masked,
-        account_masked=account.masked))
+        account_masked=account.masked), matched_via=matched_via)
 
 
 class ComparatorResult(BaseModel):
