@@ -11,7 +11,7 @@ from .parsing import (detect_language, parse_amount, parse_payee_phrase,
                        ambiguous_amount_pair, parse_currency, parse_source_account_phrase,
                        parse_biller_phrase, lookup_biller,
                        parse_card_phrase, lookup_card, parse_own_account_phrase,
-                       lookup_own_account)
+                       lookup_own_account, schedule_spec_from_text)
 from .messages import (interface_language, render, amount_pair, display_phrase,
                         FALLBACK_NAME)
 
@@ -47,6 +47,17 @@ SAFETY_HELP_RE = re.compile(
     r"\b(is this a scam|report a (scam|fraud)|coerc)\b"
     r"|\bhelp me\b(?:\s+\w+){0,5}\s+(scam|fraud|cheat|trick|avoid|report|"
     r"check|spot|identify|with)\b", re.IGNORECASE)
+
+# Shared deterministic cue for Guardrails rule 5 (UNSUPPORTED_ACTION): asking the assistant to change a
+# mandatory control — the transfer / daily limit, the KYC tier or an audit rule. It is the VERB plus a
+# NEARBY CONTROL NOUN, not the bare noun: the live model over-triggers on "change" alone and blocks an
+# ordinary date correction ("change to this monday instead") with the safety-setting line. The mock
+# Guardrails and the orchestrator's UNSUPPORTED_ACTION relaxer both use THIS one regex, so live and mock
+# cannot diverge on what counts as a control change. Widen the vocabulary in BOTH places or neither —
+# a wider noun list quietly weakens the relaxer, a narrower one loses a genuine block.
+MANDATORY_CONTROL_RE = re.compile(
+    r"\b(remove|increase|raise|change|buang|naikkan|ubah)\b.{0,24}"
+    r"\b(limit|had|kyc|audit)\b", re.IGNORECASE)
 
 # =====================================================================
 # 6. The four bounded agents — each a typed call, live or mock
@@ -169,11 +180,13 @@ Amount rules (SGD 1 = 100 minor units):
 Future-time extraction (schedule_hint) — when the customer says WHEN to pay:
 - Restate the time they named in schedule_hint, using exactly one of these kinds:
   today, tomorrow, weekday (give weekday and next), in_days (give days as a total day count — "two
-  weeks" is 14), day_of_month (give day and months_ahead), end_of_month (give months_ahead).
+  weeks" is 14), day_of_month (give day and months_ahead), named_date (give day and month as a number
+  1-12 when the customer names the month itself, e.g. "the 28th of September" is day 28 month 9),
+  end_of_month (give months_ahead).
 - Put the hour as hour (0-23, 24-hour) and minute when they named a time of day.
-- NEVER put a date, a day-of-month, a month name or a year in schedule_hint. You do not know today's
-  date and must not guess one. Deterministic code computes the calendar date from your extraction,
-  and it will discard any hint it cannot validate.
+- NEVER invent a year and NEVER resolve the date yourself. You do not know today's date. Give only
+  the parts the customer said — for named_date that is the day number and the month number (1-12) —
+  and deterministic code works out the calendar date from them. It discards any hint it cannot validate.
 - If the customer named no future time, omit schedule_hint entirely. Do not invent one.
 
 Return only a JSON object with exactly these keys: status, detected_language, recipient_phrase, amount_minor,
@@ -255,8 +268,7 @@ class GuardrailsAgent:
             return result(GuardrailDecision.SAFETY_INTERVENTION, RiskCategory.SCAM_OR_COERCION_SIGNAL,
                           "HIGH", "PAUSE_SCAM",
                           "Possible family-emergency scam involving fear and urgency.")
-        if re.search(r"\b(remove|increase|raise|change|buang|naikkan|ubah)\b.{0,24}"
-                     r"\b(limit|had|kyc|audit)\b", text):
+        if MANDATORY_CONTROL_RE.search(text):
             return result(GuardrailDecision.BLOCK, RiskCategory.UNSUPPORTED_ACTION, "HIGH",
                           "BLOCK_OVERRIDE",
                           "The request asks the assistant to change a mandatory control.")
@@ -312,6 +324,11 @@ class IntentClassifierAgent:
             return IntentResult(intent="PAYMENT_CLARIFICATION", confidence=0.99,
                                 detected_language=lang,
                                 reason=f"Customer answers the open {open_field} question.")
+        if open_field == "SCHEDULE" and schedule_spec_from_text(turn):
+            # Answering "which day did you mean?" with a date. The recipient and the amount come
+            # from the committed evidence, so this is a payment turn, not a new instruction.
+            return IntentResult(intent="PAYMENT", confidence=0.97, detected_language=lang,
+                                reason="Customer answers the open SCHEDULE question with a date.")
         amount, _ = parse_amount(turn)
         if parse_payee_phrase(turn) or parse_biller_phrase(turn, ctx.get("customer_id")) \
                 or parse_card_phrase(turn, ctx.get("customer_id")) \

@@ -16,16 +16,18 @@ from .parsing import (parse_amount, parse_corrected_amount, last_committed_amoun
                        parse_schedule, parse_currency, parse_biller_phrase,
                        parse_source_account_phrase, split_instructions, lookup_biller,
                        schedule_from_hint,
+                       is_schedule_correction, schedule_named_but_unusable,
                        lookup_card, lookup_own_account)
 from .agents import (GuardrailsAgent, IntentClassifierAgent, PaymentAgent, ValidationAgent,
                      PersonalizationAgent, CONFIRMATION_BYPASS_RE, LANGUAGE_SWITCH_RE,
-                     AFFIRMATION_RE, INSUFFICIENT_FUNDS_RE, SAFETY_HELP_RE)
+                     AFFIRMATION_RE, INSUFFICIENT_FUNDS_RE, SAFETY_HELP_RE,
+                     MANDATORY_CONTROL_RE)
 from .agent_runtime import AgentUnavailable
 from .controls import (resolve_payee_and_account, compare_validation_result, evaluate_risk,
                         evaluate_safety_policy, canonical_payload, payload_hash, sign_payload,
                         Ledger, gateway_verify, GatewayDecision, GatewayResult, ComparatorResult,
                         RiskDecision, RiskOutcome, _not_expired, freeze_message_key,
-                        detect_multiple_recipients)
+                        detect_multiple_recipients, DeterministicResolution)
 from .messages import (say, interface_language, candidate_options, amount_pair,
                         customer_name, display_phrase, join_options,
                         readback_parts, source_account_phrase, multi_item, readback_multi)
@@ -179,6 +181,20 @@ async def run_turn(req: TurnRequest) -> TurnResponse:
                                   "prompt_version": Settings.PROMPT_VERSION,
                                   "schema_version": Settings.SCHEMA_VERSION})
 
+    # Deterministic policy (IN-08): a correction of the DATE on screen. Decided here, before the
+    # model is asked anything, and split in two because the halves need opposite treatment:
+    #   * a correction that resolves becomes an edit of the payment on screen, and
+    #   * one that does NOT resolve must be ASKED about — never silently ignored — and must not
+    #     invalidate the payment the customer is still looking at.
+    # Only a turn that changes the date and nothing else counts (see is_schedule_correction), so an
+    # amount or payee correction is untouched by this and still takes the ordinary edit path.
+    # Computed ABOVE the guardrails gates on purpose: the UNSUPPORTED_ACTION relaxer below needs the
+    # answer to undo an over-trigger, and a relaxer only works if it sits above the gate it undoes.
+    # Both values are pure functions of the turn and the session, so hoisting them changes nothing.
+    date_edit_attempt = (session.draft is not None and not session.frozen
+                         and not session.cancelled and is_schedule_correction(req.text))
+    date_correction = date_edit_attempt and parse_schedule(req.text) is not None
+
     # Deterministic safeguard (mirrors GuardrailsAgent.mock): a BLOCK/CONFIRMATION_BYPASS that does
     # NOT actually contain explicit skip / ignore / bypass language is a false positive — the live
     # model over-triggers on words like "confirm". Relaxing it to ALLOW means an ordinary confirmation
@@ -221,6 +237,64 @@ async def run_turn(req: TurnRequest) -> TurnResponse:
                                       "schema_version": Settings.SCHEMA_VERSION,
                                       "note": "live guardrails relaxed to ALLOW for language-switch "
                                               "by deterministic safeguard"})
+
+    # Deterministic safeguard (UNUSABLE_INPUT over-trigger): the Guardrails prompt allows CLARIFY /
+    # UNUSABLE_INPUT ONLY for a turn that is materially unusable — under 2 characters after
+    # stripping, or pure punctuation. The live model over-triggers it anyway: "on 28th september
+    # instead" is 24 usable characters, a plain correction of the date on screen, and it came back
+    # CLARIFY — so the customer was told "I didn't quite catch that" and could never change the
+    # date. This can only ever UNDO an over-trigger, never create one: a genuinely unusable turn
+    # still has nothing to strip, so it keeps its CLARIFY. Mirrors the mock's own rule
+    # (IntentClassifierAgent.mock / GuardrailsAgent.mock both gate on len(turn.strip()) < 2).
+    if (guardrail.decision == GuardrailDecision.CLARIFY
+            and guardrail.risk_category == RiskCategory.UNUSABLE_INPUT
+            and len(req.text.strip()) >= 2):
+        guardrail = GuardrailResult(
+            decision=GuardrailDecision.ALLOW, risk_category=RiskCategory.SAFE_PAYMENT_REQUEST,
+            risk_level="LOW", detected_language=guardrail.detected_language,
+            message_key="CONTINUE",
+            developer_reason="UNUSABLE_INPUT relaxed to ALLOW by deterministic safeguard "
+                             "(the turn is usable text).")
+        engine = "deterministic-safeguard"
+        emit("GUARDRAILS_RESULT", 3, {"engine": engine, **guardrail.model_dump(),
+                                      "prompt_version": Settings.PROMPT_VERSION,
+                                      "schema_version": Settings.SCHEMA_VERSION,
+                                      "note": "live UNUSABLE_INPUT relaxed to ALLOW — the turn is "
+                                              "usable text, so the over-trigger is undone"})
+
+    # Deterministic safeguard (date-correction over-trigger): the live Guardrails model reads the bare
+    # verb "change" as rule 5 — ask to change a mandatory control — so "change to this monday instead"
+    # came back BLOCK / UNSUPPORTED_ACTION and Auntie answered "I can't change that safety setting.
+    # It stays on to protect you." on a 26-character DATE correction, freezing the session. The mock is
+    # narrower: it requires the verb AND a nearby control noun, which is why the same turn is ALLOW in
+    # mock mode and the date correction works there. This relaxes the live verdict back to the mock's,
+    # and ONLY for a turn that is a date-only correction of the payment on screen.
+    # It can never weaken the control:
+    #   * a genuine control change names the control ("change my transfer limit to 5000"), so
+    #     MANDATORY_CONTROL_RE matches and the block stands — verified on all four control phrasings;
+    #   * it carries no date, so date_correction is False anyway and the relaxer does not fire;
+    #   * the turn must also have an open, unfrozen draft to correct, so it cannot act on a first turn;
+    #   * INSTRUCTION_OVERRIDE is included because the same over-trigger happens on a denial word
+    #     ("no, change it to friday"), but SCAM / coercion is a SAFETY_INTERVENTION, a different
+    #     decision, and is deliberately left untouched.
+    if (guardrail.decision == GuardrailDecision.BLOCK
+            and guardrail.risk_category in (RiskCategory.UNSUPPORTED_ACTION,
+                                            RiskCategory.INSTRUCTION_OVERRIDE)
+            and date_correction
+            and not MANDATORY_CONTROL_RE.search(req.text)):
+        guardrail = GuardrailResult(
+            decision=GuardrailDecision.ALLOW, risk_category=RiskCategory.SAFE_PAYMENT_REQUEST,
+            risk_level="LOW", detected_language=guardrail.detected_language,
+            message_key="CONTINUE",
+            developer_reason="UNSUPPORTED_ACTION relaxed to ALLOW by deterministic safeguard "
+                             "(the turn is a date-only correction, not a control change).")
+        engine = "deterministic-safeguard"
+        emit("GUARDRAILS_RESULT", 3, {"engine": engine, **guardrail.model_dump(),
+                                      "prompt_version": Settings.PROMPT_VERSION,
+                                      "schema_version": Settings.SCHEMA_VERSION,
+                                      "note": "live guardrails relaxed to ALLOW — the turn only "
+                                              "changes WHEN the payment runs, so the over-trigger "
+                                              "is undone"})
 
     # Deterministic safeguard (affordability / insufficient funds, branch H): a customer who
     # volunteers they cannot cover the amount (e.g. "I don't have enough", "tak cukup duit",
@@ -300,6 +374,19 @@ async def run_turn(req: TurnRequest) -> TurnResponse:
         say_line(guardrail.message_key, 3)
         return await finish()
 
+    # (date_edit_attempt / date_correction were computed above the guardrails gates — see stage 3.)
+    if date_edit_attempt and not date_correction:
+        session.state, session.outcome = SessionState.CLARIFICATION_REQUIRED, "CLARIFY"
+        session.open_clarification_field = "SCHEDULE"
+        session.note_clarification("SCHEDULE_UNCLEAR")
+        emit("CLARIFICATION_OPENED", 4, {
+            "clarification_field": "SCHEDULE", "clarification_key": "SCHEDULE_UNCLEAR",
+            "draft_preserved": True,
+            "note": "The customer asked to change the date but the date could not be read. "
+                    "Nothing was changed — the payment on screen is untouched."})
+        say_line("SCHEDULE_UNCLEAR", 4)
+        return await finish()
+
     # ---------- Stage 4 — Intent Classifier ----------
     intent, engine = await IntentClassifierAgent.run(req.text, {
         "open_clarification_field": session.open_clarification_field,
@@ -332,6 +419,30 @@ async def run_turn(req: TurnRequest) -> TurnResponse:
         intent = IntentResult(intent="UNCLEAR", confidence=0.95,
                               detected_language=detect_language(req.text),
                               reason="deterministic replayed-yes safeguard")
+        engine = "deterministic-safeguard"
+    elif date_correction and intent.intent not in ("CANCEL_OR_STOP", "SAFETY_HELP"):
+        # IN-08 — "on 28th september instead" after a read-back that said 05 October. The live
+        # model reads this as a fresh payment (or as nothing at all), which re-derives the amount
+        # from the only number in the sentence and drops the date. It is an EDIT of the payment
+        # already on screen, and the deterministic chain is what says so.
+        #
+        # Never over a stop or a safety report: "cancel it, do it tomorrow" is a cancel, and a
+        # date correction must not be able to talk the customer out of one.
+        intent = IntentResult(intent="EDIT_PAYMENT", confidence=0.95,
+                              detected_language=detect_language(req.text),
+                              reason="deterministic date-correction safeguard "
+                                     "(the turn only changes WHEN the payment runs)")
+        engine = "deterministic-safeguard"
+    elif (intent.intent == "UNCLEAR" and session.open_clarification_field == "SCHEDULE"
+          and parse_schedule(req.text)):
+        # The customer is answering "which day did you mean?" with a date. The recipient and the
+        # amount are recovered from the committed evidence by the Payment Agent, so this is a
+        # payment turn. Mirrors IntentClassifierAgent.mock, so a live model cannot leave the
+        # customer's answer stranded as UNCLEAR — the question must be answerable.
+        intent = IntentResult(intent="PAYMENT", confidence=0.95,
+                              detected_language=detect_language(req.text),
+                              reason="deterministic open-SCHEDULE safeguard "
+                                     "(the customer is answering the date question)")
         engine = "deterministic-safeguard"
 
     emit("INTENT_RESULT", 4, {"engine": engine, **intent.model_dump(),
@@ -423,7 +534,12 @@ async def run_turn(req: TurnRequest) -> TurnResponse:
             "confirmation_invalidated": session.confirmation.confirmation_id if session.confirmation else None,
             "signature_invalidated": bool(session._signature),
             "superseded_draft_version": session.current_draft_version,
-            "old_field_confirmations_reused": False})
+            "old_field_confirmations_reused": False,
+            "date_only_correction": date_correction,
+            "note": ("A date-only correction: the recipient, the amount and the source account are "
+                     "carried forward unchanged — only WHEN the payment runs is re-resolved."
+                     if date_correction else
+                     "The payment on screen is superseded; every downstream result is discarded.")})
         session.confirmation = None
         session._signature, session._payload, session._nonce = None, None, None
         session.validation = None
@@ -465,7 +581,15 @@ async def run_turn(req: TurnRequest) -> TurnResponse:
         "draft": {"payee_phrase": session.payee_phrase,
                   "amount_minor": session.draft.amount_minor if session.draft else None},
     }
-    proposal, engine = await PaymentAgent.run(req.text, ctx)
+    if date_correction:
+        # The payment on screen is already agreed, so the Payment Agent is not consulted at all.
+        # Reading "on 28th september instead" back into a proposal could only re-derive the amount
+        # from the one number in the sentence (S$28.00) and drop the date. The draft already on
+        # screen IS the proposal — only WHEN it runs is still open.
+        proposal = _proposal_from_existing_draft(session.draft, lang)
+        engine = "deterministic (carried forward — date-only correction)"
+    else:
+        proposal, engine = await PaymentAgent.run(req.text, ctx)
 
     # A recipient phrase extracted from committed evidence survives a clarification turn,
     # so the answer only has to supply the missing field.
@@ -536,6 +660,10 @@ async def run_turn(req: TurnRequest) -> TurnResponse:
         schedule_source = ("payment agent extracted the phrase; deterministic code computed the date"
                            if schedule_dict else None)
     if schedule_dict:
+        if session.open_clarification_field == "SCHEDULE":
+            # The "which day did you mean?" question has now been answered, so it must not stay
+            # open — a stale open field would keep re-routing later turns that merely mention a date.
+            session.open_clarification_field = None
         emit("SCHEDULE_RESOLVED", 6, {
             "extracted_by": schedule_source,
             "spoken": schedule_dict["relative"],
@@ -543,14 +671,43 @@ async def run_turn(req: TurnRequest) -> TurnResponse:
             "absolute_date": schedule_dict["absolute"], "time": schedule_dict["time"],
             "note": "The extractor said WHAT was meant; code decided WHEN. No model produced a "
                     "date, and a hint that failed validation was dropped rather than used."})
+    # A date the customer NAMED but that could not be turned into a day — "the 3rd of this month"
+    # said on the 26th, "the 28th" with no month, "31 September". Silence is the one answer that
+    # must not be given here: the read-back would carry no date at all, and nothing would tell the
+    # customer it had been ignored. Checked after the schedule block so a resolvable date always
+    # wins. (A date correction can never reach this: it only counts as one once it has resolved.)
+    if schedule_dict is None and schedule_named_but_unusable(req.text):
+        session.state, session.outcome = SessionState.CLARIFICATION_REQUIRED, "CLARIFY"
+        session.open_clarification_field = "SCHEDULE"
+        session.note_clarification("SCHEDULE_UNCLEAR")
+        emit("CLARIFICATION_OPENED", 6, {
+            "clarification_field": "SCHEDULE", "clarification_key": "SCHEDULE_UNCLEAR",
+            "canonical_draft": "NOT_CREATED",
+            "note": "A date was named and recognised but could not be turned into a day. No draft is "
+                    "created — the customer is asked which day they meant, rather than being handed "
+                    "a payment with no date on it."})
+        say_line("SCHEDULE_UNCLEAR", 6)
+        return await finish()
+
     session.payee_phrase = (session.payee_phrase or parse_payee_phrase(req.text)
                             or proposal.recipient_phrase)
-    resolution = resolve_payee_and_account(session.customer_id, proposal, session.payee_phrase)
-    emit("PAYEE_RESOLUTION", 6, {
-        "outcome": resolution.outcome, "reason": resolution.reason,
-        "candidates": resolution.candidates,
-        "llm_generated_beneficiary_id": False,
-        "note": "The LLM proposed a phrase. Deterministic code bound the authoritative record."})
+    if date_correction:
+        # Carry the resolution forward rather than re-deriving it. Re-deriving re-binds the source
+        # account by a name match, and a near miss there would silently move the money from a
+        # different account than the one the customer is looking at.
+        resolution = DeterministicResolution(outcome="RESOLVED", draft=session.draft)
+        emit("PAYEE_RESOLUTION", 6, {
+            "outcome": "RESOLVED", "reason": "CARRIED_FORWARD_DATE_ONLY_CORRECTION",
+            "candidates": [], "llm_generated_beneficiary_id": False,
+            "note": "A date-only correction. The payee, the destination token and the source account "
+                    "are the ones already resolved and shown to the customer."})
+    else:
+        resolution = resolve_payee_and_account(session.customer_id, proposal, session.payee_phrase)
+        emit("PAYEE_RESOLUTION", 6, {
+            "outcome": resolution.outcome, "reason": resolution.reason,
+            "candidates": resolution.candidates,
+            "llm_generated_beneficiary_id": False,
+            "note": "The LLM proposed a phrase. Deterministic code bound the authoritative record."})
 
     if resolution.outcome == "FREEZE":
         session.state, session.frozen, session.outcome = SessionState.FROZEN, True, "FREEZE"
@@ -589,7 +746,10 @@ async def run_turn(req: TurnRequest) -> TurnResponse:
     draft.reference = parse_reference(req.text) or draft.reference
     draft.evidence_ids = list(session.evidence_ids)
     if schedule_dict:
-        draft.scheduled_for = f"{schedule_dict['absolute']} {schedule_dict['time']} Singapore time"
+        # "at" is part of the string so it reads naturally when spoken back on the SCHEDULED line
+        # ("on 28 September 2026 at 9:00 AM Singapore time"). Nothing else consumes this field.
+        draft.scheduled_for = (f"{schedule_dict['absolute']} at {schedule_dict['time']} "
+                               f"Singapore time")
     session.draft = draft
     session.draft_versions.append(draft.version)
     session.state = SessionState.DRAFT_READY
@@ -712,6 +872,21 @@ def _emit_draft_readback(draft: Draft, reference: Optional[str], schedule_dict: 
         schedule=schedule_dict if schedule_dict else None))
 
 
+def _proposal_from_existing_draft(draft: Draft, lang: str) -> PaymentProposal:
+    """The draft already on screen, restated as the proposal it originally came from.
+
+    Used ONLY for a date-only correction, where the recipient, the amount and the source account
+    are not in question. It keeps the Payment Agent out of the loop completely, so no model gets
+    the chance to re-read the amount out of the day number in "on 28th september instead" — which
+    is exactly how that turn used to turn a S$50 payment into a S$28 one.
+    """
+    return PaymentProposal(
+        status="PROPOSAL_READY", detected_language=lang,
+        recipient_phrase=draft.payee_display, amount_minor=draft.amount_minor,
+        currency=draft.currency, source_account_phrase=None,
+        transaction_type=draft.transaction_type)
+
+
 def _instruction_proposal(text: str, customer_id: str) -> Optional[PaymentProposal]:
     """A PaymentProposal for ONE instruction, using the SAME deterministic detection order as the
     single-instruction Payment Agent mock (bill → card → own-account → saved payee). Returns None
@@ -803,7 +978,7 @@ async def run_multi_turn(req: TurnRequest, session, lang: str, instructions: Lis
         draft.evidence_ids = list(session.evidence_ids)
         sched = parse_schedule(text)
         if sched:
-            draft.scheduled_for = f"{sched['absolute']} {sched['time']} Singapore time"
+            draft.scheduled_for = f"{sched['absolute']} at {sched['time']} Singapore time"
         # Deterministic mock validation (the reference policy) — the multi-instruction read-back is
         # about the SPLIT, and each draft is still validated independently before it is queued.
         validation = ValidationAgent.mock(draft, [text], {
@@ -1084,16 +1259,40 @@ async def run_confirmation(req: ConfirmRequest) -> TurnResponse:
         return TurnResponse(session=session.to_public(), events=events)
 
     # ---------- Stage 15 — restricted mock payment capability ----------
-    txn_id, count, created = Ledger.execute(payload["idempotency_key"], ledger_request)
-    session.execution = {"transaction_id": txn_id, "status": "RECORDED",
-                         "amount_minor": draft.amount_minor, "currency": draft.currency,
-                         "execution_count": count, "new_entry": created}
-    session.state, session.outcome = SessionState.EXECUTED, "ACCEPTED"
-    emit("LEDGER_RECORDED", 15, {**session.execution,
-                                 "gateway_authorised_only": True,
-                                 "direct_agent_or_browser_calls": "REJECTED"})
-    say_line("EXECUTED", 15, amount=money(draft.amount_minor),
-             payee=f"{draft.payee_display} {draft.payee_masked}".strip(), reference=txn_id)
+    payee_phrase = f"{draft.payee_display} {draft.payee_masked}".strip()
+
+    if draft.scheduled_for:
+        # A future-dated payment is HELD, not EXECUTED. The customer has approved it, but the date
+        # has not arrived, so no money has moved: the ledger must NOT be written and no receipt may
+        # exist. This is a deterministic consequence of the date already on the draft — no agent
+        # decides it. (The browser renders the receipt card from LEDGER_RECORDED, so withholding
+        # that event is what stops a receipt appearing for a payment that has not been sent.)
+        session.state, session.outcome = SessionState.SCHEDULED, "SCHEDULED"
+        session.execution = {"transaction_id": None, "status": "SCHEDULED",
+                             "scheduled_for": draft.scheduled_for,
+                             "amount_minor": draft.amount_minor, "currency": draft.currency,
+                             "execution_count": 0, "new_entry": False}
+        emit("LEDGER_NOT_INVOKED", 14, {
+            "ledger_invoked": False, "reason": "FUTURE_DATED_PAYMENT_HELD",
+            "scheduled_for": draft.scheduled_for,
+            "note": "The payment is held until its date. Nothing has been sent, so no ledger "
+                    "entry is written and no receipt exists."})
+        emit("SCHEDULE_HELD", 15, {**session.execution,
+                                   "gateway_authorised_only": True,
+                                   "direct_agent_or_browser_calls": "REJECTED"})
+        say_line("SCHEDULED", 15, amount=money(draft.amount_minor), payee=payee_phrase,
+                 when=draft.scheduled_for)
+    else:
+        txn_id, count, created = Ledger.execute(payload["idempotency_key"], ledger_request)
+        session.execution = {"transaction_id": txn_id, "status": "RECORDED",
+                             "amount_minor": draft.amount_minor, "currency": draft.currency,
+                             "execution_count": count, "new_entry": created}
+        session.state, session.outcome = SessionState.EXECUTED, "ACCEPTED"
+        emit("LEDGER_RECORDED", 15, {**session.execution,
+                                     "gateway_authorised_only": True,
+                                     "direct_agent_or_browser_calls": "REJECTED"})
+        say_line("EXECUTED", 15, amount=money(draft.amount_minor), payee=payee_phrase,
+                 reference=txn_id)
 
     # IN-10 — if more independent instructions are queued behind this one, advance to the next and
     # read it back, so the customer confirms them one at a time. A fresh signature is required for

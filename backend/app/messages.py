@@ -126,6 +126,20 @@ MESSAGES: Dict[str, Dict[str, str]] = {
         "BM": "{name}, belum ada apa-apa dihantar — bayaran itu masih menunggu kelulusan anda. Ia "
               "ada pada kad di skrin anda: tekan Confirm dan saya bawa anda semak satu-satu.",
     },
+    # A date the customer DID name, but which could not be turned into a calendar day — "the 3rd
+    # of this month" said on the 26th, "the 28th" with no month, "31 September". Going ahead
+    # without a date and saying nothing is the one answer that must never be given here: the
+    # customer would hear a read-back with no date on it and have no way to know it was ignored.
+    "SCHEDULE_UNCLEAR": {
+        "EN": "{name}, I heard a date in that, but I couldn't work out which day you meant. "
+              "Nothing has been sent — could you say the day again? For example, tomorrow, or "
+              "the 28th of September.",
+        "ZH": "{name}，我听到您说了日期，但没能确定是哪一天。还没有汇款——可以请您再说一次吗？"
+              "例如「明天」，或是「9月28日」。",
+        "BM": "{name}, saya dengar tarikh dalam ayat itu, tetapi tidak dapat pastikan harinya. "
+              "Belum ada apa-apa dihantar — boleh {name} sebut semula harinya? Contohnya esok, "
+              "atau 28 September.",
+    },
     "CANCELLED": {
         "EN": "No problem, {name}. I've cancelled that payment, and nothing has been sent.",
         "ZH": "没关系，{name}。这笔付款已经取消，钱没有汇出。",
@@ -273,6 +287,17 @@ MESSAGES: Dict[str, Dict[str, str]] = {
         "BM": "Selesai, {name}. {amount} telah dihantar kepada {payee}. Nombor rujukan ialah "
               "{reference}.",
     },
+    # The future-dated counterpart of EXECUTED. A scheduled payment has NOT moved any money, so it
+    # gets its own line: no "has been sent", no reference number, and no receipt card (the receipt
+    # is keyed off LEDGER_RECORDED, which is deliberately not emitted on this path).
+    "SCHEDULED": {
+        "EN": "All done, {name}. {amount} is scheduled to be sent to {payee} on {when}. Nothing "
+              "has left your account yet, so there is no receipt for this one.",
+        "ZH": "完成了，{name}。{amount} 已安排在 {when} 汇给 {payee}。款项尚未从您的账户扣除，"
+              "所以这笔还没有收据。",
+        "BM": "Selesai, {name}. {amount} dijadualkan untuk dihantar kepada {payee} pada {when}. "
+              "Wang belum keluar dari akaun anda, jadi tiada resit untuk bayaran ini.",
+    },
 
     # ---------- IN-10 — several independent instructions in one breath ----------
     # The summary line is composed elsewhere (readback_multi) from the MULTI_ITEM_* fragments and
@@ -404,6 +429,14 @@ READBACK_PARTS: Dict[str, Dict[str, str]] = {
         "ZH": " {relative}，{absolute} {time}（新加坡时间）",
         "BM": " {relative}, {absolute} pada {time} waktu Singapura",
     },
+    # Used when there is no relative phrase to give — the customer named the calendar date itself,
+    # so a relative would only repeat the absolute ("the 28th of September, 28 September 2026").
+    # One date, said once.
+    "SCHEDULE_DATE_ONLY": {
+        "EN": " {absolute} at {time} Singapore time",
+        "ZH": " {absolute} {time}（新加坡时间）",
+        "BM": " {absolute} pada {time} waktu Singapura",
+    },
 
     # --- closers ---
     "CLOSE_REVIEW": {
@@ -525,9 +558,13 @@ def readback_item(lang: str, *, body: str, amount: str, source: str = "", destin
                   schedule: Optional[Dict[str, str]] = None) -> str:
     """One instruction's clause, without its closer."""
     key = _body_variant(body, source, destination)
+    # A schedule with no relative phrase gets the date-only clause, so the date is said once.
+    schedule_key = None
+    if schedule:
+        schedule_key = "SCHEDULE" if schedule.get("relative") else "SCHEDULE_DATE_ONLY"
     return (_part(key, lang, amount=amount, source=source, destination=destination, biller=biller)
             + (_part("REFERENCE", lang, reference=reference) if reference else "")
-            + (_part("SCHEDULE", lang, **schedule) if schedule else ""))
+            + (_part(schedule_key, lang, **schedule) if schedule_key else ""))
 
 
 def multi_item(lang: str, *, shape: str, amount: str, source: str = "", destination: str = "",

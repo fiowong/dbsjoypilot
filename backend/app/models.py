@@ -65,11 +65,13 @@ class ScheduleHint(BaseModel):
     turn carries on with no schedule.
     """
 
-    kind: Optional[str] = None          # today | tomorrow | weekday | in_days | day_of_month | end_of_month
+    kind: Optional[str] = None          # today | tomorrow | weekday | in_days | day_of_month |
+                                        # named_date | end_of_month
     weekday: Optional[str] = None
     next: Optional[bool] = None         # weekday only: the customer said "next <day>"
     days: Optional[int] = None          # in_days only: a day count (weeks already multiplied out)
-    day: Optional[int] = None           # day_of_month only: 1-31
+    day: Optional[int] = None           # day_of_month / named_date only: 1-31
+    month: Optional[int] = None         # named_date only: 1-12, the month the customer named
     months_ahead: Optional[bool] = None # day_of_month / end_of_month: next month rather than this
     hour: Optional[int] = None          # 0-23
     minute: Optional[int] = None
@@ -158,6 +160,10 @@ class SessionState(str, Enum):
     CONFIRMATION_READY = "CONFIRMATION_READY"
     CONFIRMATION_COMPLETE = "CONFIRMATION_COMPLETE"
     SIGNED = "SIGNED"
+    # A future-dated payment the customer has confirmed. Distinct from EXECUTED on purpose: the
+    # ledger was never invoked, no money moved, and no receipt exists. "Scheduled" and "executed"
+    # must never be the same state to a downstream control or to the customer.
+    SCHEDULED = "SCHEDULED"
     EXECUTED = "EXECUTED"
     REJECTED = "REJECTED"
     CANCELLED = "CANCELLED"

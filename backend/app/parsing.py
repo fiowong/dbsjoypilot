@@ -123,7 +123,12 @@ def parse_amount(text: str) -> Tuple[Optional[int], bool]:
 
     Handles the compound form "<number word> thousand|ribu|千" (two thousand -> 2000),
     which is how the amounts are actually spoken in the demo scenarios.
+
+    Date expressions are masked out FIRST (see mask_dates). A day of the month is a number, and
+    without this "on 28th september instead" read as S$28.00 — a silent change to how much money
+    moves, which is the one thing this parser must never do.
     """
+    text = mask_dates(text)
     lowered = text.lower()
     scale_word = _scale_word_in(lowered, text)
 
@@ -427,11 +432,34 @@ _HOUR_NUM = (r"\d{1,2}|" + "|".join(
     if 1 <= v <= 12))
 # A day of the month can be spoken as a cardinal ("three") or an ordinal ("third"), so this one
 # accepts both, longest form first so "fifteenth" is never matched as "fifteen".
-_DAY_NUM = (r"\d{1,3}|" + "|".join(re.escape(w) for w in sorted(
+_DAY_NUM = (r"3[01]|[0-2]?\d|" + "|".join(re.escape(w) for w in sorted(
     set(_SMALL_NUMBER_WORDS) | set(_ORDINAL_WORDS), key=len, reverse=True)))
 
 _SCHEDULE_DAY_OF_MONTH_RE = re.compile(
     rf"\b(?:on\s+)?(?:the\s+)?({_DAY_NUM})\s*(?:st|nd|rd|th)?\s*(?:of\s+)?(next|this)\s+month\b")
+
+# A date named with its month ("28th september", "september 28") — the way a customer actually
+# says a specific day. The day and the month must be ADJACENT, which is what keeps the month
+# words safe: "may" / "march" / "august" are ordinary English words too, but "may send" and
+# "march on" have no day number beside them, so they never match.
+_MONTHS = {
+    "january": 1, "february": 2, "march": 3, "april": 4, "may": 5, "june": 6, "july": 7,
+    "august": 8, "september": 9, "october": 10, "november": 11, "december": 12,
+    "jan": 1, "feb": 2, "mar": 3, "apr": 4, "jun": 6, "jul": 7, "aug": 8,
+    "sep": 9, "sept": 9, "oct": 10, "nov": 11, "dec": 12,
+}
+_MONTH = "|".join(re.escape(w) for w in sorted(_MONTHS, key=len, reverse=True))
+# Two separate patterns, tried month-first, because a single alternation gets "send 50 september 28"
+# wrong: re.search returns the LEFTMOST match, so the day-first branch would grab the amount "50"
+# as the day and never see "september 28". Searching month-first first removes that trap.
+_SCHEDULE_MONTH_FIRST_RE = re.compile(
+    rf"\b(?P<m2>{_MONTH})\s+(?P<d2>{_DAY_NUM})\s*(?:st|nd|rd|th)?\b")
+_SCHEDULE_DAY_FIRST_RE = re.compile(
+    rf"\b(?:on\s+)?(?:the\s+)?(?P<d1>{_DAY_NUM})\s*(?:st|nd|rd|th)?\s*(?:of\s+)?(?P<m1>{_MONTH})\b")
+# A bare "the 28th" names a day with no month at all. It is not resolvable to a date — but it must
+# still be recognised, or "send 50 on the 28th" turns the day into S$28 and says nothing.
+_SCHEDULE_BARE_DAY_RE = re.compile(
+    rf"\b(?:on\s+)?the\s+(?P<d>{_DAY_NUM})\s*(?:st|nd|rd|th)?\b")
 _SCHEDULE_END_OF_MONTH_RE = re.compile(
     r"\b(?:the\s+)?(?:end|last\s+day)\s+of\s+(?:(next|this)\s+)?(?:the\s+)?month\b"
     r"|\bmonth[-\s]?end\b")
@@ -447,6 +475,31 @@ _SCHEDULE_AMPM_RE = re.compile(rf"\b({_HOUR_NUM})(?::(\d{{2}}))?\s*(am|pm)\b")
 _SCHEDULE_AT_HOUR_RE = re.compile(rf"\b(?:at|by)\s+({_HOUR_NUM})(?::(\d{{2}}))?\b")
 _SCHEDULE_OCLOCK_RE = re.compile(rf"\b({_HOUR_NUM})\s*o'?clock\b")
 _SCHEDULE_DAY_PART_RE = re.compile(r"\b(afternoon|evening|tonight|night|morning)\b")
+
+# Every pattern whose match is a DATE EXPRESSION rather than a value. Used by mask_dates()
+# below to keep the numbers inside a date out of the amount parser.
+_DATE_PATTERNS = (
+    _SCHEDULE_MONTH_FIRST_RE, _SCHEDULE_DAY_FIRST_RE, _SCHEDULE_DAY_OF_MONTH_RE,
+    _SCHEDULE_END_OF_MONTH_RE, _SCHEDULE_IN_WEEKS_RE, _SCHEDULE_IN_DAYS_RE,
+    _SCHEDULE_IN_A_WEEK_RE, _SCHEDULE_FORTNIGHT_RE, _SCHEDULE_BARE_DAY_RE,
+)
+
+
+def mask_dates(text: str) -> str:
+    """Blank out every date expression, keeping the offsets, so its numbers cannot be an amount.
+
+    "on 28th september instead" was read as S$28.00 because "28th" was the only number in the
+    turn and the amount parser had no way to know it was a day. "send some money in two weeks"
+    had the same fault with the number word "two". Masking the whole phrase — not just the
+    number — fixes both, and an explicit amount elsewhere in the turn ("S$50 in two weeks")
+    still survives untouched.
+    """
+    chars = list(text)
+    for pattern in _DATE_PATTERNS:
+        for match in pattern.finditer(text):
+            for i in range(*match.span()):
+                chars[i] = " "
+    return "".join(chars)
 
 
 def _number_from(token: Optional[str]) -> Optional[int]:
@@ -527,6 +580,24 @@ def schedule_spec_from_text(text: str) -> Optional[dict]:
             day = {"kind": "day_of_month", "day": _number_from(m.group(1)),
                    "months_ahead": 1 if m.group(2) == "next" else 0}
     if day is None:
+        # "september 28" then "28th september" — a day named with its month. Month-first is tried
+        # first for the reason given at _SCHEDULE_MONTH_FIRST_RE.
+        m = _SCHEDULE_MONTH_FIRST_RE.search(lowered)
+        if m:
+            day = {"kind": "named_date", "day": _number_from(m.group("d2")),
+                   "month": _MONTHS[m.group("m2")]}
+        else:
+            m = _SCHEDULE_DAY_FIRST_RE.search(lowered)
+            if m:
+                day = {"kind": "named_date", "day": _number_from(m.group("d1")),
+                       "month": _MONTHS[m.group("m1")]}
+    if day is None:
+        # "the 28th" with no month. Deliberately produces a spec compute_schedule must refuse, so
+        # the caller asks which month instead of ignoring the date (or reading it as money).
+        m = _SCHEDULE_BARE_DAY_RE.search(lowered)
+        if m:
+            day = {"kind": "named_date", "day": _number_from(m.group("d")), "month": None}
+    if day is None:
         m = _SCHEDULE_END_OF_MONTH_RE.search(lowered)
         if m:
             day = {"kind": "end_of_month", "months_ahead": 1 if m.group(1) == "next" else 0}
@@ -592,6 +663,14 @@ def schedule_spec_from_hint(hint) -> Optional[dict]:
             return None
         spec.update(kind="day_of_month", day=day_of_month,
                     months_ahead=1 if hint.get("months_ahead") else 0)
+    elif kind == "named_date":
+        day_of_month, month = hint.get("day"), hint.get("month")
+        if (isinstance(day_of_month, bool) or not isinstance(day_of_month, int)
+                or not 1 <= day_of_month <= 31):
+            return None
+        if isinstance(month, bool) or not isinstance(month, int) or not 1 <= month <= 12:
+            return None
+        spec.update(kind="named_date", day=day_of_month, month=month)
     elif kind == "end_of_month":
         spec.update(kind="end_of_month", months_ahead=1 if hint.get("months_ahead") else 0)
     else:
@@ -663,6 +742,30 @@ def compute_schedule(spec: Optional[dict], today: Optional[date] = None) -> Opti
             return None
         relative = (f"the {_ordinal(day_of_month)} of "
                     + ("next month" if months_ahead else "this month"))
+    elif kind == "named_date":
+        # "28th september" / "september 28". The customer named the month, so the only thing left
+        # for code to decide is the YEAR: this year if that day is still to come, next year if the
+        # month has already gone. A day in the CURRENT month that has already passed is refused
+        # outright (same rule as "the Nth of this month") rather than quietly pushed a year out.
+        day_of_month = spec.get("day")
+        month = spec.get("month")
+        if (isinstance(day_of_month, bool) or not isinstance(day_of_month, int)
+                or not 1 <= day_of_month <= 31
+                or isinstance(month, bool) or not isinstance(month, int) or not 1 <= month <= 12):
+            return None
+        year = base.year
+        if month < base.month:
+            year += 1
+        elif month == base.month and day_of_month <= base.day:
+            return None
+        if day_of_month > calendar.monthrange(year, month)[1]:
+            return None
+        target = date(year, month, day_of_month)
+        # Deliberately NO relative phrase. The customer named the month themselves, so
+        # "the 28th of September" and the absolute "28 September 2026" are the same date twice —
+        # the read-back was saying "the 28th of September, 28 September 2026". The absolute carries
+        # the year too, including the next-year case, so nothing is lost by dropping the relative.
+        relative = None
     elif kind == "end_of_month":
         months_ahead = spec.get("months_ahead") or 0
         if months_ahead not in (0, 1):
@@ -693,6 +796,8 @@ def parse_schedule(text: str, today: Optional[date] = None) -> Optional[Dict[str
                                     time="9:00 AM"  (absolute computed from today).
     "in two weeks"              -> relative="in 2 weeks", the date 14 days out.
     "the 3rd of next month"     -> relative="the 3rd of next month", that date.
+    "28th september"            -> relative="the 28th of September", that date (next year if the
+                                   month has already gone; None if it is this month and past).
     "end of the month"          -> relative="the end of this month", the last day of this month.
 
     The absolute date is computed from the phrase plus the current date, so it stays correct
@@ -709,6 +814,48 @@ def schedule_from_hint(hint, today: Optional[date] = None) -> Optional[Dict[str,
     computed here, from the current date.
     """
     return compute_schedule(schedule_spec_from_hint(hint), today)
+
+
+def schedule_named_but_unusable(text: str, today: Optional[date] = None) -> bool:
+    """True when the turn NAMES a date that was recognised but could not be turned into one.
+
+    "the 3rd of this month" said on the 26th, "31 September", "in 0 days". The customer did name
+    a date, so going ahead WITHOUT one — silently — is the wrong answer: the read-back would carry
+    no date at all and nothing would tell them it was ignored. The caller asks instead.
+
+    A turn with no date phrase returns False, so an ordinary payment is never questioned.
+    """
+    spec = schedule_spec_from_text(text)
+    return spec is not None and compute_schedule(spec, today) is None
+
+
+# Cues that mark a turn as CORRECTING something already on screen rather than starting a new
+# payment. Trilingual for the same reason the other safeguards are.
+_SCHEDULE_CORRECTION_CUE_RE = re.compile(
+    r"\b(instead|change|changed|make it|move it|actually|i said|should be|correction|"
+    r"wrong|no|not|salah|bukan|sepatutnya|ubah|tukar)\b", re.IGNORECASE)
+
+
+def is_schedule_correction(text: str) -> bool:
+    """True when a turn is ONLY correcting the WHEN of the payment already on screen.
+
+    Deliberately narrow, because the caller uses it to carry the existing payment forward instead
+    of re-reading it from the text. It requires all four of:
+      * a correction cue ("instead", "make it", "actually", …),
+      * a date phrase the extractor recognises,
+      * NO new amount, and
+      * NO new payee.
+    So "no, make it S$60" (amount only) and "actually send it to Ah Girl" (payee only) are NOT
+    date corrections and still take the ordinary edit path — only a turn that changes the date and
+    nothing else is carried forward, which is what makes keeping the other fields safe.
+    """
+    if not _SCHEDULE_CORRECTION_CUE_RE.search(text):
+        return False
+    if schedule_spec_from_text(text) is None:
+        return False
+    if parse_amount(text)[0] is not None:
+        return False
+    return parse_payee_phrase(mask_dates(text)) is None
 
 
 # ---------------------------------------------------------------------------

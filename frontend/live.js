@@ -2,7 +2,9 @@
 /* ---------- live free-form input: real /turn + /confirm calls, no more scripting ---------- */
 const fld=$('fld'), mic=$('mic');
 let FREE_SESSION_ID = null;
-const TERMINAL_STATES = new Set(['EXECUTED','REJECTED','FROZEN','COOLING_OFF']);
+// SCHEDULED is terminal too: a confirmed future-dated payment is finished for this draft, but it
+// is NOT executed — no ledger entry was written, so no LEDGER_RECORDED event and no receipt card.
+const TERMINAL_STATES = new Set(['EXECUTED','SCHEDULED','REJECTED','FROZEN','COOLING_OFF']);
 
 // Right-column YOU bubble the mic handler draws as words arrive (interim + final).
 // liveFreeTurn consumes this on a voice turn so it doesn't echo a second "YOU" copy.
