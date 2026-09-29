@@ -24,6 +24,7 @@ from .agents import (GuardrailsAgent, IntentClassifierAgent, PaymentAgent, Valid
                      AFFIRMATION_RE, NEGATION_RE, INSUFFICIENT_FUNDS_RE, SAFETY_HELP_RE,
                      MANDATORY_CONTROL_RE, ROLE_OVERRIDE_RE)
 from .agent_runtime import AgentUnavailable
+from .llm_client import arm_turn_deadline, disarm_turn_deadline
 # The learned-nickname store. Imported here (not via parsing) because the audit event needs to
 # attribute the match itself: parsing converts a nickname to its display name before the resolver
 # sees it, so only the store can say "the customer said a nickname, and it was this one". `teach`
@@ -169,6 +170,21 @@ def _saved_payee_options(customer_id: str) -> List[dict]:
 
 
 async def run_turn(req: TurnRequest) -> TurnResponse:
+    """Entry point for one committed customer turn.
+
+    Its only job beyond delegating is to arm the turn's live-model budget, so that a slow or
+    stalled upstream can never freeze the demo: once the budget is spent, the remaining agents
+    in this turn fail closed to their deterministic mocks (see llm_client.arm_turn_deadline).
+    The turn always completes, and always with a decision the deterministic chain owns.
+    """
+    arm_turn_deadline(Settings.TURN_DEADLINE_S)
+    try:
+        return await _run_turn(req)
+    finally:
+        disarm_turn_deadline()
+
+
+async def _run_turn(req: TurnRequest) -> TurnResponse:
     session = get_session(req.session_id)
     events: List[dict] = []
     # A previous turn's read-back may have been holding the confirm card back while it asked a

@@ -20,10 +20,34 @@ function guessLang(text){
   return 'EN';
 }
 
+// Every backend call is bounded. Without this a stalled upstream froze the customer view
+// indefinitely: the request sat open, the input stayed disabled and Auntie never answered,
+// with nothing on screen to say why. A timeout is not a decision, it is a refusal to wait
+// forever, so it is reported as such (err.timedOut) and the caller decides what to say.
+// 25s, deliberately ABOVE the backend's own 15s turn budget, so the server gives up first
+// (and still answers, having fallen back to its deterministic mocks). The browser timeout
+// is a backstop for a backend that is not answering at all, not the thing that decides.
+const REQUEST_TIMEOUT_MS = 25000;
+
 async function postJSON(path, body){
-  const res = await fetch(`${API_BASE}${path}`, {
-    method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)
-  });
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), REQUEST_TIMEOUT_MS);
+  let res;
+  try{
+    res = await fetch(`${API_BASE}${path}`, {
+      method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body),
+      signal: ctrl.signal
+    });
+  }catch(err){
+    clearTimeout(timer);
+    if(err && err.name === 'AbortError'){
+      const e = new Error(`${path} → no response within ${REQUEST_TIMEOUT_MS/1000}s`);
+      e.timedOut = true;
+      throw e;
+    }
+    throw err;
+  }
+  clearTimeout(timer);
   if(!res.ok){
     // The status alone is not enough to act on. A 409 is the backend REFUSING (frozen/cancelled,
     // or no draft awaiting confirmation), not a transport failure, so the body's `detail` is
@@ -313,7 +337,11 @@ async function liveFreeTurn(text, viaVoice, asrConfidence, asrSource){
                                      : (viaVoice ? 'unreported' : 'typed')
     });
   }catch(err){
-    audit('TURN_CALL_FAILED · '+err.message,'stop');
+    // A timeout and a refusal are different failures and must not be reported as one thing.
+    // "HTTP 409" is the backend answering; "no response within 20s" is it not answering, which
+    // is the honest thing to show a judge instead of a generic "unreachable".
+    if(err && err.timedOut) audit('TURN_TIMEOUT · '+err.message,'stop');
+    else audit('TURN_CALL_FAILED · '+err.message,'stop');
     // The backend never answered, so there is no catalogue line to quote and no settled session
     // language: the local reading of this turn's words is the best available, and the fallback
     // sentence is chrome, so it follows that.

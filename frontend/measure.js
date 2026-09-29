@@ -1,10 +1,16 @@
-/* Real-browser layout probe.
+/* ============================================================================
+   NOT A BROWSER SCRIPT. DO NOT ADD A <script src="measure.js"> TO index.html.
+   This file uses require() and child_process, which do not exist in a browser,
+   so loading it there would throw and take the whole page down with it.
+   ----------------------------------------------------------------------------
+   Real-browser layout probe (QA TOOL, run by hand, never served).
    jsdom has no layout engine, so it cannot tell whether the logo is stretched or
    whether the phone keeps phone proportions. This launches headless Chrome,
    attaches over the DevTools protocol, and reads back actual rendered geometry
    for all three screens (login -> home -> AuntieJoy chat).
 
-   Run:  node measure.js                                                       */
+   Run:  node measure.js
+   ============================================================================ */
 const { spawn } = require('child_process');
 const path = require('path');
 const os = require('os');

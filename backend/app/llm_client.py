@@ -1,6 +1,8 @@
 import json
 import sys
 import asyncio
+import time
+from contextvars import ContextVar
 from typing import Optional
 import httpx
 from .config import Settings
@@ -17,9 +19,52 @@ from .agent_runtime import AgentUnavailable
 # "upstream model service is abnormal or unreachable" rate when the provider is load-sensitive.
 _CALL_PACE_S = 0.3
 
+# Per-turn budget for live model calls, held in a ContextVar so it is scoped to the request
+# being served and cannot leak between two overlapping turns. The orchestrator arms it at the
+# top of run_turn; when it runs out, llm_complete raises AgentUnavailable, which every agent
+# already treats as "fall back to the deterministic mock". That is what stops a slow provider
+# from stacking five slow calls into a frozen demo: the first few agents may go live, the rest
+# go deterministic, and the turn still completes with a correct answer.
+_TURN_DEADLINE: ContextVar[Optional[float]] = ContextVar("aj_turn_deadline", default=None)
+
+
+class _FatalUpstreamError(AgentUnavailable):
+    """An upstream failure that retrying cannot fix (rejected credentials).
+
+    Subclasses AgentUnavailable so callers need no new handling: every agent already treats
+    that as "fall back to the deterministic mock". Only the retry loop distinguishes it.
+    """
+
+
+def arm_turn_deadline(seconds: float) -> None:
+    """Start this turn's live-model budget. Called once at the top of run_turn."""
+    _TURN_DEADLINE.set(time.monotonic() + seconds if seconds and seconds > 0 else None)
+
+
+def disarm_turn_deadline() -> None:
+    """Clear the budget. Called in a finally so a turn never leaves one armed."""
+    _TURN_DEADLINE.set(None)
+
+
+def turn_budget_spent() -> bool:
+    deadline = _TURN_DEADLINE.get()
+    return deadline is not None and time.monotonic() >= deadline
+
+
+def budget_remaining() -> Optional[float]:
+    """Seconds of live-model budget left in this turn, or None when no budget is armed."""
+    deadline = _TURN_DEADLINE.get()
+    return None if deadline is None else max(0.0, deadline - time.monotonic())
+
+
 async def llm_complete(system_prompt: str, user_payload: dict) -> str:
     if not Settings.LIVE_LLM:
         raise AgentUnavailable("live LLM not configured")
+    if turn_budget_spent():
+        # Not a transport failure: this turn already spent its live-model budget on earlier
+        # agents, so the remaining ones go deterministic. Fails closed, never silently live.
+        raise AgentUnavailable(
+            "turn live-model budget spent, using the deterministic mock for this agent")
     body = {
         "model": Settings.LLM_MODEL,
         "temperature": Settings.AGENT_TEMPERATURE,
@@ -31,15 +76,33 @@ async def llm_complete(system_prompt: str, user_payload: dict) -> str:
     last_error: Optional[Exception] = None
     backoff = 0.5
     for attempt in range(Settings.AGENT_MAX_RETRIES + 1):
+        # Checked before EVERY attempt, not just the first: otherwise one agent's four
+        # 8s attempts could overrun the whole turn's budget on its own and still leave the
+        # customer waiting long after the remaining agents should have gone deterministic.
+        if turn_budget_spent():
+            raise AgentUnavailable(
+                "turn live-model budget spent, using the deterministic mock for this agent")
         await asyncio.sleep(_CALL_PACE_S)
+        # A single attempt may not outlive the budget either, so the ceiling is whichever
+        # comes first: the per-attempt timeout, or what this turn has left to spend.
+        remaining = budget_remaining()
+        attempt_timeout = Settings.AGENT_TIMEOUT_S
+        if remaining is not None:
+            attempt_timeout = max(1.0, min(attempt_timeout, remaining))
         try:
-            async with httpx.AsyncClient(timeout=Settings.AGENT_TIMEOUT_S) as client:
+            async with httpx.AsyncClient(timeout=attempt_timeout) as client:
                 resp = await client.post(
                     f"{Settings.LLM_BASE_URL.rstrip('/')}/chat/completions",
                     headers={"Authorization": f"Bearer {Settings.LLM_API_KEY}",
                              "Content-Type": "application/json"},
                     json=body,
                 )
+                if resp.status_code in (401, 403):
+                    # Rejected credentials are permanent. Retrying four times only bought four
+                    # pointless round-trips, which is how a bad key cost ~28s of a turn.
+                    raise _FatalUpstreamError(
+                        f"upstream rejected the credentials (HTTP {resp.status_code}), "
+                        "check the API key; retrying cannot fix this")
                 if resp.status_code == 429:
                     # Rate limited, wait the server's Retry-After (or our backoff) and retry.
                     last_error = httpx.HTTPStatusError(
@@ -53,6 +116,8 @@ async def llm_complete(system_prompt: str, user_payload: dict) -> str:
                     break
                 resp.raise_for_status()
                 return resp.json()["choices"][0]["message"]["content"]
+        except _FatalUpstreamError:
+            raise                                     # a rejected key will never succeed
         except Exception as exc:                      # noqa: BLE001, fail closed on anything
             last_error = exc
             if attempt < Settings.AGENT_MAX_RETRIES:

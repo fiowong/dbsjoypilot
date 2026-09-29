@@ -20,8 +20,18 @@ class Settings:
 
     INTENT_CONFIDENCE_THRESHOLD = 0.75      # §8.6.4
     AGENT_TEMPERATURE = 0.0                 # §8.1
-    AGENT_TIMEOUT_S = 30.0                  # raised: deepseek endpoint occasionally slow; 30s ceiling, not a typical latency
+    # 8s, not 30s. This is the ceiling for ONE upstream attempt, so a stalled provider now
+    # costs 8s before that agent fails closed to its deterministic mock instead of 30s. On
+    # stage the old 30s ceiling froze the customer view for over two minutes on one hung call.
+    AGENT_TIMEOUT_S = 8.0
     AGENT_MAX_RETRIES = 3                    # §8.1, 4 attempts total with exponential backoff + 429 Retry-After (upstream is flaky)
+    # The whole turn's live-model budget. Once it is spent, every REMAINING agent in this
+    # turn skips the upstream entirely and uses its deterministic mock, so a slow provider
+    # can never stack five slow calls into a frozen demo. The customer still gets an answer,
+    # just a deterministic one, and the audit records that the budget ran out.
+    # 15s, deliberately WELL UNDER the frontend's 25s request timeout, so the backend is the
+    # thing that gives up first and the browser is only ever a backstop, never the decider.
+    TURN_DEADLINE_S = 15.0
     ASR_AMBIGUITY_THRESHOLD = 0.85
 
     # Personalization Agent (§ observed-friction, not speech-pattern inference).
