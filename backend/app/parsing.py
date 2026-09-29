@@ -29,9 +29,42 @@ NUMBER_WORDS = {
     "八": 8, "九": 9, "十": 10, "十五": 15, "二十": 20, "三十": 30, "四十": 40,
     "五十": 50, "六十": 60, "七十": 70, "八十": 80, "九十": 90, "一百": 100,
 }
-SCALE_WORDS = {"thousand": 1000, "ribu": 1000, "千": 1000}
+SCALE_WORDS = {"thousand": 1000, "ribu": 1000, "千": 1000, "grand": 1000}
 # a number word that also has a ×1000 reading is materially ambiguous when ASR is unsure (§A.5 B1)
 AMBIGUOUS_SCALES = {"fifty", "lima puluh", "五十", "five", "lima", "五", "ten", "sepuluh", "十"}
+
+# Slang scale words the customer might say out loud. "grand" and "k" are NOT standard number
+# words, so when one is used the system states the interpretation it assumed and asks the
+# customer to confirm it, the same "advise first" posture it takes for everything else.
+# "thousand" / "ribu" / "千" are standard and are never flagged.
+_SLANG_SCALE = ("grand", "k")
+_WORD_NUMBERS = {"one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"}
+
+
+def colloquial_scale_phrase(text: str) -> Optional[str]:
+    """The spoken slang-scale phrase in `text`, or None.
+
+    Returns the exact words the customer said so the confirm can quote them back, "a grand"
+    (with its article) rather than just "grand", or "5k" / "five k". Standard scale words
+    ("thousand", "ribu", "千") return None: they are not slang and need no confirmation.
+    """
+    if not text:
+        return None
+    lowered = text.lower()
+    m = re.search(r"\b(a|an)\s+grand\b", lowered)
+    if m:
+        return m.group(0)
+    if re.search(r"\bgrand\b", lowered):
+        return "grand"
+    m = re.search(r"\b\d+\s*k\b", lowered)
+    if m:
+        return m.group(0)
+    m = re.search(rf"\b({'|'.join(_WORD_NUMBERS)})\s+k\b", lowered)
+    if m:
+        return m.group(0)
+    if re.search(r"\bk\b", lowered):
+        return "k"
+    return None
 
 # alias -> the display-name fragment it resolves to (the LLM proposes a phrase, never an id)
 PAYEE_ALIASES = {
@@ -41,10 +74,11 @@ PAYEE_ALIASES = {
 }
 
 
-# The three supported interaction languages, plus code-mixed speech. These patterns are
-# module-level (not buried inside detect_language) because two callers need them:
-# detect_language() to classify the turn, and messages.interface_language() to decide which
-# template language a code-mixed turn should be answered in. One definition, two readers.
+# The three supported interaction languages, plus code-mixed speech. Module-level (not buried
+# inside detect_language) so the vocabulary is defined once and can be tuned in one place.
+# Only detect_language() reads them now: interface_language() used to consult them to pick a
+# language for a code-mixed turn, but that made a handful of Han characters outvote the rest of
+# the sentence, so MIXED now defaults to English (see messages.interface_language).
 CJK_MARKERS = re.compile(r"[\u4e00-\u9fff]")
 BM_MARKERS = re.compile(
     r"\b(hantar|kepada|dolar|duit|saya|tidak|boleh|jumlah|akaun|bayar|sekarang|"
@@ -66,18 +100,105 @@ def detect_language(text: str) -> str:
     return "EN"
 
 
+# Ordinary Malay words, for the MAJORITY count below. Deliberately wider than BM_MARKERS:
+# BM_MARKERS only has to answer "is there any Malay here?", so it gets away with a handful of
+# loud markers; a majority vote needs the small joining words too ("dan", "dari", "satu") or
+# every Malay sentence scores as mostly English because its nouns happen to be English.
+_BM_VOCAB = frozenset({
+    "hantar", "kepada", "dolar", "duit", "saya", "tidak", "boleh", "jumlah", "akaun", "bayar",
+    "sekarang", "lima", "lapan", "sepuluh", "ribu", "seratus", "buang", "had", "cucu", "cepat",
+    "maaf", "dan", "atau", "dari", "ke", "di", "untuk", "dengan", "ini", "itu", "ada", "nak",
+    "sudah", "sila", "tolong", "nanti", "satu", "dua", "tiga", "empat", "enam", "tujuh",
+    "sembilan", "puluh", "ringgit", "semua", "lagi", "juga", "tapi", "kalau", "sebab", "macam",
+    "mana", "apa", "siapa", "bil", "bayaran", "pindah", "pindahkan", "awak", "kami", "dia",
+    "mereka", "bahasa", "wang", "selamat", "jangan", "tanya", "tak", "cakap", "buat", "kita",
+})
+_CJK_RUN_RE = re.compile(r"[\u4e00-\u9fff]+")
+_LATIN_WORD_RE = re.compile(r"[A-Za-z]+")
+
+
+def language_word_counts(text: str) -> Dict[str, int]:
+    """How much of each language the turn really contains: one point per Chinese run or word.
+
+    A run of Chinese characters counts as ONE point, not one per character; otherwise a single
+    four-character phrase outweighs four English words and "mostly Chinese" is decided by
+    stroke count rather than by what the customer actually said.
+    """
+    counts = {"EN": 0, "ZH": 0, "BM": 0}
+    counts["ZH"] = len(_CJK_RUN_RE.findall(text))
+    for word in _LATIN_WORD_RE.findall(text.lower()):
+        counts["BM" if word in _BM_VOCAB else "EN"] += 1
+    return counts
+
+
+def dominant_language(text: str) -> str:
+    """The language the customer used MOST, for a turn that mixes several. EN wins a tie.
+
+    This is what makes "帮我 bayar bil Starhub dari current account" an English answer: the
+    Mandarin is three short runs and the rest of the breath is English, so English has the most
+    words. It is a count, not a guess, and unlike answering in whatever script appears first,
+    it cannot be flipped by one character.
+    """
+    counts = language_word_counts(text)
+    best = max(counts.values())
+    if best == 0:
+        return "EN"
+    for lang in ("EN", "ZH", "BM"):      # EN first, so it takes a tie as the neutral tongue
+        if counts[lang] == best:
+            return lang
+    return "EN"
+
+
+# A spoken "one fifty" is either S$1.50 or S$150, a LINGUISTIC ambiguity, not an ASR one
+# (a cousin of the ×1000 scale ambiguity in §A.5 B1). A small number word ("one"…"twelve")
+# followed by a sub-hundred number word, with no decimal point, no "hundred", and no explicit
+# cent word, is ambiguous in the words themselves, so it is material at ANY asr confidence.
+# ("one hundred fifty" is unambiguous, it has "hundred"; a literal "1.50" is parsed directly.)
+_UNITS_WORDS = {"one", "two", "three", "four", "five", "six", "seven", "eight", "nine",
+                "ten", "eleven", "twelve"}
+
+
+def decimal_ambiguity_pair(text: str) -> Optional[Tuple[int, int]]:
+    """(lower_minor, higher_minor) for a "one fifty" style amount, or None.
+
+    lower = X dollars + Y cents (one fifty -> S$1.50); higher = the same digits read as whole
+    dollars (S$150.00). Only when the turn has no decimal point, no "hundred", and no explicit
+    cent word, otherwise the customer already disambiguated it. The Payment Agent and the
+    orchestrator share this one predicate, so the question can never contradict the reason.
+    """
+    lowered = text.lower()
+    # A genuine decimal point ("1.50") disambiguates the amount, so there is nothing to ask,
+    # but a trailing sentence full stop must NOT count as one. Explicit cent words do too.
+    if re.search(r"\d\.\d", lowered) or re.search(r"\b(cent|sen)s?\b", lowered):
+        return None
+    words = re.findall(r"[a-z]+", lowered)
+    for i in range(len(words) - 1):
+        a, b = words[i], words[i + 1]
+        if a in _UNITS_WORDS and b in NUMBER_WORDS and 1 <= NUMBER_WORDS[b] <= 99:
+            units = NUMBER_WORDS[a]
+            sub = NUMBER_WORDS[b]
+            low = units * 100 + sub            # S$1.50 when units=1, sub=50
+            return low, low * 100              # S$150.00
+    return None
+
+
 def ambiguous_amount_pair(text: str, asr_confidence: float,
                           already_disambiguated: bool = False) -> Optional[Tuple[int, int]]:
     """The two readings of a *materially* ambiguous amount, or None.
 
-    "fifty" is either fifty dollars or fifty thousand dollars. That is only material when the
-    audio evidence was also uncertain (§A.5 B1), the customer has not already disambiguated
-    the amount, and the turn is not an explicit correction (an explicit correction wins).
+    A "one fifty" style amount is ambiguous in the WORDS themselves, so it is material no
+    matter how clear the audio was, that is checked first. "fifty" is either fifty dollars or
+    fifty thousand dollars; that ×1000 reading is only material when the audio evidence was
+    also uncertain (§A.5 B1), the customer has not already disambiguated the amount, and the
+    turn is not an explicit correction (an explicit correction wins).
 
     Returns (lower_minor, higher_minor). Both the Payment Agent (which raises the ambiguity)
     and the orchestrator (which renders the question) call this one predicate, so the question
     can never disagree with the reason it was asked.
     """
+    decimal = decimal_ambiguity_pair(text)
+    if decimal is not None:
+        return decimal
     if already_disambiguated or asr_confidence >= Settings.ASR_AMBIGUITY_THRESHOLD:
         return None
     if parse_corrected_amount(text) is not None:
@@ -116,19 +237,55 @@ def _scale_word_in(lowered: str, raw: str) -> Optional[str]:
     return None
 
 
+# A turn can open with a confirmation/acknowledgement of the payment already on screen ("yes
+# 1000 is correct.") and THEN name a fresh instruction ("send $50 to ah girl"). The confirmation's
+# number must never be read as the new instruction's amount, that silently changes how much money
+# the new instruction moves, the one thing amount parsing must never do. instruction_text() returns
+# only the instruction-bearing tail so parse_amount sees just it.
+_AFFIRM_TOKENS = re.compile(
+    r"\b(yes|yeah|yep|yah|ya|correct|right|ok|okay|sure|confirm|affirm|true|agreed|good|great|"
+    r"fine|sounds|perfect|alright|setuju|对的|是的|没错|正确|对|嗯|ok lah|ya lah)\b", re.I)
+_PAYMENT_VERBS = re.compile(
+    r"\b(send|transfer|pay|hantar|bayar|buat|give|transferkan|汇|给|帮我)\b", re.I)
+
+
+def instruction_text(turn: str) -> str:
+    """The portion of a turn that carries a NEW payment instruction.
+
+    A leading clause cut at a SENTENCE boundary (".", "!", "?", ";") that is a pure
+    acknowledgement (an affirmation/correctness token and no payment verb) is dropped, provided
+    the remainder still names a payment. Everything else, comma-joined phrases, verb-less
+    instructions, and instructions whose amount legitimately precedes the verb, is returned
+    unchanged, so existing behaviour is preserved.
+
+    "yes 1000 is correct. send $50 to ah girl" -> "send $50 to ah girl"
+    "send 1000 to ah girl"                      -> "send 1000 to ah girl"  (unchanged)
+    """
+    if not turn:
+        return turn
+    m = re.search(r"[.!?;]+(\s+|$)", turn)
+    if not m:
+        return turn
+    prefix, rest = turn[:m.start()].strip(), turn[m.end():].strip()
+    if (prefix and rest and not _PAYMENT_VERBS.search(prefix)
+            and _AFFIRM_TOKENS.search(prefix) and _PAYMENT_VERBS.search(rest)):
+        return rest
+    return turn
+
+
 def parse_amount(text: str) -> Tuple[Optional[int], bool]:
     """Return (amount_minor, scale_ambiguous).
 
     scale_ambiguous is True when the amount came from a number word that also has a x1000
     reading (fifty / fifty thousand). That is only a *material* ambiguity when the ASR
-    evidence is also uncertain — the caller combines it with the ASR confidence (§A.5 B1).
+    evidence is also uncertain, the caller combines it with the ASR confidence (§A.5 B1).
     Integer minor units only (§8.7.3).
 
     Handles the compound form "<number word> thousand|ribu|千" (two thousand -> 2000),
     which is how the amounts are actually spoken in the demo scenarios.
 
     Date expressions are masked out FIRST (see mask_dates). A day of the month is a number, and
-    without this "on 28th september instead" read as S$28.00 — a silent change to how much money
+    without this "on 28th september instead" read as S$28.00, a silent change to how much money
     moves, which is the one thing this parser must never do.
     """
     text = mask_dates(text)
@@ -144,7 +301,7 @@ def parse_amount(text: str) -> Tuple[Optional[int], bool]:
             value *= SCALE_WORDS[scale_word]
         return int(round(value * 100)), False
 
-    # 2) Compound spoken form — the number word that precedes the scale word multiplies it.
+    # 2) Compound spoken form, the number word that precedes the scale word multiplies it.
     if scale_word:
         head_lowered, head_raw = lowered.split(scale_word, 1)[0], None
         if not scale_word.isascii():
@@ -152,7 +309,7 @@ def parse_amount(text: str) -> Tuple[Optional[int], bool]:
         word, head_value = _largest_number_word(head_lowered, head_raw or head_lowered)
         if word is not None:
             return head_value * SCALE_WORDS[scale_word] * 100, False
-        # "a thousand" / bare scale word — the scale is the whole value.
+        # "a thousand" / bare scale word, the scale is the whole value.
         return SCALE_WORDS[scale_word] * 100, False
 
     # 3) Plain number words.
@@ -190,15 +347,50 @@ def last_committed_amount(turns: List[str]) -> Optional[int]:
         corrected = parse_corrected_amount(turn)
         if corrected is not None:
             return corrected
-        value, _ = parse_amount(turn)
+        value, _ = parse_amount(instruction_text(turn))
         if value is not None:
             return value
     return None
 
 
+def _segment_recipient(seg: str, customer_id: Optional[str]) -> Optional[str]:
+    """The resolved recipient name a single instruction segment targets, or None.
+
+    Covers all four transaction shapes (biller, card, own account, saved payee) so a
+    follow-up turn can be matched to the instruction it refers to by recipient, not by
+    whichever number happens to appear first in the turn.
+    """
+    return (parse_biller_phrase(seg, customer_id) or parse_card_phrase(seg, customer_id)
+            or parse_own_account_phrase(seg, customer_id) or parse_payee_phrase(seg, customer_id))
+
+
+def committed_amount_for_recipient(customer_id: Optional[str], recipient_phrase: Optional[str],
+                                   turns: List[str]) -> Optional[int]:
+    """The amount most recently committed for a SPECIFIC recipient.
+
+    When a follow-up turn names a payee but states no amount (e.g. "send ah girl money from my
+    current account" after "… send fifty to Ah Girl"), the amount must come from the evidence
+    segment that mentions THAT recipient, never from the first number in the turn, a
+    multi-instruction turn like "a grand to joint, then fifty to Ah Girl" would otherwise leak
+    the joint transfer's S$1,000 onto the Ah Girl payment. Deterministic and payee-scoped, so a
+    model can never re-decide how much money moves.
+    """
+    if not recipient_phrase:
+        return None
+    target = recipient_phrase.lower()
+    for turn in reversed(turns):
+        for seg in split_instructions(turn, customer_id):
+            r = _segment_recipient(seg, customer_id)
+            if r and r.lower() == target:
+                amount, _ = parse_amount(instruction_text(seg))
+                if amount is not None:
+                    return amount
+    return None
+
+
 # A spoken name is a run of CAPITALISED words: "Mei Ling", "John Doe", "Ah Girl". Capturing the
 # whole run (rather than one word) is what stops "Send S$50 to Mei Ling" from being reduced to
-# the alias "mei" and silently binding to Mei Tan — the customer named one person and the
+# the alias "mei" and silently binding to Mei Tan, the customer named one person and the
 # payment went to another.
 #
 # "Capitalised" means capital-then-lowercase, NOT merely uppercase. That distinction is what
@@ -211,7 +403,7 @@ _NAME_RUN = r"[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b"
 
 def parse_payee_phrase(text: str, customer_id: Optional[str] = None) -> Optional[str]:
     lowered = text.lower()
-    # 0) A NICKNAME the customer uses out loud — "ah girl", "mum", "my daughter". Checked FIRST
+    # 0) A NICKNAME the customer uses out loud, "ah girl", "mum", "my daughter". Checked FIRST
     #    and case-insensitively, because spoken ASR hands us "send ah girl $100" in lowercase and
     #    the capitalised-name rule below cannot see lowercase words at all. This returns the
     #    CANONICAL display name, never the nickname: the resolver matches phrases against display
@@ -223,7 +415,7 @@ def parse_payee_phrase(text: str, customer_id: Optional[str] = None) -> Optional
             return hit[1].display_name
     # 1) The name the customer actually said, in full.
     #    The CUE words are matched case-insensitively (a turn often starts "Send …" with a
-    #    capital S) but the NAME is not — a capitalised run is what tells us it is a name at
+    #    capital S) but the NAME is not, a capitalised run is what tells us it is a name at
     #    all, so lowercasing that would swallow ordinary words like "fifty dollar".
     run = re.search(rf"(?i:kepada|to|给|pay|transfer to|send)\s+({_NAME_RUN})", text)
     if run:
@@ -234,7 +426,7 @@ def parse_payee_phrase(text: str, customer_id: Optional[str] = None) -> Optional
             return PAYEE_ALIASES[phrase.lower()]
         return phrase
     # 2) Otherwise fall back to the alias table (lowercase nicknames like "mother").
-    #    Return the CANONICAL name the alias maps to, not the alias itself — returning "may"
+    #    Return the CANONICAL name the alias maps to, not the alias itself, returning "may"
     #    instead of "mei" left the resolver with a phrase that matched no display name, so
     #    "send may $50" was answered with "I couldn't find a saved payee called May" even though
     #    "may" had been in this table the whole time.
@@ -245,7 +437,7 @@ def parse_payee_phrase(text: str, customer_id: Optional[str] = None) -> Optional
 
 
 # ---------------------------------------------------------------------------
-# A name the customer used that we hold nobody for — "ah girl", "husband", "my boss".
+# A name the customer used that we hold nobody for, "ah girl", "husband", "my boss".
 #
 # "Send Ah Girl S$100" used to be answered with the generic "Mei Ling, who should I pay?", which
 # is unanswerable for a customer who has just said exactly who they meant. The useful question is
@@ -253,8 +445,8 @@ def parse_payee_phrase(text: str, customer_id: Optional[str] = None) -> Optional
 # the name is remembered (see app/nicknames.py).
 #
 # This is deliberately the most conservative detector in the file. It fires ONLY once every other
-# reading of the turn has been ruled out — no saved payee, no nickname, no alias, no biller, no
-# card, no own account, no source account — because a false positive asks an elderly customer to
+# reading of the turn has been ruled out, no saved payee, no nickname, no alias, no biller, no
+# card, no own account, no source account, because a false positive asks an elderly customer to
 # define a name they never used. The implementation is therefore subtraction: remove everything we
 # DO understand from the sentence, then ask whether a name-shaped leftover remains.
 # ---------------------------------------------------------------------------
@@ -274,7 +466,7 @@ _PERSON_NOISE_WORDS = (
     # money, and the words for an amount
     "money", "cash", "amount", "sum", "total", "dollar", "dollars", "ringgit", "yuan",
     "cent", "cents", "sen", "thousand", "hundred", "million", "ribu", "ratus", "juta",
-    # accounts, bills and cards — each of these has its own detector
+    # accounts, bills and cards, each of these has its own detector
     "savings", "saving", "current", "multiplier", "usd", "account", "akaun",
     "bill", "bills", "invoice", "card", "credit",
     # when it should run
@@ -289,7 +481,7 @@ def _person_noise_re() -> "re.Pattern[str]":
 
     Built from the live vocabularies rather than a hand-copied list, so a weekday or a month added
     to `_WEEKDAYS` / `_MONTHS` is ignored here too. The alternative is a name detector that starts
-    reading "monday" as somebody's nickname — "send ah girl next monday" would become "ah girl
+    reading "monday" as somebody's nickname, "send ah girl next monday" would become "ah girl
     monday" and be taught as a nickname.
     """
     words = set(_PERSON_NOISE_WORDS)
@@ -301,12 +493,12 @@ def _person_noise_re() -> "re.Pattern[str]":
 
 
 def is_known_payee_phrase(phrase: Optional[str], customer_id: Optional[str] = None) -> bool:
-    """Whether a phrase names a payee we actually hold — a nickname, a full name, or a first name.
+    """Whether a phrase names a payee we actually hold, a nickname, a full name, or a first name.
 
     Mirrors the resolver's own matching (display_name, then first name) closely enough that it
     never disagrees with it: when this says unknown, resolution says unknown too. Used to tell "the
     customer said a name I know" apart from "the customer said a name I don't", which
-    parse_payee_phrase alone cannot do — it returns a capitalised name either way.
+    parse_payee_phrase alone cannot do, it returns a capitalised name either way.
     """
     if not phrase:
         return False
@@ -326,7 +518,7 @@ def unknown_payee_phrase(text: str, customer_id: Optional[str] = None) -> Option
     """The name-shaped phrase in the turn that we hold nobody for, or None.
 
     Returns the phrase lowercased, the way the customer would say it back ("ah girl", "husband").
-    None means "there is no unknown name here" — either the customer named somebody we know, or
+    None means "there is no unknown name here", either the customer named somebody we know, or
     named no person at all, or said something we understand as a bill/card/account instead.
     """
     if not customer_id or not text:
@@ -351,7 +543,7 @@ def unknown_payee_phrase(text: str, customer_id: Optional[str] = None) -> Option
 
     # The leftover might BE something we understand rather than a person. Ask each of the other
     # detectors about the LEFTOVER, not about the whole turn: one turn can legitimately name both a
-    # source account and a person — "help me send fifty to ah girl from savings" — and vetoing on
+    # source account and a person, "help me send fifty to ah girl from savings", and vetoing on
     # the word "savings" would silently swallow the name the customer actually used.
     if (parse_biller_phrase(phrase, customer_id) or parse_card_phrase(phrase, customer_id)
             or parse_own_account_phrase(phrase, customer_id)
@@ -366,12 +558,13 @@ def unknown_payee_phrase(text: str, customer_id: Optional[str] = None) -> Option
 SOURCE_ACCOUNT_ALIASES = {
     "savings": "savings", "saving": "savings", "savings account": "savings",
     "current": "current", "current account": "current",
+    "everyday": "current", "everyday account": "current",
     "multiplier": "multiplier", "multiplier account": "multiplier",
     "usd": "usd", "usd account": "usd", "us dollar": "usd", "us dollar account": "usd",
 }
 
 # A currency the customer explicitly named. Anything not USD reads as SGD, because the demo
-# customer's everyday transfers are in Singapore dollars — but a currency they DID name must
+# customer's everyday transfers are in Singapore dollars, but a currency they DID name must
 # never be silently converted into another one.
 CURRENCY_MARKERS = {
     "USD": re.compile(r"\b(?:us\$|usd|us\s+dollars?)\b", re.I),
@@ -404,7 +597,7 @@ def parse_reference(text: str) -> Optional[str]:
     """The reference the customer asked to attach, or None.
 
     Trailing punctuation is not part of the reference. The old pattern anchored the capture
-    at the very end of the string, so "…for birthday." never matched — the final full stop
+    at the very end of the string, so "…for birthday." never matched, the final full stop
     killed it and the reference was silently dropped from the read-back. Strip the punctuation
     first, then anchor.
     """
@@ -428,7 +621,7 @@ def parse_biller_phrase(text: str, customer_id: Optional[str] = None) -> Optiona
     """The canonical display name of a known biller mentioned in the turn, else None.
 
     "Pay my StarHub bill" -> "StarHub". The match is on the full biller display name, so a
-    generic "pay my phone bill" with no named company is NOT picked up here — it correctly
+    generic "pay my phone bill" with no named company is NOT picked up here, it correctly
     falls through to clarification rather than being silently bound to the wrong biller.
     """
     lowered = text.lower()
@@ -448,7 +641,7 @@ def lookup_biller(customer_id: Optional[str], name: str):
 
 
 # ---------------------------------------------------------------------------
-# Credit-card + own-account (internal) destinations — the two remaining MVP
+# Credit-card + own-account (internal) destinations, the two remaining MVP
 # transaction shapes (IN-07 / IN-05). Same deterministic-directory pattern as
 # the biller: a known name in the turn resolves to an authoritative record.
 # ---------------------------------------------------------------------------
@@ -520,15 +713,15 @@ def lookup_own_account(customer_id: Optional[str], name: str):
 
 
 # ---------------------------------------------------------------------------
-# Schedule parsing (IN-08) — a future execution time the customer spoke.
+# Schedule parsing (IN-08), a future execution time the customer spoke.
 #
 # Deliberately split in two:
-#   * an EXTRACTOR says WHAT the customer meant — either the deterministic patterns below, or
+#   * an EXTRACTOR says WHAT the customer meant, either the deterministic patterns below, or
 #     the Payment Agent's `schedule_hint` on the live path;
 #   * ONE computer, compute_schedule(), says WHEN that is, from the current date.
 #
 # A model never produces a date here. It has no clock, and a model that emitted a date would be
-# deciding when money moves — the same reason no other agent decides an amount. An extraction
+# deciding when money moves, the same reason no other agent decides an amount. An extraction
 # may also be malformed or wrong, so every field is validated in compute_schedule() before it
 # can become a date.
 #
@@ -542,7 +735,7 @@ _WEEKDAYS = {
 }
 _WEEKDAY_NAMES = [name for name, _ in sorted(_WEEKDAYS.items(), key=lambda kv: kv[1])]
 
-# Ordinals as actually spoken — "the third of next month" — since a date phrase is usually said
+# Ordinals as actually spoken, "the third of next month", since a date phrase is usually said
 # aloud rather than typed as "3rd". The digit form is handled by the same pattern.
 _ORDINAL_WORDS = {
     "first": 1, "second": 2, "third": 3, "fourth": 4, "fifth": 5, "sixth": 6, "seventh": 7,
@@ -555,7 +748,7 @@ _ORDINAL_WORDS = {
 }
 
 # The number forms accepted inside a day or offset phrase: digits, plus the spoken words small
-# enough to be a count of days. Deliberately NOT all of NUMBER_WORDS — "one hundred days" is not
+# enough to be a count of days. Deliberately NOT all of NUMBER_WORDS, "one hundred days" is not
 # a scheduling phrase, and every extra word is one more chance to match an amount by accident.
 _SMALL_NUMBER_WORDS = {w: v for w, v in NUMBER_WORDS.items()
                        if 1 <= v <= 31 and w.isascii() and " " not in w}
@@ -572,7 +765,7 @@ _DAY_NUM = (r"3[01]|[0-2]?\d|" + "|".join(re.escape(w) for w in sorted(
 _SCHEDULE_DAY_OF_MONTH_RE = re.compile(
     rf"\b(?:on\s+)?(?:the\s+)?({_DAY_NUM})\s*(?:st|nd|rd|th)?\s*(?:of\s+)?(next|this)\s+month\b")
 
-# A date named with its month ("28th september", "september 28") — the way a customer actually
+# A date named with its month ("28th september", "september 28"), the way a customer actually
 # says a specific day. The day and the month must be ADJACENT, which is what keeps the month
 # words safe: "may" / "march" / "august" are ordinary English words too, but "may send" and
 # "march on" have no day number beside them, so they never match.
@@ -590,7 +783,7 @@ _SCHEDULE_MONTH_FIRST_RE = re.compile(
     rf"\b(?P<m2>{_MONTH})\s+(?P<d2>{_DAY_NUM})\s*(?:st|nd|rd|th)?\b")
 _SCHEDULE_DAY_FIRST_RE = re.compile(
     rf"\b(?:on\s+)?(?:the\s+)?(?P<d1>{_DAY_NUM})\s*(?:st|nd|rd|th)?\s*(?:of\s+)?(?P<m1>{_MONTH})\b")
-# A bare "the 28th" names a day with no month at all. It is not resolvable to a date — but it must
+# A bare "the 28th" names a day with no month at all. It is not resolvable to a date, but it must
 # still be recognised, or "send 50 on the 28th" turns the day into S$28 and says nothing.
 _SCHEDULE_BARE_DAY_RE = re.compile(
     rf"\b(?:on\s+)?the\s+(?P<d>{_DAY_NUM})\s*(?:st|nd|rd|th)?\b")
@@ -604,7 +797,7 @@ _SCHEDULE_FORTNIGHT_RE = re.compile(r"\bin\s+(?:a\s+)?fortnight(?:'s\s+time)?\b"
 
 # A bare number is only read as a TIME when the sentence says so. Without this cue
 # "send ten dollars tomorrow" was scheduled at 10:00 AM, because the amount word was read as an
-# hour — and extending the vocabulary to "in two weeks" would have made it worse.
+# hour, and extending the vocabulary to "in two weeks" would have made it worse.
 _SCHEDULE_AMPM_RE = re.compile(rf"\b({_HOUR_NUM})(?::(\d{{2}}))?\s*(am|pm)\b")
 _SCHEDULE_AT_HOUR_RE = re.compile(rf"\b(?:at|by)\s+({_HOUR_NUM})(?::(\d{{2}}))?\b")
 _SCHEDULE_OCLOCK_RE = re.compile(rf"\b({_HOUR_NUM})\s*o'?clock\b")
@@ -624,8 +817,8 @@ def mask_dates(text: str) -> str:
 
     "on 28th september instead" was read as S$28.00 because "28th" was the only number in the
     turn and the amount parser had no way to know it was a day. "send some money in two weeks"
-    had the same fault with the number word "two". Masking the whole phrase — not just the
-    number — fixes both, and an explicit amount elsewhere in the turn ("S$50 in two weeks")
+    had the same fault with the number word "two". Masking the whole phrase, not just the
+    number, fixes both, and an explicit amount elsewhere in the turn ("S$50 in two weeks")
     still survives untouched.
     """
     chars = list(text)
@@ -658,7 +851,7 @@ def _shift_month(year: int, month: int, months_ahead: int) -> Tuple[int, int]:
 
 
 def _time_spec_from_text(lowered: str) -> Dict[str, int]:
-    """The hour the customer named, or {} to mean "a day was named but no time — use the default".
+    """The hour the customer named, or {} to mean "a day was named but no time, use the default".
 
     An explicit am/pm wins; otherwise an "at"/"by"/"o'clock" cue qualifies a bare hour, and a
     named part of the day ("tomorrow afternoon") supplies the meridiem. Anything else is not
@@ -714,7 +907,7 @@ def schedule_spec_from_text(text: str) -> Optional[dict]:
             day = {"kind": "day_of_month", "day": _number_from(m.group(1)),
                    "months_ahead": 1 if m.group(2) == "next" else 0}
     if day is None:
-        # "september 28" then "28th september" — a day named with its month. Month-first is tried
+        # "september 28" then "28th september", a day named with its month. Month-first is tried
         # first for the reason given at _SCHEDULE_MONTH_FIRST_RE.
         m = _SCHEDULE_MONTH_FIRST_RE.search(lowered)
         if m:
@@ -820,8 +1013,8 @@ def schedule_spec_from_hint(hint) -> Optional[dict]:
 def compute_schedule(spec: Optional[dict], today: Optional[date] = None) -> Optional[Dict[str, str]]:
     """The ONE place a day/time spec becomes a calendar date -> {"relative","absolute","time"}.
 
-    The relative phrase is built here too, from the spec's own numbers — never taken from the
-    extractor — so an extraction can only ever say WHAT was meant, and every customer-facing word
+    The relative phrase is built here too, from the spec's own numbers, never taken from the
+    extractor, so an extraction can only ever say WHAT was meant, and every customer-facing word
     in the SCHEDULE clause still comes from deterministic code.
 
     Returns None for a spec it cannot trust (unknown kind, out-of-range day, a "this month" day
@@ -871,7 +1064,7 @@ def compute_schedule(spec: Optional[dict], today: Optional[date] = None) -> Opti
         target = date(year, month, day_of_month)
         if target <= base:
             # "the 3rd of this month" said on the 26th is in the past. Rather than silently
-            # scheduling a date that has gone, leave it unscheduled — the read-back then carries
+            # scheduling a date that has gone, leave it unscheduled, the read-back then carries
             # no date, and the customer hears that their date was not understood.
             return None
         relative = (f"the {_ordinal(day_of_month)} of "
@@ -896,7 +1089,7 @@ def compute_schedule(spec: Optional[dict], today: Optional[date] = None) -> Opti
             return None
         target = date(year, month, day_of_month)
         # Deliberately NO relative phrase. The customer named the month themselves, so
-        # "the 28th of September" and the absolute "28 September 2026" are the same date twice —
+        # "the 28th of September" and the absolute "28 September 2026" are the same date twice,
         # the read-back was saying "the 28th of September, 28 September 2026". The absolute carries
         # the year too, including the next-year case, so nothing is lost by dropping the relative.
         relative = None
@@ -954,7 +1147,7 @@ def schedule_named_but_unusable(text: str, today: Optional[date] = None) -> bool
     """True when the turn NAMES a date that was recognised but could not be turned into one.
 
     "the 3rd of this month" said on the 26th, "31 September", "in 0 days". The customer did name
-    a date, so going ahead WITHOUT one — silently — is the wrong answer: the read-back would carry
+    a date, so going ahead WITHOUT one, silently, is the wrong answer: the read-back would carry
     no date at all and nothing would tell them it was ignored. The caller asks instead.
 
     A turn with no date phrase returns False, so an ordinary payment is never questioned.
@@ -980,7 +1173,7 @@ def is_schedule_correction(text: str) -> bool:
       * NO new amount, and
       * NO new payee.
     So "no, make it S$60" (amount only) and "actually send it to Ah Girl" (payee only) are NOT
-    date corrections and still take the ordinary edit path — only a turn that changes the date and
+    date corrections and still take the ordinary edit path, only a turn that changes the date and
     nothing else is carried forward, which is what makes keeping the other fields safe.
     """
     if not _SCHEDULE_CORRECTION_CUE_RE.search(text):
@@ -999,8 +1192,8 @@ def is_schedule_correction(text: str) -> bool:
 # into its separate instructions so each can be drafted and reviewed on its own.
 #
 # Only splits when the turn names 2+ DISTINCT payment targets (a biller, the customer's own
-# card, their own account, or a saved payee). A plain single payment — even one that happens
-# to contain the word "and" — returns [text] unchanged, so the ordinary one-draft path is
+# card, their own account, or a saved payee). A plain single payment, even one that happens
+# to contain the word "and", returns [text] unchanged, so the ordinary one-draft path is
 # untouched. Two saved payees in one breath is handled upstream by detect_multiple_recipients
 # (one transfer at a time), so this only ever splits genuinely independent instructions.
 # ---------------------------------------------------------------------------
@@ -1024,7 +1217,10 @@ def split_instructions(text: str, customer_id: Optional[str] = None) -> List[str
             found.add("CARD")
         if parse_own_account_phrase(t, customer_id):
             found.add("OWN")
-        pp = parse_payee_phrase(t)
+        # customer_id is passed through: a nickname the customer TAUGHT lives in the per-customer
+        # store, so without it "ah girl" resolves to nothing here and a two-instruction breath
+        # looks like one, the whole turn then never splits.
+        pp = parse_payee_phrase(t, customer_id)
         if pp:
             found.add("PAYEE:" + pp)
         return found
@@ -1039,7 +1235,8 @@ def split_instructions(text: str, customer_id: Optional[str] = None) -> List[str
         if not p:
             continue
         if (parse_biller_phrase(p, customer_id) or parse_card_phrase(p, customer_id)
-                or parse_own_account_phrase(p, customer_id) or parse_payee_phrase(p)):
+                or parse_own_account_phrase(p, customer_id)
+                or parse_payee_phrase(p, customer_id)):
             resolved.append(p)
     return resolved if len(resolved) >= 2 else [text]
 

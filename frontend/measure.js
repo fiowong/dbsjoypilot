@@ -11,7 +11,7 @@ const os = require('os');
 const fs = require('fs');
 
 /* Find a Chrome/Chromium to drive. Unlike the original probe this is not pinned to
-   one Windows path — it looks wherever the OS actually keeps a browser. */
+   one Windows path, it looks wherever the OS actually keeps a browser. */
 function findChrome() {
   const candidates = process.platform === 'darwin'
     ? ['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
@@ -127,7 +127,7 @@ const SNAP = `(() => {
     console.log('viewport            : ' + s.viewport.w + ' x ' + s.viewport.h);
     console.log('\n--- 1. LOGIN SCREEN (in the device) ---');
     const L = s.loginLogo;
-    if (!L) throw new Error('login logo not found — #scrLogin .lghead img.dbslogo');
+    if (!L) throw new Error('login logo not found, #scrLogin .lghead img.dbslogo');
     console.log('  login logo        : ' + L.w + ' x ' + L.h + '  rendered ratio ' + L.ratio
       + '  (asset ' + L.natural + ' = ' + (1280 / 382).toFixed(3) + ')');
     const drift = Math.abs(L.ratio - 1280 / 382) / (1280 / 382);
@@ -182,7 +182,7 @@ const SNAP = `(() => {
     console.log('  composer          : ' + s.cinput.w + ' x ' + s.cinput.h);
     ok('chat area has real height', s.chat.h > 300, s.chat.h + 'px');
     // .langtog now lives INSIDE .cinput (one composer unit), so its height is already
-    // included in s.cinput.h — adding it separately would double-count it.
+    // included in s.cinput.h, adding it separately would double-count it.
     const stack = s.abar.h + s.chat.h + s.cinput.h;
     ok('header + chat + composer exactly fill the screen',
        Math.abs(stack - s.screen.h) < 2,

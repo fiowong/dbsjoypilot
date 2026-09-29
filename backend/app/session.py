@@ -5,7 +5,7 @@ from .config import Settings
 from .models import SessionState, Draft, Confirmation, ValidationResult, PersonalizationSignals
 from .data import CUSTOMERS
 
-# 9. The 16-stage control chain — §8.2
+# 9. The 16-stage control chain, §8.2
 # =====================================================================
 STAGES = [
     (0,  "Authenticated session",             "Deterministic or mocked adapter"),
@@ -38,7 +38,7 @@ class Session:
         self.draft: Optional[Draft] = None
         self.draft_versions: List[int] = []
         self.current_draft_version: int = 0
-        # IN-10 — a queue of independent instructions raised in one breath. Each entry is a
+        # IN-10, a queue of independent instructions raised in one breath. Each entry is a
         # fully-resolved, validated draft reviewed and confirmed one at a time. session.draft
         # always points at the instruction currently being confirmed (pending_drafts[draft_index]).
         self.pending_drafts: List[Draft] = []
@@ -47,6 +47,13 @@ class Session:
         self.pending_references: List[Optional[str]] = []
         self.draft_index: int = 0
         self.multi_total: int = 0
+        # True while a multi-instruction read-back has just ASKED the customer something
+        # (confirming a slang amount like "a grand", or which account a payment should come from).
+        # The review is technically CONFIRMATION_READY, but showing the "Confirm & Slide to Pay"
+        # card at that moment puts two competing actions on screen at once, the card and the
+        # question above it, and the customer cannot tell which to do first. The client defers
+        # the card until they have answered. Cleared on the next turn, whatever they say.
+        self.awaiting_multi_go_ahead: bool = False
         self.confirmation: Optional[Confirmation] = None
         self.validation: Optional[ValidationResult] = None
         self.open_clarification_field: Optional[str] = None
@@ -57,7 +64,7 @@ class Session:
         # so a stale binding can never leak into a later, unrelated payment.
         self.pending_nickname: Optional[dict] = None
         # The nickname this draft was reached through ("ah girl"), carried to the read-back so Joy
-        # can say "I found Ah Girl as Mei Tan" — and carried in the audit so the claim is checkable.
+        # can say "I found Ah Girl as Mei Tan", and carried in the audit so the claim is checkable.
         self.nickname_used: Optional[str] = None
         self.amount_disambiguated: bool = False
         self.review_restarted: bool = False
@@ -67,8 +74,14 @@ class Session:
         self.drafts_created: int = 0
         self.step_up_required: bool = False
         self.gateway_origin_authorised: bool = True
-        self.outcome: str = "—"
+        self.outcome: str = "-"
         self.confirmation_language: str = "EN"
+        # The language this conversation is being SPOKEN in, decided on the first turn from the
+        # customer's own words and then held. Without it a code-mixed first turn gets an English
+        # answer and a short Mandarin "是" on the next turn flips the whole conversation to
+        # Chinese, so Auntie appears to change language mid-sentence for no reason. An explicit
+        # request to switch (LANGUAGE_SWITCH_RE) is the only thing that moves it.
+        self.interface_language: Optional[str] = None
         self._nonce: Optional[str] = None
         self._idempotency_key: Optional[str] = None
         self._payload: Optional[dict] = None
@@ -76,7 +89,7 @@ class Session:
         self._issued_at: Optional[datetime] = None
         self.execution: Optional[dict] = None
 
-        # ---- Personalization signals — structured facts only, never the transcript ----
+        # ---- Personalization signals: structured facts only, never the transcript ----
         self.field_rejection_counts: Dict[str, int] = {}
         self.clarification_history: List[str] = []
         self.intent_history: List[str] = []
@@ -105,7 +118,7 @@ class Session:
                                       stalled_intent=stalled)
 
     def to_public(self) -> dict:
-        # The preferred name is trusted data from the customer record — never taken from
+        # The preferred name is trusted data from the customer record, never taken from
         # anything the customer typed (§A.6 C3). The app addresses the customer with it.
         customer = CUSTOMERS.get(self.customer_id) or {}
         return {
@@ -123,6 +136,9 @@ class Session:
             # or the last of a multi-instruction batch.
             "pending_remaining": max(0, len(self.pending_drafts) - self.draft_index - 1),
             "multi_total": self.multi_total,
+            # The client reads this to hold back the confirm card while the read-back above it
+            # still has an open question (see the field's note above).
+            "awaiting_multi_go_ahead": self.awaiting_multi_go_ahead,
             "confirmation": self.confirmation.model_dump() if self.confirmation else None,
             "open_clarification_field": self.open_clarification_field,
             "frozen": self.frozen,
@@ -135,6 +151,11 @@ class Session:
             "personalize_auto": self.personalize_auto,
             "personalization_signals": self.personalization_signals,
             "personalization_decision": self.personalization_decision,
+            # The language this conversation is being spoken in, settled by the backend on the
+            # first turn and then held. Exposed so every client surface, the field review, the
+            # biometric prompt, the receipt, reads the SAME language, instead of each one
+            # re-guessing from whatever sentence the customer happened to say last.
+            "interface_language": self.interface_language,
         }
 
 

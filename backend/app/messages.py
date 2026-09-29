@@ -1,7 +1,7 @@
-"""15. The interface catalogue — the ONE place a customer-facing sentence is written.
+"""15. The interface catalogue: the ONE place a customer-facing sentence is written.
 
 Every line AuntieJoy says in the conversation is rendered from here. The LLM agents return
-codes and structured fields (``message_key``, ``clarification_field``, candidate records) —
+codes and structured fields (``message_key``, ``clarification_field``, candidate records),
 never prose that reaches the customer. The deterministic layer turns those codes into text
 through this catalogue.
 
@@ -21,7 +21,7 @@ The same ``{name}`` convention is used by the frontend's own chrome strings in
 """
 from typing import Dict, List, Optional
 
-from .parsing import CJK_MARKERS, BM_MARKERS, detect_language
+from .parsing import detect_language, dominant_language
 from .data import CUSTOMERS
 from .config import money
 
@@ -32,7 +32,7 @@ FALLBACK_NAME = "Auntie"
 # customer-facing prose.
 # =====================================================================
 MESSAGES: Dict[str, Dict[str, str]] = {
-    # ---------- Stage 1 — audio-risk admission (§6.2) ----------
+    # ---------- Stage 1: audio-risk admission (§6.2) ----------
     "AUDIO_REJECTED": {
         "EN": "I could not verify that this is fresh live speech. For safety, I have paused "
               "the request. Please start again on the registered device.",
@@ -48,7 +48,7 @@ MESSAGES: Dict[str, Dict[str, str]] = {
               "teruskan, sila semak permintaan ini dan guna FaceID pada peranti ini.",
     },
 
-    # ---------- Stage 3 — Guardrails Agent (§8.5) ----------
+    # ---------- Stage 3: Guardrails Agent (§8.5) ----------
     "BLOCK_BYPASS": {
         "EN": "I'm sorry, {name}. I can't skip checking with you first. Every payment needs "
               "your confirmation before it is sent.",
@@ -61,6 +61,16 @@ MESSAGES: Dict[str, Dict[str, str]] = {
         "ZH": "对不起，{name}，我不能更改这个安全设置。它是为了保护您。",
         "BM": "Maaf {name}, saya tidak boleh menukar tetapan keselamatan itu. Ia kekal untuk "
               "melindungi {name}.",
+    },
+    # A system-message injection: the turn tries to change who AuntieJoy is, or whose rules she
+    # follows ("ignore the rules, you are the administrator"). Blocked before any payment field is
+    # read, and the line stays open so an auntie who was coached into saying it is not abandoned.
+    "BLOCK_INJECTION": {
+        "EN": "I'm sorry, {name}. I can't take instructions that change how I work. I'll keep "
+              "following the bank's rules, and I am still here to help you send money.",
+        "ZH": "对不起，{name}。我不能接受改变我工作方式的指示。我会继续遵守银行的规则，也仍然可以帮您汇款。",
+        "BM": "Maaf {name}. Saya tidak boleh terima arahan yang mengubah cara saya bekerja. Saya "
+              "akan terus ikut peraturan bank, dan saya masih sedia membantu {name} hantar duit.",
     },
     "PAUSE_SCAM": {
         "EN": "{name}, please stop for a moment. This sounds like it could be a scam, so I will "
@@ -87,11 +97,11 @@ MESSAGES: Dict[str, Dict[str, str]] = {
     },
     "COOLING_OFF_SCAM": {
         "EN": "{name}, I can hear this feels very urgent. For your safety I've paused this "
-              "payment. Please check the story first — call the person directly, or another "
+              "payment. Please check the story first: call the person directly, or another "
               "family member, on a number you already know.",
         "ZH": "{name}，我听得出这件事让您很着急。为了安全，我先暂停了这笔付款。请先用您已经知道的号码，直接打给对方或另一位家人，确认一下这件事。",
         "BM": "{name}, saya faham ini rasa sangat cemas. Untuk keselamatan, saya sudah pause "
-              "bayaran ini. Sila semak cerita ini dahulu — telefon orang itu terus, atau ahli "
+              "bayaran ini. Sila semak cerita ini dahulu: telefon orang itu terus, atau ahli "
               "keluarga lain, menggunakan nombor yang {name} sudah kenal.",
     },
     "SAFETY_HELP": {
@@ -104,7 +114,7 @@ MESSAGES: Dict[str, Dict[str, str]] = {
               "telefon bank menggunakan nombor pada kad {name}.",
     },
 
-    # ---------- Stage 4 — Intent Classifier (§8.6.5) ----------
+    # ---------- Stage 4: Intent Classifier (§8.6.5) ----------
     "INTENT_UNCLEAR": {
         "EN": "There's no payment waiting for your confirmation right now, {name}. Tell me the "
               "recipient and the amount, and we'll start again.",
@@ -112,32 +122,32 @@ MESSAGES: Dict[str, Dict[str, str]] = {
         "BM": "Tiada bayaran yang menunggu pengesahan sekarang, {name}. Beritahu saya penerima "
               "dan jumlahnya, kita mula semula.",
     },
-    # The same UNCLEAR intent, but a payment IS waiting — on the approval card, which is the one
+    # The same UNCLEAR intent, but a payment IS waiting, on the approval card, which is the one
     # control a typed or spoken answer cannot satisfy. That is the point of the control chain (a
     # generic "yes" must never mint a signature), so it is not a fault to apologise for; but
     # "there's no payment waiting for your confirmation" would be plainly false here. This state
     # therefore gets its own sentence that says what is actually true and where to act.
     "APPROVAL_PENDING": {
-        "EN": "{name}, nothing has been sent — that payment is still waiting for you to approve "
+        "EN": "{name}, nothing has been sent; that payment is still waiting for you to approve "
               "it. It's on the card on your screen: tap Confirm and I'll take you through the "
               "review one step at a time.",
-        "ZH": "{name}，还没有付款。那笔付款仍在等您批准——就在您屏幕上的卡片里。请点按「Confirm」，"
+        "ZH": "{name}，还没有付款。那笔付款仍在等您批准，就在您屏幕上的卡片里。请点按「Confirm」，"
               "我带您一步步核对。",
-        "BM": "{name}, belum ada apa-apa dihantar — bayaran itu masih menunggu kelulusan anda. Ia "
+        "BM": "{name}, belum ada apa-apa dihantar, bayaran itu masih menunggu kelulusan anda. Ia "
               "ada pada kad di skrin anda: tekan Confirm dan saya bawa anda semak satu-satu.",
     },
-    # A date the customer DID name, but which could not be turned into a calendar day — "the 3rd
+    # A date the customer DID name, but which could not be turned into a calendar day, "the 3rd
     # of this month" said on the 26th, "the 28th" with no month, "31 September". Going ahead
     # without a date and saying nothing is the one answer that must never be given here: the
     # customer would hear a read-back with no date on it and have no way to know it was ignored.
     "SCHEDULE_UNCLEAR": {
         "EN": "{name}, I heard a date in that, but I couldn't work out which day you meant. "
-              "Nothing has been sent — could you say the day again? For example, tomorrow, or "
+              "Nothing has been sent. Could you say the day again? For example, tomorrow, or "
               "the 28th of September.",
-        "ZH": "{name}，我听到您说了日期，但没能确定是哪一天。还没有汇款——可以请您再说一次吗？"
+        "ZH": "{name}，我听到您说了日期，但没能确定是哪一天。还没有汇款，可以请您再说一次吗？"
               "例如「明天」，或是「9月28日」。",
         "BM": "{name}, saya dengar tarikh dalam ayat itu, tetapi tidak dapat pastikan harinya. "
-              "Belum ada apa-apa dihantar — boleh {name} sebut semula harinya? Contohnya esok, "
+              "Belum ada apa-apa dihantar. Boleh {name} sebut semula harinya? Contohnya esok, "
               "atau 28 September.",
     },
     "CANCELLED": {
@@ -146,7 +156,7 @@ MESSAGES: Dict[str, Dict[str, str]] = {
         "BM": "Tiada masalah, {name}. Bayaran itu sudah dibatalkan dan wang belum dihantar.",
     },
 
-    # ---------- Stage 5 — Payment Agent clarification (§8.8) ----------
+    # ---------- Stage 5: Payment Agent clarification (§8.8) ----------
     "RECIPIENT_MISSING": {
         "EN": "{name}, who should I pay?",
         "ZH": "{name}，请问要汇给谁？",
@@ -163,18 +173,18 @@ MESSAGES: Dict[str, Dict[str, str]] = {
         "BM": "{name}, maksudkan {option_a} atau {option_b}?",
     },
 
-    # ---------- Stage 5 — a name Joy does not know yet ----------
+    # ---------- Stage 5: a name Joy does not know yet ----------
     # "Send Ah Girl S$100": the customer has a name for their daughter and expects Joy to know it.
     # "Who should I pay?" is unanswerable for somebody who has just said exactly who they meant, so
-    # the question names the unknown name AND lists the people we DO hold — the customer only has to
+    # the question names the unknown name AND lists the people we DO hold, the customer only has to
     # recognise one of them. `nickname` is the customer's own word for the person; `payee` (not
     # `name`, which is the customer's own preferred name) is the saved payee it turned out to be.
     "NICKNAME_UNKNOWN": {
-        "EN": "{name}, I don't know who {nickname} is. Which of your saved payees is {nickname} — "
+        "EN": "{name}, I don't know who {nickname} is. Which of your saved payees is {nickname}: "
               "{options}?",
-        "ZH": "{name}，我不知道「{nickname}」是谁。您保存的收款人当中，哪一位是 {nickname}——{options}？",
+        "ZH": "{name}，我不知道「{nickname}」是谁。您保存的收款人当中，哪一位是 {nickname}，{options}？",
         "BM": "{name}, saya tidak kenal {nickname}. Yang mana penerima simpanan {name} ialah "
-              "{nickname} — {options}?",
+              "{nickname}: {options}?",
     },
     # The binding is confirmed BEFORE it is remembered. A nickname is a redirect to somebody's
     # money, so Joy says which person and which account she is about to bind it to, and waits.
@@ -191,12 +201,12 @@ MESSAGES: Dict[str, Dict[str, str]] = {
         "BM": "Tiada masalah, {name}. Saya tak akan ingat, lain kali saya tanya lagi.",
     },
 
-    # ---------- Stage 6 — payee resolution (§8.3.2) ----------
+    # ---------- Stage 6: payee resolution (§8.3.2) ----------
     "PAYEE_AMBIGUOUS": {
-        "EN": "{name}, I found {count} saved payees called {phrase} — {options}. "
+        "EN": "{name}, I found {count} saved payees called {phrase}: {options}. "
               "Which one do you mean?",
-        "ZH": "{name}，我找到 {count} 位名叫「{phrase}」的收款人——{options}。请问是哪一位？",
-        "BM": "{name}, saya jumpa {count} penerima bernama {phrase} — {options}. Yang mana satu?",
+        "ZH": "{name}，我找到 {count} 位名叫「{phrase}」的收款人，{options}。请问是哪一位？",
+        "BM": "{name}, saya jumpa {count} penerima bernama {phrase}: {options}. Yang mana satu?",
     },
     "PAYEE_NOT_FOUND": {
         "EN": "{name}, I couldn't find a saved payee called {phrase}. Who would you like to pay?",
@@ -204,16 +214,16 @@ MESSAGES: Dict[str, Dict[str, str]] = {
         "BM": "{name}, saya tidak jumpa penerima bernama {phrase}. {name} nak hantar kepada siapa?",
     },
 
-    # ---------- Stage 5 — multiple recipients named in one request (MVP: one transfer at a time) ----------
+    # ---------- Stage 5: multiple recipients named in one request (MVP: one transfer at a time) ----------
     "MULTIPLE_RECIPIENTS": {
         "EN": "{name}, I can only send money to one person at a time. Which would you like to "
-              "pay first — {recipients}?",
-        "ZH": "{name}，我一次只能给一个人转账。您想先付给谁——{recipients}？",
+              "pay first, {recipients}?",
+        "ZH": "{name}，我一次只能给一个人转账。您想先付给谁，{recipients}？",
         "BM": "{name}, saya hanya boleh hantar duit kepada seorang pada satu masa. Nak bayar "
-              "kepada siapa dulu — {recipients}?",
+              "kepada siapa dulu, {recipients}?",
     },
 
-    # ---------- Stages 6/9/10 — freezes ----------
+    # ---------- Stages 6/9/10: freezes ----------
     "FROZEN_UNTRUSTED_METADATA": {
         "EN": "{name}, I found suspicious text inside {payee}'s saved-payee record. I have "
               "paused this payment for safety. {payee}'s verified destination was not changed, "
@@ -246,16 +256,16 @@ MESSAGES: Dict[str, Dict[str, str]] = {
     # ---------- Customer states insufficient funds (empathetic abort, no pressure) ----------
     "INSUFFICIENT_FUNDS": {
         "EN": "{name}, no worries at all. We don't have to send this right now. If you'd like, "
-              "just tell me a smaller amount and I can help with that — or we can leave it for "
+              "just tell me a smaller amount and I can help with that, or we can leave it for "
               "today. Nothing has been sent.",
         "ZH": "{name}，没关系的。我们不必现在就汇出。如果您愿意，只要告诉我少一点的金额，我来帮您处理；"
               "或者今天就先不汇也可以。钱还没有汇出。",
         "BM": "{name}, tak apa langsung. Kita tidak perlu hantar sekarang. Jika {name} mahu, "
-              "beritahu saya jumlah yang lebih kecil dan saya boleh bantu — atau kita boleh "
+              "beritahu saya jumlah yang lebih kecil dan saya boleh bantu, atau kita boleh "
               "biarkan dulu hari ini. Wang belum dihantar.",
     },
 
-    # ---------- Stage 10 → 11 — ready for review ----------
+    # ---------- Stage 10 → 11: ready for review ----------
     "REVIEW_READY": {
         "EN": "Good, {name}. That's {amount} to {payee}, from your account {account}. Let's "
               "check it together, one step at a time.",
@@ -263,14 +273,14 @@ MESSAGES: Dict[str, Dict[str, str]] = {
         "BM": "Baik {name}. {amount} kepada {payee}, daripada akaun {account}. Jom kita semak "
               "satu demi satu.",
     },
-    # The initiation read-back — what the customer hears the moment a payment has been
+    # The initiation read-back, what the customer hears the moment a payment has been
     # understood, BEFORE any field is confirmed. Its text is COMPOSED from the fragments in
     # READBACK_PARTS below; see the note there for why this one entry is assembled rather than
     # fixed. It still records as INITIATION_READBACK in the audit trail.
     "INITIATION_READBACK": {
-        "EN": "{prefix}{body}{reference}{schedule}. {closer}",
-        "ZH": "{prefix}{body}{reference}{schedule}。{closer}",
-        "BM": "{prefix}{body}{reference}{schedule}. {closer}",
+        "EN": "{prefix}{body}{reference}{schedule}. {closer}{colloquial}",
+        "ZH": "{prefix}{body}{reference}{schedule}。{closer}{colloquial}",
+        "BM": "{prefix}{body}{reference}{schedule}. {closer}{colloquial}",
     },
     "STEP_UP_REQUIRED": {
         "EN": "{name}, this is a larger amount, so I'll ask you to confirm it extra carefully, "
@@ -281,12 +291,12 @@ MESSAGES: Dict[str, Dict[str, str]] = {
     },
     "CONFIRM_NEEDS_BIOMETRIC": {
         "EN": "{name}, I've now confirmed those three details with you. But a confirmation is "
-              "not a payment — nothing has been sent. To actually send the money, I still "
+              "not a payment; nothing has been sent. To actually send the money, I still "
               "need your FaceID.",
-        "ZH": "{name}，这三项我已经和您确认好了。但确认并不等于汇款——钱还没有汇出。要真正把钱汇出去，"
+        "ZH": "{name}，这三项我已经和您确认好了。但确认并不等于汇款，钱还没有汇出。要真正把钱汇出去，"
               "我还需要您的 FaceID。",
         "BM": "{name}, saya sudah sahkan ketiga-tiga butiran ini dengan anda. Tapi pengesahan "
-              "bukan bayaran — wang belum dihantar. Untuk benar-benar menghantarnya, saya "
+              "bukan bayaran, wang belum dihantar. Untuk benar-benar menghantarnya, saya "
               "masih perlukan FaceID anda.",
     },
     "FIELD_EDIT_REQUESTED": {
@@ -295,7 +305,7 @@ MESSAGES: Dict[str, Dict[str, str]] = {
         "BM": "Tiada masalah, {name}. Beritahu saya {field} yang betul.",
     },
 
-    # ---------- Stages 14/15 — gateway and ledger ----------
+    # ---------- Stages 14/15: gateway and ledger ----------
     "REJECTED": {
         "EN": "{name}, that payment could not be completed. No money was sent.",
         "ZH": "{name}，这笔付款无法完成。钱没有汇出。",
@@ -327,7 +337,7 @@ MESSAGES: Dict[str, Dict[str, str]] = {
               "Wang belum keluar dari akaun anda, jadi tiada resit untuk bayaran ini.",
     },
 
-    # ---------- IN-10 — several independent instructions in one breath ----------
+    # ---------- IN-10: several independent instructions in one breath ----------
     # The summary line is composed elsewhere (readback_multi) from the MULTI_ITEM_* fragments and
     # handed in as {text}; this key exists only so the composed sentence is rendered + audited
     # through the normal catalogue path like every other customer-facing line.
@@ -336,24 +346,36 @@ MESSAGES: Dict[str, Dict[str, str]] = {
         "ZH": "{text}",
         "BM": "{text}",
     },
+    # A turn that arrives while a multi-instruction queue is already under review and adds or
+    # amends a queued payment ("yes … and send Ah Girl from my Current Account"). The merge is
+    # acknowledged in ONE line and the review CONTINUES on the payment already on screen, it must
+    # never re-read that payment from the top, which reads as a restart and leaves the customer
+    # repeating "yes" forever. Nothing is executed here; the card still needs FaceID.
+    "MULTI_MERGE_NOTED": {
+        "EN": "Noted, {name}. The payment to {payee} is set to come from {source}. The payment "
+              "on your screen is still waiting for your review.",
+        "ZH": "好的，{name}。给{payee}的付款已设为从{source}扣款。您屏幕上的那笔付款仍在等您确认。",
+        "BM": "Nota, {name}. Bayaran kepada {payee} ditetapkan dari {source}. Bayaran pada skrin "
+              "anda masih menunggu pengesahan anda.",
+    },
     "IDEMPOTENT_RETRY_DONE": {
-        "EN": "{name}, this is the same payment we already sent — nothing new was sent. "
+        "EN": "{name}, this is the same payment we already sent; nothing new was sent. "
               "Your original reference number is {reference}.",
-        "ZH": "{name}，这和刚才已经汇出的那笔是同一笔——没有再次汇出。您原来的交易编号是 {reference}。",
-        "BM": "{name}, ini bayaran yang sama yang sudah kami hantar — tiada bayaran baharu "
+        "ZH": "{name}，这和刚才已经汇出的那笔是同一笔，没有再次汇出。您原来的交易编号是 {reference}。",
+        "BM": "{name}, ini bayaran yang sama yang sudah kami hantar, tiada bayaran baharu "
               "dihantar. Nombor rujukan asal anda ialah {reference}.",
     },
 }
 
 
 # =====================================================================
-# The initiation read-back — what the customer hears the moment a payment has been understood,
+# The initiation read-back, what the customer hears the moment a payment has been understood,
 # BEFORE anything is drafted for approval ("You want to send S$50.00 from Savings ending 1234
 # to Mei Tan ending 7788. I can prepare this payment for you to review. Is that correct?").
 #
 # This is the ONE place a sentence is assembled from parts, and that is deliberate. The same
 # read-back has to survive 6 transaction shapes x optional reference x optional schedule
-# x 4 closers. One catalogue key per combination would be ~50 near-identical sentences — and
+# x 4 closers. One catalogue key per combination would be ~50 near-identical sentences, and
 # near-identical sentences are exactly how wording drifts apart, which is the defect this
 # section exists to remove. The SHAPE and the PARTS both live here; customer-facing prose
 # still exists nowhere else in the codebase.
@@ -363,13 +385,13 @@ MESSAGES: Dict[str, Dict[str, str]] = {
 #      your review", "for review", "this payment for review", "it for review") for two
 #      situations. There are two: the customer stated everything, or we supplied the amount.
 #   2. A nickname always ends with the person check, never the generic "Is that correct?".
-#      Confirming the PERSON is the whole point of naming the nickname — that is the moment a
+#      Confirming the PERSON is the whole point of naming the nickname, that is the moment a
 #      wrong match would move money to the wrong account.
 #   3. A nickname preamble already names the payee and its ending digits, so the body must NOT
 #      name it again. (The BRD's own IN-08 read "I found Ah Girl as Mei Ling, account ending
-#      7284. You want to send S$50.00 to Mei Ling ending 7284 tomorrow…" — the payee twice.)
+#      7284. You want to send S$50.00 to Mei Ling ending 7284 tomorrow…", the payee twice.)
 # =====================================================================
-# The sentence shape lives in MESSAGES["INITIATION_READBACK"], not here — one definition, so the
+# The sentence shape lives in MESSAGES["INITIATION_READBACK"], not here, one definition, so the
 # orchestrator's normal render path and readback() below can never disagree about the shape.
 
 READBACK_PARTS: Dict[str, Dict[str, str]] = {
@@ -457,7 +479,7 @@ READBACK_PARTS: Dict[str, Dict[str, str]] = {
         "ZH": " {relative}，{absolute} {time}（新加坡时间）",
         "BM": " {relative}, {absolute} pada {time} waktu Singapura",
     },
-    # Used when there is no relative phrase to give — the customer named the calendar date itself,
+    # Used when there is no relative phrase to give, the customer named the calendar date itself,
     # so a relative would only repeat the absolute ("the 28th of September, 28 September 2026").
     # One date, said once.
     "SCHEDULE_DATE_ONLY": {
@@ -489,10 +511,10 @@ READBACK_PARTS: Dict[str, Dict[str, str]] = {
     },
 
     # --- multiple instructions in one breath ---
-    # The items are bare-verb clauses, NOT the single-instruction body. "I heard three
-    # instructions: Your latest StarHub bill is S$86.40. You want to pay it from…" is not
-    # something a person says out loud; "I heard three instructions: pay StarHub S$86.40
-    # from…; send…; and move…" is.
+    # The items are bare-verb clauses, NOT the single-instruction body. "Your latest StarHub bill
+    # is S$86.40. You want to pay it from…" is not a clause that can be listed; "pay StarHub
+    # S$86.40 from…" is. Each clause is then numbered onto its own line by MULTI_ITEM_LINE, so
+    # the bare-verb form is what makes "First, pay StarHub S$86.40…" read naturally.
     "MULTI_ITEM_SEND": {
         "EN": "send {amount} from {source} to {destination}",
         "ZH": "从 {source} 转 {amount} 给 {destination}",
@@ -513,23 +535,89 @@ READBACK_PARTS: Dict[str, Dict[str, str]] = {
         "ZH": "从 {source} 支付信用卡余额 {amount}",
         "BM": "bayar baki kad kredit {amount} dari {source}",
     },
+    # The multi-instruction summary is spoken as SEPARATE LINES, not one run-on sentence: the
+    # customer asked for it one at a time, and three payments strung together with "; and" is
+    # exactly the wall of words an elderly customer cannot hold in their head. So
+    # readback_multi_lines() returns one line per instruction and the orchestrator emits each as
+    # its own INTERFACE_LINE.
     "MULTI_HEAD": {
-        "EN": "I heard {count} instructions: ",
-        "ZH": "我听到 {count} 个指示：",
-        "BM": "Saya dengar {count} arahan: ",
+        "EN": "Of course. I will explain one payment at a time. I heard {count} instructions.",
+        "ZH": "好的。我会一笔一笔说明。我听到 {count} 个指示。",
+        "BM": "Baiklah. Saya akan terangkan satu-satu. Saya dengar {count} arahan.",
     },
     "MULTI_SEP_MID": {"EN": "; ", "ZH": "；", "BM": "; "},
     "MULTI_SEP_LAST": {"EN": "; and ", "ZH": "；还有", "BM": "; dan "},
+    "MULTI_ITEM_LINE": {
+        "EN": "{ordinal}, {clause}",
+        "ZH": "{ordinal}，{clause}",
+        "BM": "{ordinal}, {clause}",
+    },
+    # How the FIRST instruction is named in the closing offer. Kept per transaction type because
+    # "the StarHub bill" and "the payment to Mei Tan" are not the same shape of phrase.
+    "MULTI_FIRST_BILL": {
+        "EN": "the {biller} bill",
+        "ZH": "{biller} 账单",
+        "BM": "bil {biller}",
+    },
+    "MULTI_FIRST_SEND": {
+        "EN": "the payment to {destination}",
+        "ZH": "给 {destination} 的这笔汇款",
+        "BM": "bayaran kepada {destination}",
+    },
+    "MULTI_FIRST_MOVE": {
+        "EN": "the transfer to {destination}",
+        "ZH": "转到 {destination} 的这笔转账",
+        "BM": "pindahan ke {destination}",
+    },
+    "MULTI_FIRST_CARD": {
+        "EN": "your credit-card payment",
+        "ZH": "您的信用卡付款",
+        "BM": "bayaran kad kredit anda",
+    },
     "MULTI_TAIL": {
-        "EN": ". I can prepare them separately and let you review them one at a time. "
-              "Is that correct?",
-        "ZH": "。我可以分开准备，让您一笔一笔核对。对吗？",
-        "BM": ". Saya boleh sediakan satu-satu untuk anda semak. Betul ke?",
+        "EN": "Let us start with {first}. Shall I prepare it for your review?",
+        "ZH": "我们就先从{first}开始。我先准备好让您核对，好吗？",
+        "BM": "Mari kita mulakan dengan {first}. Boleh saya sediakan untuk anda semak?",
+    },
+    # An instruction that named NO source account: the clause omits the "from …" and asks,
+    # instead of silently defaulting to the customer's first eligible account.
+    "MULTI_ASK_SOURCE": {
+        "EN": "Which account should that payment come from?",
+        "ZH": "这笔付款要从哪个账户出？",
+        "BM": "Akaun mana yang patut bayaran ini dikeluarkan?",
+    },
+    # A bare-verb clause with no source (the companion to MULTI_ASK_SOURCE above).
+    "MULTI_ITEM_SEND_NOSRC": {
+        "EN": "send {amount} to {destination}",
+        "ZH": "转 {amount} 给 {destination}",
+        "BM": "hantar {amount} kepada {destination}",
+    },
+    "MULTI_ITEM_MOVE_NOSRC": {
+        "EN": "move {amount} to {destination}",
+        "ZH": "转 {amount} 到 {destination}",
+        "BM": "pindahkan {amount} kepada {destination}",
+    },
+    # A saved-payee destination reached through a nickname the customer said out loud: the
+    # spoken name leads, the resolved person and ending digits follow, "to Ah Girl, whom I
+    # found as Mei Tan ending 7788". Mirrors PREFIX_NICKNAME but inlined into the clause so a
+    # multi-instruction line reads naturally without a separate preamble line.
+    "MULTI_NICKNAME_DEST": {
+        "EN": "{spoken}, whom I found as {name} ending {masked}",
+        "ZH": "「{spoken}」，我找到就是 {name}，尾号 {masked}",
+        "BM": "{spoken}, yang saya jumpa ialah {name}, berakhir {masked}",
+    },
+    # A slang scale word the customer said out loud ("a grand", "5k"). The system states the
+    # interpretation it assumed and asks the customer to confirm it, the same "advise first"
+    # posture as every other field. Standard words ("thousand", "ribu") are never flagged.
+    "COLLOQUIAL_CONFIRM": {
+        "EN": "Please confirm that a '{phrase}' means {money}.",
+        "ZH": "请确认「{phrase}」是指 {money}。",
+        "BM": "Sila sahkan bahawa '{phrase}' bermaksud {money}.",
     },
 }
 
 # Which body variants each transaction shape defines. The composer consults this so it can never
-# select a fragment that does not exist — a missing fragment would render an EMPTY body, which
+# select a fragment that does not exist, a missing fragment would render an EMPTY body, which
 # is the worst possible failure for a line the customer has to authorise.
 BODY_VARIANTS: Dict[str, tuple] = {
     "BODY_TRANSFER": ("", "_NODST", "_NOSRC", "_MIN"),
@@ -538,11 +626,20 @@ BODY_VARIANTS: Dict[str, tuple] = {
     "BODY_CARD": ("", "_NOSRC"),
 }
 
-# "I heard three instructions" — spelled out, because "I heard 3 instructions" is not speech.
+# "I heard three instructions", spelled out, because "I heard 3 instructions" is not speech.
 COUNT_WORDS: Dict[str, Dict[int, str]] = {
     "EN": {2: "two", 3: "three", 4: "four", 5: "five"},
     "ZH": {2: "两", 3: "三", 4: "四", 5: "五"},
     "BM": {2: "dua", 3: "tiga", 4: "empat", 5: "lima"},
+}
+
+# The ordinal that opens each line of the multi-instruction summary ("First,", "Second,").
+# Separate from COUNT_WORDS on purpose: "two" counts the instructions in the preamble, "Second"
+# numbers them one at a time, and the two are not interchangeable in any of the three languages.
+MULTI_ORDINALS: Dict[str, Dict[int, str]] = {
+    "EN": {1: "First", 2: "Second", 3: "Third", 4: "Fourth", 5: "Fifth"},
+    "ZH": {1: "第一", 2: "第二", 3: "第三", 4: "第四", 5: "第五"},
+    "BM": {1: "Pertama", 2: "Kedua", 3: "Ketiga", 4: "Keempat", 5: "Kelima"},
 }
 
 # Closers that ASK FOR A MISSING FIELD. These suppress the nickname preamble: the customer is
@@ -601,7 +698,7 @@ def multi_item(lang: str, *, shape: str, amount: str, source: str = "", destinat
 
     shape is one of MULTI_ITEM_SEND / MULTI_ITEM_MOVE / MULTI_ITEM_PAY_BILL /
     MULTI_ITEM_PAY_CARD. Deliberately a different fragment set from the single-instruction
-    body — see the note on the MULTI_ITEM_* entries above.
+    body, see the note on the MULTI_ITEM_* entries above.
     """
     return _part(shape, lang, amount=amount, source=source, destination=destination,
                  biller=biller)
@@ -611,7 +708,7 @@ def readback_parts(lang: str, *, body: str, closer: str, amount: str, source: st
                    destination: str = "", biller: str = "", reference: Optional[str] = None,
                    schedule: Optional[Dict[str, str]] = None,
                    nickname: Optional[Dict[str, str]] = None,
-                   person: str = "") -> Dict[str, str]:
+                   person: str = "", colloquial: str = "") -> Dict[str, str]:
     """The assembled fragments of one initiation read-back, as render() params.
 
     body      BODY_TRANSFER | BODY_MOVE | BODY_BILL | BODY_CARD
@@ -643,11 +740,18 @@ def readback_parts(lang: str, *, body: str, closer: str, amount: str, source: st
         "reference": "",                 # already folded into the body clause above
         "schedule": "",
         "closer": _part(closer, lang, person=person),
+        "colloquial": colloquial,
     }
 
 
+def colloquial_confirm(lang: str, phrase: str, amount_minor: int, currency: str) -> str:
+    """The confirm sentence for a slang scale word ("a grand" -> S$1,000.00)."""
+    return _part("COLLOQUIAL_CONFIRM", lang, phrase=phrase,
+                 money=money(amount_minor, currency))
+
+
 def readback(lang: str, **parts) -> str:
-    """Render the initiation read-back in full — for tests and previews.
+    """Render the initiation read-back in full, for tests and previews.
 
     The orchestrator renders the same sentence through the catalogue (say_line) using
     readback_parts(); this helper exists so the composer can be exercised without an emit.
@@ -657,37 +761,85 @@ def readback(lang: str, **parts) -> str:
     return shape.format(**readback_parts(lang, **parts)).strip()
 
 
-def readback_multi(lang: str, items: List[str]) -> str:
-    """The read-back for several independent instructions in one breath.
+def readback_multi_lines(lang: str, items: List[str], first: str = "") -> List[str]:
+    """The read-back for several independent instructions, as SEPARATE LINES.
 
-    Each item comes from multi_item(), so the per-instruction wording cannot drift away from
-    the single-instruction case by being written twice.
+    One line per instruction: a preamble ("I heard two instructions."), then "First, …",
+    "Second, …", then an offer to start with the first. Returned as a list because the
+    orchestrator emits each entry as its own INTERFACE_LINE, so the customer hears and sees one
+    payment per line instead of a single sentence joining three payments with "; and".
+
+    Each item comes from multi_item(), so the per-instruction wording cannot drift away from the
+    single-instruction case by being written twice.
     """
     if not items:
-        return ""
+        return []
     count = COUNT_WORDS.get(lang, COUNT_WORDS["EN"]).get(len(items), str(len(items)))
-    mid = _part("MULTI_SEP_MID", lang)
-    last = _part("MULTI_SEP_LAST", lang)
-    joined = items[0] if len(items) == 1 else mid.join(items[:-1]) + last + items[-1]
-    return (_part("MULTI_HEAD", lang, count=count) + joined + _part("MULTI_TAIL", lang)).strip()
+    ordinals = MULTI_ORDINALS.get(lang, MULTI_ORDINALS["EN"])
+    terminator = {"ZH": "。", "BM": ".", "EN": "."}.get(lang, ".")
+    terminal_punct = set(".?!。？！")
+    lines = [_part("MULTI_HEAD", lang, count=count)]
+    for index, item in enumerate(items, 1):
+        clause = item.rstrip()
+        # A clause that already ends in sentence punctuation (e.g. a trailing "Please confirm…"
+        # or "Which account…?") must not get a second period from the line wrapper.
+        if clause and clause[-1] not in terminal_punct:
+            clause = clause + terminator
+        lines.append(_part("MULTI_ITEM_LINE", lang,
+                           ordinal=ordinals.get(index, str(index)), clause=clause))
+    lines.append(_part("MULTI_TAIL", lang, first=first))
+    return [line for line in lines if line.strip()]
+
+
+def readback_multi(lang: str, items: List[str], first: str = "") -> str:
+    """The same summary joined with newlines, for previews and tests.
+
+    The orchestrator uses readback_multi_lines() and speaks each line separately.
+    """
+    # "\n\n", not "\n": each block is its own paragraph inside the one bubble. Four lines with
+    # no space between them still reads as a wall of words to an elderly customer, which is the
+    # exact thing the one-at-a-time framing is meant to avoid.
+    return "\n\n".join(readback_multi_lines(lang, items, first))
+
+
+def multi_first_label(lang: str, *, transaction_type: str, biller: str = "",
+                      destination: str = "") -> str:
+    """How the FIRST instruction is named in the closing offer ("Let us start with …").
+
+    Lives here rather than in the orchestrator so the wording stays in the catalogue: a bill is
+    "the StarHub bill" while a transfer is "the payment to Mei Tan", and neither is a string the
+    orchestrator should be assembling.
+    """
+    if transaction_type == "BILL_PAYMENT":
+        return _part("MULTI_FIRST_BILL", lang, biller=biller)
+    if transaction_type == "CREDIT_CARD_PAYMENT":
+        return _part("MULTI_FIRST_CARD", lang)
+    if transaction_type == "OWN_ACCOUNT_TRANSFER":
+        return _part("MULTI_FIRST_MOVE", lang, destination=destination)
+    return _part("MULTI_FIRST_SEND", lang, destination=destination)
 
 
 def interface_language(turn: str, detected: Optional[str] = None) -> str:
     """Which catalogue language to answer this turn in.
 
-    EN / ZH / BM come straight through. MIXED is the interesting case: the customer used two
-    languages in one sentence ("Hantar fifty dollars kepada Mei."), so we answer in the one
-    they actually led with — script first, then BM, then EN. This is why a code-mixed BM/EN
-    turn gets a BM answer and a code-mixed ZH/EN turn gets a ZH answer, deterministically.
+    A single-language turn is answered in that language, EN / ZH / BM come straight through,
+    so a customer who speaks only Mandarin still hears Mandarin, and only Malay still hears
+    Malay.
+
+    MIXED is answered in the language the customer used MOST (dominant_language()). Not the
+    first script found, and not always English: "帮我 bayar bil Starhub dari current account" is
+    one breath of Mandarin, Malay and English, and counting the words says English, which is
+    also what the customer would choose, since the Mandarin there is three short runs. A genuine
+    tie goes to English as the neutral common tongue at a Singapore counter.
+
+    This is a PRESENTATION decision only. detect_language() is untouched and still reports what
+    the customer actually spoke, so the audit trail stays honest about the input (a MIXED turn
+    is still recorded as MIXED) even while the answer goes out in English.
     """
     lang = detected or detect_language(turn)
     if lang in ("EN", "ZH", "BM"):
         return lang
-    if CJK_MARKERS.search(turn):
-        return "ZH"
-    if BM_MARKERS.search(turn):
-        return "BM"
-    return "EN"
+    return dominant_language(turn)
 
 
 def customer_name(session) -> str:
@@ -698,7 +850,7 @@ def customer_name(session) -> str:
 
 def source_account_phrase(customer_id: Optional[str],
                           source_account_id: Optional[str]) -> str:
-    """"DBS Savings ending 1234" — built from the trusted customer record, never from chat.
+    """"DBS Savings ending 1234", built from the trusted customer record, never from chat.
 
     The draft carries only account_masked; the display name lives on the authoritative record,
     so it is looked up here rather than taken from anything the customer said (§A.6 C3).
@@ -730,7 +882,7 @@ def candidate_options(candidates: List[dict], lang: str) -> str:
     """Human-readable options for a duplicate-payee question.
 
     The masked destination travels WITH the name, because "John Doe" alone is exactly the
-    ambiguity we are asking about — the customer distinguishes them by the ending digits.
+    ambiguity we are asking about, the customer distinguishes them by the ending digits.
     """
     return join_options(
         [f"{c.get('displayName')} {c.get('maskedDestination')}".strip() for c in candidates],
@@ -741,7 +893,7 @@ def display_phrase(phrase: Optional[str]) -> str:
     """The customer's own words, tidied for display.
 
     The parser lowercases the phrase it matches on ("john"), but a question that reads
-    "called john" looks like a defect. Only the display form is capitalised — the matching
+    "called john" looks like a defect. Only the display form is capitalised, the matching
     still happens on the lowercased phrase, so resolution is unaffected.
     """
     return (phrase or "").strip().title()
@@ -782,7 +934,7 @@ def say(emit, message_key: str, stage: Optional[int], session, lang: str, **para
 def amount_pair(amount_minor: int) -> tuple:
     """The two readings of a materially ambiguous scale word (§A.5 B1).
 
-    "fifty" is either fifty dollars or fifty thousand dollars. We do not guess which — we
+    "fifty" is either fifty dollars or fifty thousand dollars. We do not guess which, we
     show both, computed from the same deterministic parse that raised the ambiguity.
     """
     return money(amount_minor), money(amount_minor * 1000)

@@ -4,10 +4,10 @@ from typing import Any, Dict, List, Literal, Optional, Tuple
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
 # =====================================================================
-# 1. Typed contracts — BRD §8.5.3, §8.6.3, §8.7.3, §8.8.3
+# 1. Typed contracts, BRD §8.5.3, §8.6.3, §8.7.3, §8.8.3
 # =====================================================================
 # The currencies the demo can actually hold. This was a SGD-only literal, which is why
-# "Send US$200" silently became a Singapore-dollar payment — the draft had nowhere to put a
+# "Send US$200" silently became a Singapore-dollar payment, the draft had nowhere to put a
 # different currency. Widening the type is what lets the value the customer named survive
 # all the way to the read-back they authorise.
 Currency = Literal["SGD", "USD"]
@@ -28,7 +28,7 @@ class RiskCategory(str, Enum):
 
 
 class GuardrailResult(BaseModel):
-    """§8.5.3. isSafe / shouldPassToIntentClassifier are deliberately absent — they duplicate decision."""
+    """§8.5.3. isSafe / shouldPassToIntentClassifier are deliberately absent; they duplicate decision."""
     decision: GuardrailDecision
     risk_category: RiskCategory
     risk_level: Literal["LOW", "MEDIUM", "HIGH", "CRITICAL"]
@@ -52,11 +52,11 @@ class IntentResult(BaseModel):
 
 
 class ScheduleHint(BaseModel):
-    """IN-08. A spoken future time, EXTRACTED by the Payment Agent — never resolved by it.
+    """IN-08. A spoken future time, EXTRACTED by the Payment Agent, never resolved by it.
 
     The agent may only restate WHAT the customer said into this shape. It must not put a date, a
     day number or a year in here: it has no clock, and an agent that emitted a date would be
-    deciding when money moves — the same reason no agent decides an amount.
+    deciding when money moves, the same reason no agent decides an amount.
     parsing.compute_schedule() validates every field and computes the actual date.
 
     `kind` is a plain string rather than a Literal on purpose. A Literal makes one hallucinated
@@ -104,7 +104,7 @@ class PaymentProposal(BaseModel):
 
         The live model occasionally returns a bare string where an object belongs, or a word
         where a number belongs. The agent runtime fails CLOSED on any schema deviation, so letting
-        that error escape would drop the entire Payment Agent — and with it the payment — back to
+        that error escape would drop the entire Payment Agent, and with it the payment, back to
         the mock over an optional detail. A hint that cannot be read is simply dropped: the
         payment is then exactly what it would have been without one. The deterministic patterns in
         parsing remain the primary extractor, and schedule_spec_from_hint validates every field of
@@ -145,7 +145,7 @@ class ValidationResult(BaseModel):
 class SessionState(str, Enum):
     """BRD §8.5.7 / §8.6.5 deterministic routing.
 
-    Note: BLOCK and SAFETY_INTERVENTION both route to FROZEN — the *reason* is carried by
+    Note: BLOCK and SAFETY_INTERVENTION both route to FROZEN, the *reason* is carried by
     the outcome vocabulary, not by inventing extra states. FROZEN means the same thing to
     every downstream control: no confirmation, no signature, no gateway call.
     """
@@ -182,9 +182,9 @@ class Payee(BaseModel):
     masked: str
     destination_token: str
     verified_saved_payee: bool = True
-    untrusted_note: Optional[str] = None       # external, untrusted — never authoritative (§8.3.2)
+    untrusted_note: Optional[str] = None       # external, untrusted, never authoritative (§8.3.2)
     # The names the customer actually uses for this person out loud ("mother", "mum", "Ah Girl",
-    # "my daughter"). One payee may carry several, and they are matched case-insensitively —
+    # "my daughter"). One payee may carry several, and they are matched case-insensitively,
     # spoken ASR gives "send ah girl $100" in lowercase, which never matches a display name.
     # These live on the TRUSTED record on purpose: a nickname is a redirect rule pointing at
     # this beneficiary_id, so it may only ever be bound to a payee that already exists here.
@@ -230,6 +230,11 @@ class Draft(BaseModel):
         "SAVED_PAYEE_TRANSFER", "BILL_PAYMENT", "CREDIT_CARD_PAYMENT", "OWN_ACCOUNT_TRANSFER"
     ] = "SAVED_PAYEE_TRANSFER"
     source_account_id: str
+    # The authoritative source-account display name (e.g. "DBS Current Account"), looked up from
+    # the trusted customer record at resolution time. Travels with the draft so the client renders
+    # the real account name instead of guessing one (the receipt card must never hard-code a name
+    # like "DBS Savings", that mislabels a Current Account transfer as a Savings one).
+    source_account_display: str = ""
     beneficiary_id: str
     destination_token: str
     amount_minor: int
@@ -240,7 +245,7 @@ class Draft(BaseModel):
     account_masked: str
     # A future execution time the customer named (e.g. "tomorrow morning at nine"). Deterministic
     # code parses it from the turn; it is an annotation on the read-back, not an execution trigger
-    # in this MVP (the mock ledger still records on confirmation — a scheduled send is out of scope).
+    # in this MVP (the mock ledger still records on confirmation, a scheduled send is out of scope).
     scheduled_for: Optional[str] = None
     evidence_ids: List[str] = Field(default_factory=list)
 
@@ -255,7 +260,7 @@ class Confirmation(BaseModel):
 
 
 # =====================================================================
-# Personalization Agent — 5th bounded agent. Reasons ONLY over structured,
+# Personalization Agent, 5th bounded agent. Reasons ONLY over structured,
 # already-computed facts about what happened mechanically in this session.
 # It is never given the transcript, so it cannot infer age, ability, accent
 # or identity from how the customer speaks or types (see agents.py docstring).
@@ -264,7 +269,7 @@ class PersonalizationSignals(BaseModel):
     """Every field here is a fact about what happened, never about how it was said.
 
     A single rejection/clarification is normal system behaviour (the system caught
-    or asked about something) — only a REPEAT on the same point is a friction signal.
+    or asked about something), only a REPEAT on the same point is a friction signal.
     """
     repeat_field_rejections: List[Literal["RECIPIENT", "AMOUNT", "SOURCE_ACCOUNT"]] = Field(default_factory=list)
     repeat_clarifications: List[str] = Field(default_factory=list)
@@ -272,7 +277,7 @@ class PersonalizationSignals(BaseModel):
 
 
 class PersonalizationDecision(BaseModel):
-    """Output is a score + reason, not a black-box probability — every point is traceable
+    """Output is a score + reason, not a black-box probability; every point is traceable
     to one of the three PersonalizationSignals fields (see PERSONALIZATION_WEIGHTS)."""
     personalize: bool
     score: int

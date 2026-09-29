@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>AuntieJoy — DBS Voice-First Payments</title>
+<title>AuntieJoy · DBS Voice-First Payments</title>
 <!-- Banking-grade type. Inter is the requested DBS/enterprise face; the CSS stack keeps a
      full system fallback, so an offline demo laptop simply renders in system-ui instead. -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -33,9 +33,9 @@
     </div>
   </div>
 
-  <!-- Backup only: the MECE A–H scenario rail. Hidden unless the user asks for it. -->
+  <!-- Backup only: the MECE A-H scenario rail. Hidden unless the user asks for it. -->
   <div class="rail" id="rail" hidden>
-    <h2>SCENARIOS — MECE BRANCHES A–H (BRD §6) · BACKUP ONLY</h2>
+    <h2>SCENARIOS: MECE BRANCHES A-H (BRD §6) · BACKUP ONLY</h2>
     <div class="grp HAPPY"><span class="glab">HAPPY</span>
       <button class="sbtn" data-s="HAPPY">HAPPY · Golden path</button>
     </div>
@@ -142,7 +142,7 @@
 
             <div class="lgfoot">
               <div class="lgfoot-t">DBS Bank Ltd · Reg. No. 196800306E</div>
-              <div class="lgfoot-s">Demonstration build. Sample credentials only — nothing is
+              <div class="lgfoot-s">Demonstration build. Sample credentials only, nothing is
                 collected, stored or transmitted.</div>
             </div>
           </div>
@@ -164,7 +164,7 @@
         <!-- 3 · AUNTIEJOY CHAT -->
         <section class="scr" id="scrJoy">
           <!-- LIGHT app bar: back control on the left, identity and trust state centred.
-               Deliberately no avatar here — the assistant introduces itself in the message
+               Deliberately no avatar here, the assistant introduces itself in the message
                card below, so the header stays a quiet piece of navigation chrome.
                The back control is absolutely positioned so the title is centred on the
                SCREEN, not on the space left over after the button. -->
@@ -210,7 +210,7 @@
     <div class="ins">
 
       <div class="panel">
-        <h3>END-TO-END CONTROL CHAIN <span class="cnt">BRD §8.2 · STAGES 0–15</span></h3>
+        <h3>END-TO-END CONTROL CHAIN <span class="cnt">BRD §8.2 · STAGES 0-15</span></h3>
         <div class="chain" id="chain"></div>
       </div>
 
@@ -223,14 +223,14 @@
         <h3>STATE · OUTCOME · EVIDENCE</h3>
         <div class="statewrap">
           <div class="sbox"><div class="k">SESSION STATE</div><div class="v" id="stState">IDLE</div></div>
-          <div class="sbox"><div class="k">DRAFT</div><div class="v" id="stDraft">—</div></div>
+          <div class="sbox"><div class="k">DRAFT</div><div class="v" id="stDraft">-</div></div>
         </div>
         <div class="statewrap">
           <div class="sbox"><div class="k">MOCK LEDGER</div><div class="v" id="stLedger">NOT_INVOKED</div></div>
           <div class="sbox"><div class="k">SIGNATURE</div><div class="v" id="stSig">NONE</div></div>
         </div>
         <div class="sbox" style="margin-bottom:11px"><div class="k">CONTROL OUTCOME</div>
-          <div style="margin-top:5px"><span class="outbadge" id="stOut">—</span></div>
+          <div style="margin-top:5px"><span class="outbadge" id="stOut">-</span></div>
         </div>
         <h3 style="margin-top:14px">APPEND-ONLY AUDIT TIMELINE</h3>
         <div class="audit" id="audit"><div class="placeholder">No events yet.</div></div>
@@ -246,7 +246,7 @@
 
   <div class="foot">
     <b>Read this as:</b> the customer only ever sees one warm conversation, inside the DBS app.
-    Everything in the panels is what DBS sees — five bounded agents that may screen, classify,
+    Everything in the panels is what DBS sees, five bounded agents that may screen, classify,
     propose and audit, and deterministic code that alone resolves, verifies, authorises and executes.
     No LLM holds a signing key, a gateway credential or ledger access.
   </div>

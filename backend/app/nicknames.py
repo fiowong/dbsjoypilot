@@ -1,4 +1,4 @@
-"""Learned nicknames — the names a customer actually uses out loud.
+"""Learned nicknames, the names a customer actually uses out loud.
 
 A nickname is a REDIRECT RULE: "ah girl" -> a beneficiary. Two rules keep that safe, and both are
 enforced here rather than trusted to callers:
@@ -6,7 +6,7 @@ enforced here rather than trusted to callers:
   1. The store holds ONLY a beneficiary_id. Never a display name, a masked ending, an account
      number or a destination token. The payee record always comes from the trusted repository
      (SAVED_PAYEES), so a stale or hand-edited file cannot introduce a destination the
-     repository does not already contain — an unknown id simply resolves to nothing.
+     repository does not already contain, an unknown id simply resolves to nothing.
   2. teach() refuses to bind anything that is not already a saved payee of that customer. Chat
      can express a preference; it can never create a payee or a destination.
 
@@ -14,7 +14,7 @@ Seeded nicknames live on the trusted Payee record (data.py); learned ones live i
 and are layered on top of it. A taught nickname wins over a seeded one: the customer's own, more
 recent instruction is the better answer, and the person check on the read-back still gates it.
 
-This file is deliberately NOT part of the audit log — it is mutable state, not an append-only
+This file is deliberately NOT part of the audit log, it is mutable state, not an append-only
 record. Every teaching is audited separately as a NICKNAME_LEARNED event by the orchestrator.
 """
 from __future__ import annotations
@@ -38,7 +38,7 @@ def _path() -> str:
 
 
 def _read() -> Dict[str, Dict[str, str]]:
-    """{customer_id: {nickname: beneficiary_id}}. A missing or corrupt file is an empty store —
+    """{customer_id: {nickname: beneficiary_id}}. A missing or corrupt file is an empty store,
     a demo must never fail to start because a preference file got damaged."""
     try:
         with open(_path(), "r", encoding="utf-8") as handle:
@@ -130,7 +130,7 @@ def match_in_text(customer_id: str, text: str) -> Optional[Tuple[str, Payee]]:
 
 def teach(customer_id: str, nickname: str, beneficiary_id: str) -> Optional[Payee]:
     """Bind a nickname to an EXISTING saved payee. Returns the payee, or None and changes nothing
-    if the nickname is empty or the beneficiary is not this customer's saved payee — which is the
+    if the nickname is empty or the beneficiary is not this customer's saved payee, which is the
     whole point: chat can name a preference, it can never create a destination."""
     key = (nickname or "").strip().lower()
     if not key:

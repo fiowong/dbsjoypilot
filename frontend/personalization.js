@@ -1,23 +1,23 @@
-/* 3/5 personalization.js — load 3rd. CUSTOMER_NAME/PERSONALIZE_MODE state, personalizeActive()/tt(), syncPersonalization(), reportFieldSignal(), and the Personalisation settings-button wiring. Calls popup()/iface()/agent()/audit() from ui.js (already loaded) and postJSON()/auditClassFor() from live.js/scenarios.js — safe because those are only referenced inside functions that run after every file below has finished loading, never during this file's own top-level evaluation. */
+/* 3/5 personalization.js, load 3rd. CUSTOMER_NAME/PERSONALIZE_MODE state, personalizeActive()/tt(), syncPersonalization(), reportFieldSignal(), and the Personalisation settings-button wiring. Calls popup()/iface()/agent()/audit() from ui.js (already loaded) and postJSON()/auditClassFor() from live.js/scenarios.js, safe because those are only referenced inside functions that run after every file below has finished loading, never during this file's own top-level evaluation. */
 // ==========================================================================
-// PERSONALIZATION — adapts to observed difficulty in THIS conversation, not
+// PERSONALIZATION, adapts to observed difficulty in THIS conversation, not
 // to any guess about who the customer is. The decision itself is made server-side
 // by the Personalization Agent (backend/auntiejoy/agents.py), which reasons only
 // over structured facts about this session (a clarification point that had to be
-// raised twice, a field rejected twice, two turns in a row that didn't resolve) —
+// raised twice, a field rejected twice, two turns in a row that didn't resolve),
 // never the customer's words. This file just reflects that decision and lets the
 // customer override it from the "Personalisation" button.
 // ==========================================================================
 let CUSTOMER_NAME = 'Auntie';    // updated from the trusted session.customer_preferred_name once
-                                  // a live turn responds — never taken from anything the customer typed.
+                                  // a live turn responds, never taken from anything the customer typed.
                                   // It fills the {name} placeholder in ui.js's fill(); the live path
                                   // arrives already addressed by the backend and needs no filling.
 let CUSTOMER_NAME_KNOWN = false; // false until the trusted session actually tells us the name.
                                   // The intro card is drawn BEFORE the first turn, so it must not
-                                  // invent one — refreshNameSlots() leaves the greeting nameless
+                                  // invent one, refreshNameSlots() leaves the greeting nameless
                                   // until this flips, rather than addressing the customer as
                                   // "Auntie", which reads like the assistant talking to itself.
-let PERSONALIZE_MODE = 'auto';   // 'auto' | 'on' | 'off' — 'auto' follows AUTO_PERSONALIZE
+let PERSONALIZE_MODE = 'auto';   // 'auto' | 'on' | 'off', 'auto' follows AUTO_PERSONALIZE
 let AUTO_PERSONALIZE = false;    // mirrors the backend's session.personalize_auto
 let LAST_PERSONALIZATION_DECISION = null;   // the Personalization Agent's own reason_code, for the settings popup
 function personalizeActive(){
@@ -36,7 +36,7 @@ function updatePersonalizeBadge(){
 }
 // Reads the Personalization Agent's latest decision off a /turn, /confirm or
 // /field_signal response and announces the change once, the moment it actually
-// flips — never retroactively, never silently.
+// flips, never retroactively, never silently.
 function syncPersonalization(session){
   if(!session) return;
   if(session.customer_preferred_name){
@@ -56,7 +56,7 @@ function syncPersonalization(session){
   updatePersonalizeBadge();
 }
 // Reports a field-review answer to the backend the instant it happens, so a
-// second "no" on the same field is a fact the Personalization Agent can see —
+// second "no" on the same field is a fact the Personalization Agent can see,
 // not something the client only claims after the fact.
 async function reportFieldSignal(field, result){
   if(!FREE_SESSION_ID) return;
@@ -71,7 +71,7 @@ async function reportFieldSignal(field, result){
     const steps=[];
     for(const ev of (resp.events||[])) steps.push(...stepsForEvent(ev, seenStages));
     await play(steps, RUN);
-  }catch(err){ /* best-effort — a failed signal just means slower adaptation, never a broken flow */ }
+  }catch(err){ /* best-effort, a failed signal just means slower adaptation, never a broken flow */ }
 }
 
 // Picks what Auntie should actually hear back for a live /turn or /confirm response.
@@ -79,10 +79,10 @@ async function reportFieldSignal(field, result){
 // or a message_key and render the sentence here, using the MSG[] map. That made the browser a
 // second author of the interface copy. The backend now renders the finished sentence from its
 // messages.py catalogue and ships it as an INTERFACE_LINE event, which eventsToSteps() plays
-// directly — so there is nothing left for the client to compose.
+// directly, so there is nothing left for the client to compose.
 
 // Personalisation settings button: shows honestly what's active and why, and
-// always lets the customer override it — automatic detection never has the
+// always lets the customer override it, automatic detection never has the
 // final word.
 const personalizeBadge = $('personalizeBadge');
 if(personalizeBadge){

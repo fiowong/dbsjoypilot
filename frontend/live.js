@@ -1,9 +1,9 @@
-/* 5/5 live.js — load 5th and LAST. Live free-form /turn + /confirm flow: postJSON, liveFieldReview/liveConfirmFlow/liveFreeTurn, mic/language wiring, and the boot call runScenario('HAPPY') at the very end — must be last since it depends on everything above. */
+/* 5/5 live.js, load 5th and LAST. Live free-form /turn + /confirm flow: postJSON, liveFieldReview/liveConfirmFlow/liveFreeTurn, mic/language wiring, and the boot call runScenario('HAPPY') at the very end, must be last since it depends on everything above. */
 /* ---------- live free-form input: real /turn + /confirm calls, no more scripting ---------- */
 const fld=$('fld'), mic=$('mic');
 let FREE_SESSION_ID = null;
 // SCHEDULED is terminal too: a confirmed future-dated payment is finished for this draft, but it
-// is NOT executed — no ledger entry was written, so no LEDGER_RECORDED event and no receipt card.
+// is NOT executed; no ledger entry was written, so no LEDGER_RECORDED event and no receipt card.
 const TERMINAL_STATES = new Set(['EXECUTED','SCHEDULED','REJECTED','FROZEN','COOLING_OFF']);
 
 // Right-column YOU bubble the mic handler draws as words arrive (interim + final).
@@ -24,12 +24,21 @@ async function postJSON(path, body){
   const res = await fetch(`${API_BASE}${path}`, {
     method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)
   });
-  if(!res.ok) throw new Error(`${path} → HTTP ${res.status}`);
+  if(!res.ok){
+    // The status alone is not enough to act on. A 409 is the backend REFUSING (frozen/cancelled,
+    // or no draft awaiting confirmation), not a transport failure, so the body's `detail` is
+    // carried on the error and surfaced in the audit panel instead of being flattened to a code.
+    let detail='';
+    try{ const j = await res.json(); detail = (j && (j.detail || j.message)) || ''; }catch(_){}
+    const err = new Error(`${path} → HTTP ${res.status}${detail ? ' · '+detail : ''}`);
+    err.status = res.status; err.detail = detail;
+    throw err;
+  }
   return res.json();
 }
 
 // A live /turn or /confirm response is a flat event list rather than a `turns` wrapper, but it
-// is translated by the SAME stepsForEvent()/finalStateSteps() the scenario path uses — defined
+// is translated by the SAME stepsForEvent()/finalStateSteps() the scenario path uses, defined
 // in scenarios.js. Keeping one mapping is what stops the live and scripted demos drifting apart.
 function eventsToSteps(events, seenStages){
   const steps=[];
@@ -37,7 +46,7 @@ function eventsToSteps(events, seenStages){
   return steps;
 }
 
-// The most recent sentence the backend rendered for this turn — its own reviewed
+// The most recent sentence the backend rendered for this turn, its own reviewed
 // INTERFACE_LINE wording. Used when re-presenting a clarification as a card, so the
 // client never has to write that sentence itself.
 function lastInterfaceLine(events){
@@ -56,17 +65,17 @@ function showUnderstood(resp, asrConfidence, viaVoice){
   if(!ev) return;
   const p=ev.payload||{};
   const esc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;');
-  const conf=(p.confidence!=null)?Math.round(p.confidence*100)+'%':'—';
+  const conf=(p.confidence!=null)?Math.round(p.confidence*100)+'%':'-';
   // Voice provenance: the live "Heard…" line is overwritten as soon as a turn resolves,
   // so the clarity reading is repeated here where it survives.
   const asr=(viaVoice && typeof asrConfidence==='number')
     ? `<br><span class="why">heard via voice · clarity ${Math.round(asrConfidence*100)}%`+
-      (asrConfidence < 0.85 ? ' — below the 0.85 threshold, so a repeat may be requested' : '')+`</span>`
+      (asrConfidence < 0.85 ? '. Below the 0.85 threshold, so a repeat may be requested' : '')+`</span>`
     : '';
   const d=document.createElement('div');
   d.className='row them ins';
   d.innerHTML=`<span class="lab UNDERSTOOD">UNDERSTOOD</span><div class="bub sys">`+
-    `intent <b>${esc(p.intent||'—')}</b> · confidence <b>${conf}</b>`+
+    `intent <b>${esc(p.intent||'-')}</b> · confidence <b>${conf}</b>`+
     (p.detected_language?` · language <b>${esc(p.detected_language)}</b>`:'')+
     (p.reason?`<br><span class="why">${esc(p.reason)}</span>`:'')+asr+`</div>`;
   chatEl.appendChild(d); scroll();
@@ -74,14 +83,18 @@ function showUnderstood(resp, asrConfidence, viaVoice){
 
 // Local, presentation-only field-by-field walkthrough (BRD §8.11.2 / A.8) using
 // the REAL draft the backend just returned. Nothing is sent to the server until
-// all three fields get a "yes" — a "no" just stops here and asks Auntie to
+// all three fields get a "yes"; a "no" just stops here and asks Auntie to
 // restate that field as a normal free-text/voice turn (same as scenario E2).
 async function liveFieldReview(lang, d){
   const t=tt(lang);
+  // `lang` here is the language the BACKEND settled on for this session, not the local guess,
+  // so the popups, the FaceID card below and the receipt all speak the same language as the
+  // conversation around them.
+  const c=t.chrome;
   const F=[
-    ['RECIPIENT','Recipient', t.recipient(`${d.payee_display} · ${d.payee_masked}`), 1, 'user'],
-    ['AMOUNT','Amount',       t.amount(money(d.amount_minor, d.currency)),            2, 'receipt'],
-    ['SOURCE_ACCOUNT','Source', t.source(d.account_masked),                           3, 'card']
+    ['RECIPIENT', c.fieldTitle.recipient, t.recipient(`${d.payee_display} · ${d.payee_masked}`), 1, 'user'],
+    ['AMOUNT',    c.fieldTitle.amount,    t.amount(money(d.amount_minor, d.currency)),            2, 'receipt'],
+    ['SOURCE_ACCOUNT', c.fieldTitle.source, t.source(d.account_masked),                           3, 'card']
   ];
   // No spoken intro here: the backend already said the REVIEW_READY line from its catalogue
   // when it opened confirmation, so this walkthrough is popups only.
@@ -89,12 +102,12 @@ async function liveFieldReview(lang, d){
     const f=F[i];
     stage(11,'run');
     const a=await popup({
-      kicker:`FIELD ${f[3]} OF 3 · ${f[0]}`, stepIdx:i, steps:F,
+      kicker:`${c.fieldKicker(f[3])} · ${f[0]}`, stepIdx:i, steps:F,
       icon:f[4] || 'shieldCheck',
       title:f[1], body:f[2],
-      fields: `<div class="fr"><span class="k">Draft version</span><span class="v">v${d.version} · ${d.draft_id}</span></div>`,
+      fields: `<div class="fr"><span class="k">${c.draftVersion}</span><span class="v">v${d.version} · ${d.draft_id}</span></div>`,
       acts:[{id:'yes',label:t.yes,kind:'yes'},{id:'no',label:t.no,kind:'no'}],
-      note:'One “yes” confirms only the field on this screen. It does not sign, and it does not call the gateway.'
+      note:c.fieldNote
     });
     if(a==='cancelled') return {cancelled:true};
     if(a==='no'){
@@ -103,13 +116,13 @@ async function liveFieldReview(lang, d){
       return {edit:true, field:f[0]};
     }
     // Extra confirmation layer: once personalization is active, a single "yes"
-    // isn't taken as final — the detail is read back once more before it locks in.
+    // isn't taken as final, the detail is read back once more before it locks in.
     if(personalizeActive() && t.confirmAgain){
       const again = await popup({
-        kicker:`DOUBLE-CHECK · ${f[0]}`, title:f[1],
+        kicker:`${c.doubleCheckKicker} · ${f[0]}`, title:f[1],
         body: t.confirmAgain(f[2]),
         acts:[{id:'yes',label:t.yes,kind:'yes'},{id:'no',label:t.no,kind:'no'}],
-        note:'Confirming twice, just to be sure. This still hasn’t signed or sent anything.'
+        note:c.doubleCheckNote
       });
       if(again==='cancelled') return {cancelled:true};
       if(again==='no'){
@@ -125,20 +138,20 @@ async function liveFieldReview(lang, d){
 }
 
 // Field review → mock FaceID → real POST /confirm → render whatever the
-// backend actually decided (sign, gateway, ledger — or a freeze/reject).
+// backend actually decided (sign, gateway, ledger, or a freeze/reject).
 //
 // IN-10: one turn can carry several independent instructions. The backend queues them, and
 // after each one executes it advances session.draft to the NEXT queued instruction and reads
 // that one back itself (event NEXT_INSTRUCTION_QUEUED). So this walkthrough has to run once
 // per queued draft. Without the loop the customer is left with no card to act on for
-// instruction 2, and the "yes" they type instead travels to /turn as a fresh turn — which the
+// instruction 2, and the "yes" they type instead travels to /turn as a fresh turn, which the
 // backend answers by restarting the review, so the same read-back is heard twice.
 async function liveConfirmFlow(session, lang, my){
   const offered = new Set();
   let cur = session;
   while(my===RUN && cur && cur.draft){
     // The backend hands over the next queued instruction by leaving the session in
-    // CONFIRMATION_READY with session.draft pointing at a DIFFERENT draft — it has already
+    // CONFIRMATION_READY with session.draft pointing at a DIFFERENT draft; it has already
     // re-read that draft back itself. Anything else means this flow is done: EXECUTED, a
     // freeze or a reject (the last instruction), or a review re-opened on the SAME draft.
     //
@@ -161,29 +174,34 @@ async function liveConfirmFlow(session, lang, my){
 // (cancelled, a rejected field, an unreachable backend, or a newer run superseding this one).
 async function liveConfirmOnce(session, lang, my){
   const d = session.draft;
+  const c = tt(lang).chrome;
   // Present the recognised draft in the transcript first. The approval walkthrough begins
   // only when the customer acts on that card, so the card is a real control rather than
   // decoration. A new run resolves it as 'cancelled' and this flow unwinds.
-  const go = await draftCard(d);
+  const go = await draftCard(d, lang);
   if(my!==RUN || go!=='confirm') return null;
   const r = await liveFieldReview(lang, d);
   if(my!==RUN || r.cancelled) return null;
   // A rejected field already produced the backend's FIELD_EDIT_REQUESTED line via
-  // /field_signal, so there is nothing to say here — just wait for the next turn.
+  // /field_signal, so there is nothing to say here, just wait for the next turn.
   if(r.edit) return null;
   // This lead-in belongs to the simulated FaceID popup below, which is frontend chrome (like
   // the field-review popups), not a conversation line the backend decides.
   iface(tt(lang).ready); await sleep(500);
   if(my!==RUN) return null;
   stage(12,'run');
+  // Which language this chrome renders in is decided by the backend's settled session language,
+  // not by a local guess, so it is recorded here. If a card ever appears in the wrong tongue this
+  // line says whether the wrong language arrived or the catalogue lookup missed.
+  audit('FACEID_PROMPT · interface language '+lang+(c.faceid ? '' : ' · CHROME MISSING'),'ok');
   const a = await popup({
-    kicker:'MOCK FACEID · SIMULATED', title:'Face ID',
-    body:'AuntieJoy is asking for a <b>transaction-specific</b> biometric confirmation on the registered device.',
-    fields:`<div class="fr"><span class="k">Draft</span><span class="v">${d.draft_id} · v${d.version}</span></div>
-            <div class="fr big"><span class="k">Amount</span><span class="v">${money(d.amount_minor, d.currency)}</span></div>`,
-    acts:[{id:'ok',label:icon('faceid')+' Confirm with Face ID',kind:'yes'}],
+    kicker:c.faceid.kicker, title:c.faceid.title,
+    body:c.faceid.body,
+    fields:`<div class="fr"><span class="k">${c.faceid.draftLabel}</span><span class="v">${d.draft_id} · v${d.version}</span></div>
+            <div class="fr big"><span class="k">${c.faceid.amountLabel}</span><span class="v">${money(d.amount_minor, d.currency)}</span></div>`,
+    acts:[{id:'ok',label:icon('faceid')+' '+c.faceid.confirm,kind:'yes'}],
     icon:'faceid',
-    note:'Simulated. The prototype does not claim production FaceID integration (BRD §7.4).'
+    note:c.faceid.note
   });
   if(my!==RUN) return null;
   if(a==='cancelled'){ stage(12,''); return null; }
@@ -195,8 +213,15 @@ async function liveConfirmOnce(session, lang, my){
       language: lang, biometric: true, faceid_result: 'SUCCESS'
     });
   }catch(err){
-    audit('CONFIRM_CALL_FAILED · '+err.message,'stop');
-    iface('Sorry, I could not reach the payment system just now. Please try again.');
+    // A 409 is not "the payment system is unreachable"; the backend refused because there is
+    // nothing left to confirm or the transaction was stopped. Saying otherwise is false and hides
+    // the real cause, so the true reason (the backend's own detail) goes to the audit panel.
+    if(err && err.status === 409){
+      audit('CONFIRM_REFUSED_409 · '+(err.detail || 'no draft awaiting confirmation'),'stop');
+    } else {
+      audit('CONFIRM_CALL_FAILED · '+err.message,'stop');
+    }
+    iface(c.unreachable);
     return null;
   }
   if(my!==RUN) return null;
@@ -207,7 +232,7 @@ async function liveConfirmOnce(session, lang, my){
   if(my!==RUN) return null;
   // A real executed payment gets the full DBS receipt treatment, so the confirmation reads
   // as a digibank record rather than as a chat message claiming success. The SPOKEN line is
-  // still the backend's own reviewed INTERFACE_LINE (played above) — this card only SHOWS it,
+  // still the backend's own reviewed INTERFACE_LINE (played above); this card only SHOWS it,
   // and every value on it comes from the canonical draft and the execution record.
   //
   // Keyed off the ledger record THIS confirmation produced rather than off the session's final
@@ -222,16 +247,20 @@ async function liveConfirmOnce(session, lang, my){
               hour:'2-digit',minute:'2-digit'}),
       amount: money(d.amount_minor, d.currency),
       to:     d.payee_display + (d.payee_masked ? ' · ' + d.payee_masked : ''),
-      from:   'DBS Savings · ' + (d.account_masked || 'ending 1234'),
+      // The real source-account name comes from the backend (source_account_display), so a
+      // Current Account transfer is never mislabelled "DBS Savings". Fall back to the old
+      // hard-coded label only if the field is somehow absent.
+      from:   (d.source_account_display ? d.source_account_display + ' · ' : 'DBS Savings · ')
+              + (d.account_masked || 'ending 1234'),
       ref:    txn
-    });
+    }, lang);
   }
   return resp.session;
 }
 
 // asrConfidence: the REAL confidence the speech engine reported for this utterance, or null
 // when it reported none. Passing it through is what makes the backend's ASR ambiguity
-// guardrail live — previously every voice turn was sent as a hardcoded 0.93, so a badly
+// guardrail live; previously every voice turn was sent as a hardcoded 0.93, so a badly
 // misheard amount could never trigger a "please repeat that" challenge.
 // asrSource travels with it so the backend can always tell a measurement from a stand-in.
 async function liveFreeTurn(text, viaVoice, asrConfidence, asrSource){
@@ -245,22 +274,22 @@ async function liveFreeTurn(text, viaVoice, asrConfidence, asrSource){
     // look identical to the page reloading.
     resetPanels();
     document.querySelectorAll('.sbtn').forEach(b=>b.classList.remove('on'));
-    AUTO_PERSONALIZE = false;   // a new conversation starts with a clean read — no carry-over profiling
+    AUTO_PERSONALIZE = false;   // a new conversation starts with a clean read, no carry-over profiling
     updatePersonalizeBadge();
     await sleep(120);
     if(my!==RUN) return;
     audit('LIVE BACKEND · '+API_BASE,'ok');
   }
-  const lang = guessLang(text);
+  let lang = guessLang(text);
   // Clear only the STALE, transient mic status markers ("Listening…" / "Hearing…" /
-  // "Stopped listening…") left over from a PREVIOUS mic press. The "Heard you — clarity N%"
+  // "Stopped listening…") left over from a PREVIOUS mic press. The "Heard you · clarity N%"
   // marker is KEPT: it is the only place the engine's clarity reading survives, and it proves
   // the ears worked. Clarification cards (.ccard) and every other bubble stay untouched.
   chatEl.querySelectorAll('.row.them .bub.iface').forEach(b => {
     if(/^(Listening|Hearing|Stopped listening)/.test(b.textContent || '')) b.closest('.row').remove();
   });
   // Echo the customer's own words into the transcript. BOTH typed and voice turns get a
-  // right-column "YOU" echo for symmetry — but a VOICE turn has usually already drawn that
+  // right-column "YOU" echo for symmetry, but a VOICE turn has usually already drawn that
   // bubble word-by-word while the mic streamed interim results, so reuse it instead of
   // creating a second copy. A TYPED turn never reuses one: any bubble still hanging around
   // belongs to an abandoned mic session and must be dropped, or the typed words would go
@@ -285,10 +314,18 @@ async function liveFreeTurn(text, viaVoice, asrConfidence, asrSource){
     });
   }catch(err){
     audit('TURN_CALL_FAILED · '+err.message,'stop');
-    iface('Sorry, I could not reach the payment system just now. Please try again.');
+    // The backend never answered, so there is no catalogue line to quote and no settled session
+    // language: the local reading of this turn's words is the best available, and the fallback
+    // sentence is chrome, so it follows that.
+    iface(tt(lang).chrome.unreachable);
     BUSY=false; return;
   }
   if(my!==RUN) return;
+  // The backend has now settled which language this conversation is spoken in (it counts the
+  // customer's words and holds the winner for the whole session). Adopt it for everything the
+  // customer sees next (the field review, the Face ID prompt, the receipt) instead of the
+  // local guess above, which only looked at this one sentence and disagreed with the backend.
+  if(resp.session && resp.session.interface_language) lang = resp.session.interface_language;
   const seenStages=new Set();
   const steps = eventsToSteps(resp.events, seenStages).concat(finalStateSteps(resp.session));
   await play(steps, my);
@@ -297,19 +334,27 @@ async function liveFreeTurn(text, viaVoice, asrConfidence, asrSource){
   const st = resp.session.state;
   syncPersonalization(resp.session);   // the backend's Personalization Agent already decided this turn
   showUnderstood(resp, asrConfidence, viaVoice);   // diagnostic: intent + clarity, hidden in the customer view
-  if(st==='CONFIRMATION_READY' && resp.session.draft){
+  // The read-back may have just ASKED the customer something, to confirm a slang amount
+  // ("a grand"), or which account a payment should come from. Showing the "Confirm & Slide to
+  // Pay" card at that moment puts two competing actions on screen (the card and the question
+  // above it) and the customer cannot tell which to do first, so the card is held back until
+  // they have answered. Nothing is skipped: the very next turn releases it.
+  if(st==='CONFIRMATION_READY' && resp.session.draft && !resp.session.awaiting_multi_go_ahead){
     await liveConfirmFlow(resp.session, lang, my);
+  } else if(st==='CONFIRMATION_READY' && resp.session.awaiting_multi_go_ahead){
+    audit('CONFIRM_CARD_DEFERRED · the read-back above is still asking a question; '
+          + 'the review card appears once the customer answers.','ok');
   } else {
-    if(TERMINAL_STATES.has(st)) FREE_SESSION_ID = null;   // conversation ended — next turn starts fresh
+    if(TERMINAL_STATES.has(st)) FREE_SESSION_ID = null;   // conversation ended, next turn starts fresh
     if(st==='CLARIFICATION_REQUIRED'){
       // The backend already spoke this turn's clarification line, and play() rendered it as
-      // a plain bubble. Re-present that SAME backend wording as an in-transcript card — the
-      // client writes no sentence of its own — and drop the plain bubble so Auntie never
+      // a plain bubble. Re-present that SAME backend wording as an in-transcript card (the
+      // client writes no sentence of its own) and drop the plain bubble so Auntie never
       // sees the same line twice.
       const said = lastInterfaceLine(resp.events);
       if(said){
         removeLastIfaceBubble();
-        clarifyCard(said, ()=>{ const f=$('fld'); if(f) f.focus(); });
+        clarifyCard(said, ()=>{ const f=$('fld'); if(f) f.focus(); }, lang);
       }
     }
   }
@@ -321,7 +366,7 @@ async function liveFreeTurn(text, viaVoice, asrConfidence, asrSource){
 
 fld.addEventListener('keydown',e=>{ if(e.key==='Enter'&&fld.value.trim()){const t=fld.value.trim();fld.value='';liveFreeTurn(t,false);} });
 
-// Web Speech API only listens in ONE language at a time — it can't auto-detect,
+// Web Speech API only listens in ONE language at a time; it can't auto-detect,
 // so Auntie (or whoever's speaking) picks which one with this toggle first.
 let MIC_LANG = 'en-SG';
 document.querySelectorAll('#langtog .lt').forEach(b=>{
@@ -344,7 +389,7 @@ function sttLanguage(){
    Resolves with {text, confidence, confidenceSource}; throws if the engine is unusable. */
 async function sttTurn(setYou){
   // Tap-to-talk that waits for the engine to finish. We deliberately do NOT call start()
-  // and stop() back-to-back — that gave no listening window, so the engine returned an
+  // and stop() back-to-back; that gave no listening window, so the engine returned an
   // empty final and the turn was silently dropped. Instead we let the engine's VAD
   // (1 s of silence after speech) finalise on its own, and only cancel on timeout/error.
   // Interim results stream into the customer's own bubble via setYou, word by word.
@@ -404,7 +449,7 @@ function webSpeechTurn(setYou){
       if(interim.trim()) setYou(interim.trim());
       if(final.trim()) resolve({ text: final.trim(), confidence: typeof conf==='number' ? conf : null });
     };
-    // Errors are SYSTEM messages, so they belong on the left — never in the customer's bubble.
+    // Errors are SYSTEM messages, so they belong on the left, never in the customer's bubble.
     r.onerror = ev=>{
       iface(icon('alert') + ' ' + ({
         'not-allowed':'Microphone permission was blocked. Please allow it in your browser, or type instead.',
@@ -437,7 +482,7 @@ async function micCapture(){
   stopSpeaking();   // barge-in: pressing the mic immediately silences any playback
   // Clear any stale mic placeholders from a PREVIOUS press (Listening…/Hearing…/Stopped…)
   // so we never end up with a stack of them. The live FreeTurn path also clears these,
-  // but that only fires when the engine produced a result — if it didn't (no speech,
+  // but that only fires when the engine produced a result; if it didn't (no speech,
   // aborted, blocked by a guardrail), the bubbles would otherwise pile up on every
   // extra press of the mic.
   chatEl.querySelectorAll('.row.them .bub.iface').forEach(b => {
@@ -449,7 +494,7 @@ async function micCapture(){
   const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
   const haveStt = (typeof SttClient !== 'undefined') && SttClient.supported();
   if(!haveStt && !SR){
-    iface('Voice input is not available in this browser — please type, or run a scripted scenario.');
+    iface('Voice input is not available in this browser. Please type, or run a scripted scenario.');
     return;
   }
 
@@ -474,7 +519,7 @@ async function micCapture(){
   }
 
   // The INTERFACE bubble is only a status marker ("we are listening"). The customer's OWN
-  // words stream into their own right-column YOU bubble, word by word, via setYou — so the
+  // words stream into their own right-column YOU bubble, word by word, via setYou, so the
   // transcript reads like a real voice-first exchange instead of the system quoting them back.
   const live = iface(icon('mic') + 'Listening…');
   // Every status line carries the mic icon; the icon is re-emitted on each update because
@@ -491,7 +536,7 @@ async function micCapture(){
   mic.classList.add('on');
 
   try{
-    // Prefer the real engine. Any failure — no config, no server, no key — falls through to
+    // Prefer the real engine. Any failure (no config, no server, no key) falls through to
     // the browser's recogniser rather than leaving Auntie with a dead button.
     if(haveStt){
       let r = null;
@@ -500,7 +545,7 @@ async function micCapture(){
       if(r && r.text){
         setYou(r.text);   // settle the customer's bubble on the FINAL text, not the last partial
         const c = (typeof r.confidence==='number') ? r.confidence : null;
-        const clarity = c!=null ? ` — clarity ${Math.round(c*100)}%` : ' — clarity not reported';
+        const clarity = c!=null ? ` · clarity ${Math.round(c*100)}%` : ' · clarity not reported';
         // The words now live in the customer's own bubble, so this left-hand marker carries
         // only the reading that has no home there: how clearly the engine heard them.
         setLive(`Heard you${clarity}`);
@@ -515,7 +560,7 @@ async function micCapture(){
     if(spoken && spoken.text){
       setYou(spoken.text);
       const c = (typeof spoken.confidence==='number') ? spoken.confidence : null;
-      setLive(`Heard you${c!=null ? ` — clarity ${Math.round(c*100)}%` : ''}`);
+      setLive(`Heard you${c!=null ? ` · clarity ${Math.round(c*100)}%` : ''}`);
       liveFreeTurn(spoken.text, true, c);
       return;
     }
@@ -523,7 +568,7 @@ async function micCapture(){
     // Nothing usable came back: never leave a ghost YOU bubble or a stuck "Listening…" marker.
     if(_pendingYouBubble){ try{ _pendingYouBubble.remove(); }catch(_){} _pendingYouBubble = null; }
     const b = live && live.querySelector('.bub');
-    if(b && /Listening…/.test(b.textContent)) b.innerHTML = icon('mic') + 'Stopped listening — nothing was heard.';
+    if(b && /Listening…/.test(b.textContent)) b.innerHTML = icon('mic') + 'Stopped listening. Nothing was heard.';
   } finally {
     mic.classList.remove('on');
   }

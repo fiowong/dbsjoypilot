@@ -1,8 +1,8 @@
-/* 6/6 shell.js — load LAST. Device shell only: the DBS digibank phone mockup that
+/* 6/6 shell.js, load LAST. Device shell only: the DBS digibank phone mockup that
    wraps the three app screens (Login → digibank home → AuntieJoy chat). It switches
    screens, renders the balance hero / "Enable AuntieJoy" hero / quick-action tiles,
    and drops the landing intro card into the chat. It does NOT implement any payment
-   logic — that is owned by the five files above (translations/ui/personalization/
+   logic, that is owned by the five files above (translations/ui/personalization/
    scenarios/live) and by the backend. Everything it touches is a global already defined
    by those files: MASCOT, money(), chatEl, scroll(), resetRun(), popup(), liveFreeTurn(),
    mic. Loaded after live.js so all of those exist. */
@@ -27,7 +27,7 @@ function showLogin(){
 }
 
 /* ---------- digibank home ---------- */
-/* Every icon here comes from icons.js — no OS emoji in banking chrome. The balance card is a
+/* Every icon here comes from icons.js, no OS emoji in banking chrome. The balance card is a
    dark gradient surface with a masked account number and a currency pill; the AuntieJoy entry
    is a white card with a red accent badge and a pulsing mic dot rather than a full-red block. */
 const HOME_HTML = `
@@ -128,7 +128,7 @@ async function showPayScopeNotice(){
   const a = await popup({
     kicker:'PROTOTYPE SCOPE',
     title:'That route isn’t built in this demo',
-    body:'Every transfer in this build is prepared by <b>AuntieJoy</b> — that is the thing being demonstrated. '+
+    body:'Every transfer in this build is prepared by <b>AuntieJoy</b>, that is the thing being demonstrated. '+
          'The other Pay &amp; Transfer routes are shown so you can see where AuntieJoy sits in the real app.',
     acts:[{id:'joy',label:'Open AuntieJoy',kind:'yes'},{id:'back',label:'Back to Pay &amp; Transfer',kind:'no'}],
     note:'Nothing was sent, and no payment was created.'
@@ -165,7 +165,7 @@ async function showForgotNotice(){
    The landing block is one transcript child: the assistant's message card, the
    "SAMPLE VOICE COMMANDS" label, and the example chips. Kept together so the
    transcript still holds exactly one thing before the customer says anything.
-   The card is a plain WHITE surface with a monogram avatar — the assistant is
+   The card is a plain WHITE surface with a monogram avatar, the assistant is
    introduced by the card, so the app bar above it can stay quiet navigation. */
 function introCard(){
   const d=document.createElement('div');
@@ -203,7 +203,7 @@ function showJoy(blank){
   showScreen('scrJoy');
   studioEl.classList.remove('appmode');
   if(blank){
-    chatEl.innerHTML='';          // fresh start — drop any prior transcript
+    chatEl.innerHTML='';          // fresh start, drop any prior transcript
     resetRun();                   // resolve any popup the old run was blocked on
     introCard();                  // the warm one-tap way in
   }
@@ -234,7 +234,7 @@ if(lgForgot) lgForgot.addEventListener('click', ev=>{ ev.preventDefault(); showF
 const appBack = $('appBack');
 if(appBack) appBack.addEventListener('click', ev=>{ ev.preventDefault(); showJoy(); });
 
-/* The chat header's Back control returns to the digibank home — the same single-header
+/* The chat header's Back control returns to the digibank home, the same single-header
    navigation the redesign calls for. */
 const joyBack = $('joyBack');
 if(joyBack) joyBack.addEventListener('click', ev=>{ ev.preventDefault(); showHome(); });
@@ -242,7 +242,7 @@ if(joyBack) joyBack.addEventListener('click', ev=>{ ev.preventDefault(); showHom
 const restartBtn = $('restartBtn');
 if(restartBtn) restartBtn.addEventListener('click', ev=>{ ev.preventDefault(); showHome(); });
 
-/* The MECE A–H rail is a BACKUP, kept for the BRD walkthrough and judge Q&A. It is
+/* The MECE A-H rail is a BACKUP, kept for the BRD walkthrough and judge Q&A. It is
    hidden by default so the landing experience is the DBS app, not a scenario picker. */
 const railEl = $('rail'), railToggle = $('railToggle');
 if(railToggle && railEl) railToggle.addEventListener('click', ev=>{

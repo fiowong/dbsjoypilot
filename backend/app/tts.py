@@ -1,4 +1,4 @@
-"""Mouth — text to speech.
+"""Mouth, text to speech.
 
 Provider: Cartesia Sonic, streamed over its WebSocket API. The backend forwards Cartesia's
 audio chunks to the browser as soon as they arrive (no waiting for the full clip), so the
@@ -8,7 +8,7 @@ instead of after the whole sentence has been synthesised. The Cartesia key stays
 own /tts endpoint.
 
 Design rule (same as the ears): the engine is a *provider*, not a decider. It turns the
-backend's INTERFACE_LINE text into sound. It never chooses what AuntieJoy says — the
+backend's INTERFACE_LINE text into sound. It never chooses what AuntieJoy says, the
 orchestrator / messages.py catalogue does.
 """
 from __future__ import annotations
@@ -54,7 +54,7 @@ class SpeechResult:
 
 def language_for(ui_lang: str) -> str:
     u = (ui_lang or "en").lower()
-    # Already a Cartesia code? (en / zh / ms) — pass through untouched.
+    # Already a Cartesia code? (en / zh / ms), pass through untouched.
     if u in ("en", "zh", "ms"):
         return u
     # Otherwise treat as our UI language (EN / ZH / BM / mixed) and map it.
@@ -80,10 +80,10 @@ async def _cartesia_pcm_chunks(text: str, ui_lang: str) -> AsyncIterator[bytes]:
     """
     if not Settings.LIVE_TTS:
         raise TTSError(
-            "TTS is not configured — set CARTESIA_API_KEY (and CARTESIA_VOICE_ID)"
+            "TTS is not configured, set CARTESIA_API_KEY (and CARTESIA_VOICE_ID)"
         )
     if not Settings.TTS_VOICE_ID:
-        raise TTSError("TTS voice not configured — set CARTESIA_VOICE_ID")
+        raise TTSError("TTS voice not configured, set CARTESIA_VOICE_ID")
 
     lang = language_for(ui_lang)
     model = Settings.TTS_MODEL or "sonic-latest"
@@ -150,7 +150,7 @@ async def synthesize_stream(text: str, ui_lang: str = "en") -> AsyncIterator[byt
     """Stream raw mono 16-bit PCM from Cartesia. The browser builds audio on the fly.
 
     Each yielded chunk is a complete slice of 16-bit signed little-endian PCM at
-    SAMPLE_RATE Hz, mono. No WAV header — the frontend knows the format out-of-band
+    SAMPLE_RATE Hz, mono. No WAV header, the frontend knows the format out-of-band
     (it always matches Cartesia's output_format we asked for).
     """
     async for chunk in _cartesia_pcm_chunks(text, ui_lang):

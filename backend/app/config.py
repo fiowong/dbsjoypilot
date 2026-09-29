@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 try:
     # Loads a .env file (if present) in the current working directory into
     # os.environ, so `export`-ing variables by hand is a one-time setup, not
-    # a per-terminal-session chore. Safe if python-dotenv isn't installed —
+    # a per-terminal-session chore. Safe if python-dotenv isn't installed,
     # falls back to whatever's already in the real environment.
     from dotenv import load_dotenv
     load_dotenv()
@@ -12,7 +12,7 @@ except ImportError:
     pass
 
 # =====================================================================
-# 0. Configuration — every threshold is configuration, never prompt text (§8.6.4)
+# 0. Configuration, every threshold is configuration, never prompt text (§8.6.4)
 # =====================================================================
 class Settings:
     PROMPT_VERSION = "aj-2026-09-22e"
@@ -21,22 +21,22 @@ class Settings:
     INTENT_CONFIDENCE_THRESHOLD = 0.75      # §8.6.4
     AGENT_TEMPERATURE = 0.0                 # §8.1
     AGENT_TIMEOUT_S = 30.0                  # raised: deepseek endpoint occasionally slow; 30s ceiling, not a typical latency
-    AGENT_MAX_RETRIES = 3                    # §8.1 — 4 attempts total with exponential backoff + 429 Retry-After (upstream is flaky)
+    AGENT_MAX_RETRIES = 3                    # §8.1, 4 attempts total with exponential backoff + 429 Retry-After (upstream is flaky)
     ASR_AMBIGUITY_THRESHOLD = 0.85
 
     # Personalization Agent (§ observed-friction, not speech-pattern inference).
-    # Each weight is individually justified — see agents.py PERSONALIZATION_SYSTEM_PROMPT
+    # Each weight is individually justified, see agents.py PERSONALIZATION_SYSTEM_PROMPT
     # and the developer_reason on PersonalizationDecision for the audit-trail rationale.
     PERSONALIZATION_THRESHOLD = 2
     PERSONALIZATION_WEIGHTS = {
-        "repeat_field_rejection": 2,   # the SAME field rejected twice — the first "no" is normal use
+        "repeat_field_rejection": 2,   # the SAME field rejected twice, the first "no" is normal use
         "repeat_clarification": 2,     # the SAME clarification point raised twice
         "stalled_intent": 1,           # two consecutive turns that failed to resolve at all
     }
 
-    # §8.10 — synthetic demonstration limits, never real DBS limits
+    # §8.10, synthetic demonstration limits, never real DBS limits
     DEMO_MAX_TRANSFER_MINOR = 1_000_000     # SGD 10,000.00
-    STEP_UP_HIGH_VALUE_MINOR = 500_000      # SGD 5,000.00 — transfers above this (and at/below
+    STEP_UP_HIGH_VALUE_MINOR = 500_000      # SGD 5,000.00, transfers above this (and at/below
                                            # the synthetic reject limit) require extra verification
                                            # via STEP_UP; the reject ceiling is DEMO_MAX_TRANSFER_MINOR
                                            # (SGD 10,000). Repurposed from COOLING_OFF_HIGH_VALUE_MINOR,
@@ -57,7 +57,7 @@ class Settings:
     LIVE_LLM = bool(LLM_API_KEY)
 
     # ---- voice pipeline: the ears (ASR) and the mouth (TTS) ----
-    # Both are PROVIDERS. Neither decides anything — AuntieJoy's orchestrator does.
+    # Both are PROVIDERS. Neither decides anything, AuntieJoy's orchestrator does.
     ASR_SECRET_ID = os.getenv("TENCENTCLOUD_SECRET_ID", "")
     ASR_SECRET_KEY = os.getenv("TENCENTCLOUD_SECRET_KEY", "")
     # Required: the realtime ASR URL puts the AppID in its path.
@@ -85,7 +85,7 @@ def money(minor: int, currency: str = "SGD") -> str:
     """Amount as the customer hears it.
 
     "SGD 50.00" is a system identifier; nobody says it out loud. The customer hears
-    "S$50.00", so the ISO code is mapped to its spoken symbol here — the one place an
+    "S$50.00", so the ISO code is mapped to its spoken symbol here, the one place an
     amount becomes text. Thousands are separated and the minor units are always shown
     ("S$1,000.00"), because a bare "$1000" is easy to misread on a phone.
 

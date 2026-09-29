@@ -7,7 +7,7 @@ const { JSDOM, VirtualConsole } = require('jsdom');
 const dir = __dirname;
 const html = fs.readFileSync(path.join(dir, 'index.html'), 'utf8');
 const css  = fs.readFileSync(path.join(dir, 'styles.css'), 'utf8');
-// Loaded in the same order index.html uses — the files share globals.
+// Loaded in the same order index.html uses, the files share globals.
 // icons.js MUST be here: ui.js and shell.js call icon() at load time, so without it the
 // whole bundle throws during boot.
 const files = ['translations.js','icons.js','ui.js','personalization.js','scenarios.js','stt.js',
@@ -27,7 +27,7 @@ vc.on('error', (...a) => problems.push('console.error: ' + a.join(' ')));
 // Drop the <script src> tags: we inject the very same files ourselves, in the same order.
 // They must go in as real <script> elements (not one big eval) because eval code traps its
 // own top-level `const`/`let` in a throwaway lexical scope, whereas a real script puts them
-// in the global lexical scope — which is how ui.js's `iface`, `auntie`, `fill` … are visible
+// in the global lexical scope, which is how ui.js's `iface`, `auntie`, `fill` … are visible
 // to the files loaded after it in a browser.
 const srcFree = html.replace(/<script\b[^>]*\bsrc=[^>]*>\s*<\/script>/gi, '');
 const dom = new JSDOM(srcFree, {
@@ -66,7 +66,7 @@ const $ = id => doc.getElementById(id);
 const scrOn = id => $(id).classList.contains('on');
 const chat = $('chat');
 // `iface`, `auntie`, `fill` … are top-level `const`, so they are global *lexical* bindings,
-// not properties of `window` — same as in a browser. Reach them the way a later <script>
+// not properties of `window`, same as in a browser. Reach them the way a later <script>
 // would: by evaluating an expression in global scope.
 const ev = code => window.eval(code);
 
@@ -96,7 +96,7 @@ ok('intro offers suggestion chips', chat.querySelectorAll('.chip').length >= 3,
    chat.querySelectorAll('.chip').length + ' chips');
 ok('transcript contains ONLY the intro card', chat.children.length === 1, chat.children.length + ' children');
 // The greeting addresses the customer by name, but the intro card is drawn BEFORE the first
-// turn — so at this point no trusted name exists yet. It must NOT invent one (addressing the
+// turn, so at this point no trusted name exists yet. It must NOT invent one (addressing the
 // customer as "Auntie" reads like the assistant talking to itself).
 const greet = () => chat.querySelector('.intro .itext').textContent.replace(/\s+/g, ' ').trim();
 ok('greeting starts nameless rather than inventing a name', /^Hello! Tell me who to pay/.test(greet()), greet());
@@ -141,7 +141,7 @@ ok('card still present after retry', doc.contains(card));
 ok('retry focused the input', doc.activeElement === $('fld'),
    'activeElement=' + (doc.activeElement && doc.activeElement.id));
 // Our invariant: the client composes NO customer-facing sentence of its own, so a retry
-// must not append a chat line — the wording on the card is the backend's own line.
+// must not append a chat line, the wording on the card is the backend's own line.
 ok('retry appended no client-written sentence', chat.children.length === lenBefore,
    chat.children.length + ' vs ' + lenBefore);
 ok('retry marked itself done', card.dataset.retried === '1');
@@ -151,8 +151,8 @@ ok('still no reload after double click', unloadCount === 0);
 
 console.log('\n=== 7. removeLastIfaceBubble() REMOVES ONLY THE BUBBLE ===');
 window.resetRun();
-window.clarifyCard('x', null);              // a card (not a bubble) — must survive
-ev("iface('a backend line')");              // a bubble — must be removed
+window.clarifyCard('x', null);              // a card (not a bubble), must survive
+ev("iface('a backend line')");              // a bubble, must be removed
 const before = chat.children.length;
 const removed = window.removeLastIfaceBubble();
 ok('removed exactly one row', chat.children.length === before - 1,
@@ -205,7 +205,7 @@ for (const f of ['dbs-logo.png','dbs-logo-white.png','dbs-mark.png']) {
 
 console.log('\n=== 11. THE EARS (stt.js) ===');
 // `class SttClient` is a top-level class declaration, so (like `const`) it is a global
-// LEXICAL binding, not a property of window — reach it the way live.js does.
+// LEXICAL binding, not a property of window, reach it the way live.js does.
 ok('SttClient is defined', ev("typeof SttClient") === 'function');
 // jsdom has no AudioContext, so the client must honestly report that it cannot run here.
 // That same flag is what makes live.js fall back to the browser recogniser.
@@ -220,7 +220,7 @@ const wsUrl = ev("sttWsUrl()");
 ok('socket URL is derived from API_BASE', wsUrl === 'ws://127.0.0.1:8078/ws/stt', wsUrl);
 ok('API_BASE follows the page host + backend port (no hardcoded 127.0.0.1)',
    ev("API_BASE") === 'http://127.0.0.1:8078', ev("API_BASE"));
-// Convert inside the page realm and return a plain string — a jsdom ArrayBuffer is not
+// Convert inside the page realm and return a plain string, a jsdom ArrayBuffer is not
 // safely viewable from this realm.
 const pcm = ev("Array.from(new Int16Array(floatToPcm16(new Float32Array([0, 1, -1])))).join(',')");
 ok('PCM is 16-bit signed, full-scale mapped correctly', pcm === '0,32767,-32768', pcm);

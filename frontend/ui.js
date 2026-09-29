@@ -1,4 +1,4 @@
-/* 2/5 ui.js — load 2nd. DOM plumbing: chat/panel element refs, tech-toggle, buildStatic() (needs STAGES/BRANCHES from translations.js, called immediately), bubble/auntie/attacker/iface/sysLine, agent/stage/state/draft/ledger/sig/outcome/hit/audit cards, the popup() system, fieldReview(), and the canonical/hmac/newDraft signing helpers. */
+/* 2/5 ui.js, load 2nd. DOM plumbing: chat/panel element refs, tech-toggle, buildStatic() (needs STAGES/BRANCHES from translations.js, called immediately), bubble/auntie/attacker/iface/sysLine, agent/stage/state/draft/ledger/sig/outcome/hit/audit cards, the popup() system, fieldReview(), and the canonical/hmac/newDraft signing helpers. */
 
 /* ============================ UI plumbing ============================ */
 const $ = id => document.getElementById(id);
@@ -28,7 +28,7 @@ function bubble(kind,label,text){
   const d=document.createElement('div');
   // "me" (right column) = the person holding the phone: the customer, or an attacker who
   // took it. Everything Auntie/the system says lands on the left ("them"). The customer's
-  // own words therefore go right, under a "YOU" label — never "AUNTIE".
+  // own words therefore go right, under a "YOU" label, never "AUNTIE".
   d.className='row '+(kind==='auntie'||kind==='attacker'||kind==='you'?'me':'them');
   d.innerHTML=`<span class="lab ${label}">${label}</span><div class="bub ${kind}">${text}</div>`;
   chatEl.appendChild(d); scroll(); return d;
@@ -36,20 +36,20 @@ function bubble(kind,label,text){
 const auntie   = t => bubble('auntie','AUNTIE',t);
 const attacker = t => bubble('attacker','ATTACKER',t);
 // The customer's own spoken/typed words. Echoed in the transcript (right column, "YOU" label)
-// so the conversation reads like a real voice-first exchange. Distinct from the AUNTIE bubble
-// — the customer is the one whose voice we just heard, not the assistant.
+// so the conversation reads like a real voice-first exchange. Distinct from the AUNTIE bubble:
+// the customer is the one whose voice we just heard, not the assistant.
 const customer = t => bubble('you','YOU',t);
 // The one placeholder for the customer's name, everywhere in the system. The backend's
 // messages.py catalogue renders {name} server-side for live turns (so the live path arrives
 // already addressed); this fills it for the offline scripted fallback, whose strings are
-// hand-written. One convention, one substitution point — and no regex rewriting of the word
+// hand-written. One convention, one substitution point, and no regex rewriting of the word
 // "Auntie", which used to mangle any sentence that legitimately contained it.
 const fill     = t => String(t==null?'':t).replace(/\{name\}/g, CUSTOMER_NAME);
 const iface    = t => bubble('iface','INTERFACE', fill(t));
 const sysLine  = t => bubble('sys','SYSTEM',t);
 
 /* Chrome strings that address the customer by name carry an empty `<span data-nslot></span>`
-   which is filled from the TRUSTED session name the moment it arrives — never from anything
+   which is filled from the TRUSTED session name the moment it arrives, never from anything
    the customer said, and never invented. The intro card is drawn before the first turn, when
    the name is not yet known, so the slot renders as nothing and the sentence still reads
    correctly ("Hello! Tell me who to pay…"). A data attribute, not a class: it is a behaviour
@@ -74,7 +74,7 @@ function hl(o){
    Raw JSON is technically complete but tells a judge nothing at a glance. For
    the two agents whose whole job is to reach a yes/no, the panel renders a
    verdict card instead: the decision, the numbers behind it, and the agent's own
-   stated reason — with the untouched payload one click away underneath.
+   stated reason, with the untouched payload one click away underneath.
    ========================================================================== */
 function renderVerdict(name, p){
   const esc = s => String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;');
@@ -82,9 +82,9 @@ function renderVerdict(name, p){
   const eng = p.engine ? `<span class="veng">${esc(p.engine)}</span>` : '';
 
   if(name==='GUARDRAILS AGENT'){
-    const d    = String(p.decision||'—');
+    const d    = String(p.decision||'-');
     const dCls = d==='ALLOW' ? 'ok' : (d==='BLOCK'||d==='STOP') ? 'stop' : 'warn';
-    const lvl  = String(p.risk_level||'—');
+    const lvl  = String(p.risk_level||'-');
     const lCls = /HIGH|CRIT/.test(lvl) ? 'stop' : /MED/.test(lvl) ? 'warn' : 'ok';
     return `
       <div class="vhead">
@@ -105,14 +105,14 @@ function renderVerdict(name, p){
     const pass = c!=null && c>=thr;
     return `
       <div class="vhead">
-        <span class="vbadge ${pass?'ok':'warn'}">${esc(p.intent||'—')}</span>
+        <span class="vbadge ${pass?'ok':'warn'}">${esc(p.intent||'-')}</span>
         <span class="vtag ${pass?'ok':'warn'}">${pass?'ABOVE':'BELOW'} THRESHOLD</span>
         ${eng}
       </div>
       <div class="vbar">
         <div class="vbar-t"><span>Confidence</span><b>${pct}%</b></div>
         <div class="vtrack"><i style="width:${pct}%"></i><u style="left:${Math.round(thr*100)}%"></u></div>
-        <div class="vthr">threshold ${thr} — below this, AuntieJoy asks you to say it again</div>
+        <div class="vthr">threshold ${thr}: below this, AuntieJoy asks you to say it again</div>
       </div>
       ${row('Detected language', esc(p.detected_language))}
       ${p.reason?`<div class="vwhy">“${esc(p.reason)}”</div>`:''}`;
@@ -123,14 +123,14 @@ function renderVerdict(name, p){
 
 function agent(name,obj){
   // Agent output is what DBS/engineers see, never what the customer sees (BRD: "the
-  // customer only ever sees one warm conversation") — so this goes to the TYPED AGENT
+  // customer only ever sees one warm conversation"), so this goes to the TYPED AGENT
   // CONTRACTS panel only, never into the chat bubble stream.
   agentCalls++; $('acnt').textContent = agentCalls+' call'+(agentCalls>1?'s':'');
   const c=document.createElement('div');
   c.className='acard';
   const verdict = renderVerdict(name, obj || {});
   if(verdict){
-    // Verdict on top, the untouched payload one disclosure away underneath — so the
+    // Verdict on top, the untouched payload one disclosure away underneath, so the
     // readable summary never becomes a substitute for the evidence it came from.
     c.classList.add('verdict');
     c.innerHTML = `<div class="ah">${name}</div>${verdict}`+
@@ -142,51 +142,59 @@ function agent(name,obj){
 }
 
 /* ==========================================================================
-   DBS payment RECEIPT — shown in-chat once a payment has actually executed.
+   DBS payment RECEIPT, shown in-chat once a payment has actually executed.
    Deliberately reads like a digibank confirmation, not like a chat bubble: the
    customer should recognise this as DBS, not as "the AI said it worked".
 
    It only ever SHOWS what the backend already decided. The spoken confirmation
    remains the backend's own reviewed INTERFACE_LINE (messages.py), and every
-   value on this card comes from the canonical draft and the execution record —
+   value on this card comes from the canonical draft and the execution record,
    the client composes no wording of its own here.
+
+   Its labels are chrome, so they follow the conversation's language: a Mandarin
+   payment gets a Mandarin receipt. `lang` comes from session.interface_language,
+   the language the backend settled on for this session.
    ========================================================================== */
-function receiptCard(o){
+function receiptCard(o, lang){
+  const c = tt(lang || 'EN').chrome.receipt;
   const esc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;');
   const d=document.createElement('div');
   d.className='row them';
   d.innerHTML=
     `<div class="rcpt">
-       <div class="rhead"><img class="dbslogo" src="assets/dbs-logo-white.png" alt="DBS"><span class="rt">PAYMENT RECEIPT</span></div>
+       <div class="rhead"><img class="dbslogo" src="assets/dbs-logo-white.png" alt="DBS"><span class="rt">${c.title}</span></div>
        <div class="rok">
          <div class="rtick">${icon('check')}</div>
-         <div class="rstatus">Payment completed</div>
+         <div class="rstatus">${c.status}</div>
          <div class="rsub">${esc(o.stamp)}</div>
        </div>
        <div class="ramt">${esc(o.amount)}</div>
        <div class="rrows">
-         <div class="rr"><span class="k">To</span><span class="v">${esc(o.to)}</span></div>
-         <div class="rr"><span class="k">From</span><span class="v">${esc(o.from)}</span></div>
-         <div class="rr"><span class="k">Reference</span><span class="v">${esc(o.ref)}</span></div>
-         <div class="rr"><span class="k">Status</span><span class="v">Completed</span></div>
+         <div class="rr"><span class="k">${c.to}</span><span class="v">${esc(o.to)}</span></div>
+         <div class="rr"><span class="k">${c.from}</span><span class="v">${esc(o.from)}</span></div>
+         <div class="rr"><span class="k">${c.reference}</span><span class="v">${esc(o.ref)}</span></div>
+         <div class="rr"><span class="k">${c.statusLabel}</span><span class="v">${c.statusDone}</span></div>
        </div>
-       <div class="rfoot">Prepared by AuntieJoy · approved by you with a transaction-specific
-         biometric · signed and recorded by DBS. Synthetic ledger entry — no real money moved.</div>
+       <div class="rfoot">${c.foot}</div>
      </div>`;
   chatEl.appendChild(d); scroll();
   return d;
 }
 
 /* ==========================================================================
-   INLINE DRAFT CARD — "Voice Command Recognized"
+   INLINE DRAFT CARD: "Voice Command Recognized"
    What AuntieJoy THINKS it heard, shown in the transcript before any approval
    starts. Deliberately not a modal: the customer should be able to read it
    against the conversation that produced it, and it stays on screen as the
    record of what was recognised.
-   The card renders only what the canonical draft already says — it composes no
+   The card renders only what the canonical draft already says; it composes no
    figure of its own. It accepts both draft shapes: the live /turn payload uses
    payee_display / payee_masked / account_masked, while the offline scripted
    fallback carries a payee{} object.
+
+   The labels are chrome, so they follow the conversation's language; `lang`
+   defaults to EN for the callers that have none (the offline scripted path and
+   the test harness).
    ========================================================================== */
 let draftResolve = null;
 function closeDraftCard(v){
@@ -195,42 +203,63 @@ function closeDraftCard(v){
 }
 // The account string now passes through as the backend gave it ("ending 1234").
 // It used to be rewritten to "•••• 1234" here, which put two different renderings of the SAME
-// account on screen at once — the INTERFACE line said "ending 1234" while the draft card said
+// account on screen at once; the INTERFACE line said "ending 1234" while the draft card said
 // "•••• 1234". The backend owns the masked string, so the client renders it verbatim; the
 // dashboard's bullet style is a separate display choice, not something to re-derive here.
 const maskAcct = s => String(s == null ? '' : s);
 
-function draftCard(d){
+function draftCard(d, lang){
+  const c = tt(lang || 'EN').chrome.card;
   const esc = s => String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;');
-  const payeeName   = d.payee_display || (d.payee && d.payee.displayName) || '—';
+  const payeeName   = d.payee_display || (d.payee && d.payee.displayName) || '-';
   const payeeDetail = d.payee_masked  || (d.payee && d.payee.masked)      || '';
-  const acctName    = (typeof ACCOUNT!=='undefined' && ACCOUNT.displayName) || 'DBS Savings';
-  const acctDetail  = maskAcct(d.account_masked || (typeof ACCOUNT!=='undefined' && ACCOUNT.masked));
+  // The real source-account name comes from the backend (source_account_display), so a Current
+  // Account transfer is never mislabelled "DBS Savings". Fall back to the global only if absent.
+  const acctName    = d.source_account_display
+                      || (typeof ACCOUNT!=='undefined' && ACCOUNT.displayName) || 'DBS Savings';
+  const acctDetail  = maskAcct(d.account_masked || d.source_account_id
+                      || (typeof ACCOUNT!=='undefined' && ACCOUNT.masked));
   // d.currency travels with the draft, so a non-SGD draft renders US$ rather than silently
-  // falling back to S$ — the same rule the backend's config.money() applies.
+  // falling back to S$, the same rule the backend's config.money() applies.
   const amt         = (typeof d.amount_minor === 'number')
-    ? money(d.amount_minor, d.currency) : '—';
+    ? money(d.amount_minor, d.currency) : '-';
+  const rows =
+      `<div class="dr"><span class="k">${c.recipient}</span>
+        <span class="v">${esc(payeeName)}${payeeDetail?' · '+esc(payeeDetail):''}</span></div>
+       <div class="dr"><span class="k">${c.amount}</span>
+        <span class="v amt">${esc(amt)}</span></div>
+       <div class="dr"><span class="k">${c.from}</span>
+        <span class="v">${esc(acctName)} ${esc(acctDetail)}</span></div>`;
+
+  // If a confirm card for this exact draft is already on screen (e.g. a split-and-confirm merge
+  // turn re-enters the review flow for the same draft), update it in place rather than stacking a
+  // duplicate. The new review walkthrough owns the button via a fresh draftResolve.
+  const id = d.draft_id || '';
+  const existing = id ? chatEl.querySelector('.dcard[data-draft="'+id+'"]') : null;
+  if(existing){
+    existing.querySelector('.drows').innerHTML = rows;
+    // Re-rendering the same draft can happen in a DIFFERENT language (a language switch
+    // mid-review), so the static chrome is refreshed too. The button is left alone once the
+    // customer has pressed it, or its "approval started" state would be overwritten.
+    const ttl = existing.querySelector('.dtitle'); if(ttl) ttl.textContent = c.title;
+    const tag = existing.querySelector('.dtag');   if(tag) tag.textContent = c.tag;
+    const btn = existing.querySelector('.dbtn');   if(btn && !btn.disabled) btn.textContent = c.confirm;
+    return new Promise(res=>{ draftResolve = res; });
+  }
 
   return new Promise(res=>{
     draftResolve = res;
     const el=document.createElement('div');
     el.className='row them full';
     el.innerHTML=
-      `<div class="dcard">
+      `<div class="dcard" data-draft="${esc(id)}">
          <div class="dhead">
            <span class="dtick">${icon('checkCircle')}</span>
-           <span class="dtitle">Voice Command Recognized</span>
-           <span class="dtag">DRAFT</span>
+           <span class="dtitle">${c.title}</span>
+           <span class="dtag">${c.tag}</span>
          </div>
-         <div class="drows">
-           <div class="dr"><span class="k">Recipient:</span>
-             <span class="v">${esc(payeeName)}${payeeDetail?' · '+esc(payeeDetail):''}</span></div>
-           <div class="dr"><span class="k">Amount:</span>
-             <span class="v amt">${esc(amt)}</span></div>
-           <div class="dr"><span class="k">From Account:</span>
-             <span class="v">${esc(acctName)} ${esc(acctDetail)}</span></div>
-         </div>
-         <button class="dbtn" type="button">Confirm &amp; Slide to Pay</button>
+         <div class="drows">${rows}</div>
+         <button class="dbtn" type="button">${c.confirm}</button>
        </div>`;
     chatEl.appendChild(el); scroll();
 
@@ -240,7 +269,7 @@ function draftCard(d){
     if(b) b.addEventListener('click', ev=>{
       ev.preventDefault(); ev.stopPropagation();
       b.disabled = true;
-      b.textContent = 'Approval started — review each field below';
+      b.textContent = c.started;
       closeDraftCard('confirm');
     });
   });
@@ -250,25 +279,28 @@ function draftCard(d){
    INLINE CLARIFICATION CARD
    A clarification is rendered as a card INSIDE the transcript rather than as a
    full-screen modal, so the conversation stays visible behind it.
-   The wording on the card is the backend's own INTERFACE_LINE text, passed in —
-   the client invents no sentence of its own here.
+   The wording on the card is the backend's own INTERFACE_LINE text, passed in,
+   the client invents no sentence of its own here. The frame AROUND that line
+   (kicker, heading, button, note) is chrome, so it follows the conversation's
+   language; `lang` defaults to EN for the test harness.
    ========================================================================== */
-function clarifyCard(text, onRetry){
+function clarifyCard(text, onRetry, lang){
+  const c = tt(lang || 'EN').chrome.clarify;
   const esc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;');
   const d=document.createElement('div');
   d.className='row them';
   d.innerHTML=
     `<span class="lab IFACE">INTERFACE</span>
      <div class="ccard">
-       <span class="ckick">NEEDS CLARIFICATION</span>
-       <div class="ctitle">Could you help me with this?</div>
+       <span class="ckick">${c.kicker}</span>
+       <div class="ctitle">${c.title}</div>
        <div class="ctext">${esc(text)}</div>
-       <button class="cbtn" type="button">${icon('mic')} Let me try again</button>
-       <div class="cnote">Nothing has been sent, and no payment has been created yet.</div>
+       <button class="cbtn" type="button">${icon('mic')} ${c.retry}</button>
+       <div class="cnote">${c.note}</div>
      </div>`;
   chatEl.appendChild(d); scroll();
 
-  // "Let me try again" must only ever re-arm the input — it must never reload the page
+  // "Let me try again" must only ever re-arm the input; it must never reload the page
   // or re-fire the previous turn. Three separate guards, because a page refresh here
   // would silently throw away the whole conversation:
   //   1. type="button" (set above) so it can never act as an implicit form submit;
@@ -284,7 +316,7 @@ function clarifyCard(text, onRetry){
     if(!d.dataset.retried){
       d.dataset.retried='1';
       d.classList.add('done');
-      b.innerHTML = icon('mic') + ' Try again below, or tap the mic';
+      b.innerHTML = icon('mic') + ' ' + c.retried;
     }
   });
   return d;
@@ -353,30 +385,32 @@ function popup(cfg){
 
 /* ---------- the deterministic field-by-field review (BRD §8.11.2 / A.8) ---------- */
 async function fieldReview(lang, d){
-  const t=T[lang];
+  const t=T[lang] || T.EN;
+  // Popup chrome (kickers, field titles, the draft-version label, the explanatory note) comes
+  // from the same per-language `chrome` catalogue the live path uses, so the scripted fallback
+  // and a real turn look identical in all three languages.
+  const c=t.chrome;
   const F=[
-    ['RECIPIENT','Recipient',  t.recipient(d.payee.displayName+' · '+d.payee.masked), 1, 'user'],
-    ['AMOUNT','Amount',        t.amount(amountWord[lang]||amountWord.EN),              2, 'receipt'],
-    ['SOURCE_ACCOUNT','Source',t.source(ACCOUNT.masked),                               3, 'card']
+    ['RECIPIENT',c.fieldTitle.recipient, t.recipient(d.payee.displayName+' · '+d.payee.masked), 1, 'user'],
+    ['AMOUNT',   c.fieldTitle.amount,    t.amount(amountWord[lang]||amountWord.EN),              2, 'receipt'],
+    ['SOURCE_ACCOUNT',c.fieldTitle.source,t.source(ACCOUNT.masked),                              3, 'card']
   ];
   // Show the recognised draft first; the field walkthrough starts when the customer acts
   // on that card. Nothing has been signed at this point either way.
-  const go = await draftCard(d);
+  const go = await draftCard(d, lang);
   if(go!=='confirm') return {cancelled:true};
   iface(t.intro); await sleep(600);
   for(let i=0;i<F.length;i++){
     const f=F[i];
     stage(11,'run');
     const a=await popup({
-      kicker:`FIELD ${f[3]} OF 3 · ${f[0]}`, stepIdx:i, steps:F,
+      kicker:`${c.fieldKicker(f[3])} · ${f[0]}`, stepIdx:i, steps:F,
       icon:f[4] || 'shieldCheck',
       title:f[1],
       body:f[2],
-      fields: lang==='ZH'
-        ? `<div class="fr"><span class="k">草稿版本</span><span class="v">v${d.version} · ${d.draft_id}</span></div>`
-        : `<div class="fr"><span class="k">Draft version</span><span class="v">v${d.version} · ${d.draft_id}</span></div>`,
+      fields:`<div class="fr"><span class="k">${c.draftVersion}</span><span class="v">v${d.version} · ${d.draft_id}</span></div>`,
       acts:[{id:'yes',label:t.yes,kind:'yes'},{id:'no',label:t.no,kind:'no'}],
-      note:'One “yes” confirms only the field on this screen. It does not sign, and it does not call the gateway.'
+      note:c.fieldNote
     });
     if(a==='cancelled'){ return {cancelled:true}; }
     if(a==='no'){

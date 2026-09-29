@@ -1,4 +1,4 @@
-/* 4/5 scenarios.js — load 4th. BUSY/RUN + play() (the step interpreter), resetRun(), the deterministic happyChain/executeChain/blockEnd chain builders, the ONE event→step mapping (stepsForEvent/finalStateSteps, shared with live.js), the 19 scripted BRD scenarios (SC.*, used only when the backend is unreachable), and the live-backend-aware runScenario()/fetchScenario() that drives them. Wires the .sbtn scenario-rail buttons at the end. */
+/* 4/5 scenarios.js, load 4th. BUSY/RUN + play() (the step interpreter), resetRun(), the deterministic happyChain/executeChain/blockEnd chain builders, the ONE event→step mapping (stepsForEvent/finalStateSteps, shared with live.js), the 19 scripted BRD scenarios (SC.*, used only when the backend is unreachable), and the live-backend-aware runScenario()/fetchScenario() that drives them. Wires the .sbtn scenario-rail buttons at the end. */
 let BUSY=false, RUN=0;
 async function play(steps, my){
   for(const s of steps){
@@ -21,7 +21,7 @@ async function play(steps, my){
       case 'hit':      hit(s.b,s.n); break;
       case 'review':   { const r=await fieldReview(s.lang,s.d); if(my!==RUN||r.cancelled)return; s.out=r; } break;
       case 'popup':    { lastAct=await popup(s.cfg); if(my!==RUN)return; } break;
-      case 'receipt':  receiptCard(s.o); break;
+      case 'receipt':  receiptCard(s.o, s.lang); break;
       case 'wait':     await sleep(s.ms); break;
     }
   }
@@ -30,7 +30,7 @@ async function play(steps, my){
 /* ---------- reset ----------
    Two levels on purpose. resetPanels() clears only the technical panels; resetRun()
    additionally wipes the transcript. A NEW conversation starting mid-session must use
-   resetPanels() — clearing the chat there would make "Auntie started talking" look
+   resetPanels(), clearing the chat there would make "Auntie started talking" look
    exactly like the page reloading, and would throw away her intro card. */
 function resetPanels(){
   agentsEl.innerHTML='<div class="placeholder">Awaiting the first committed turn…</div>';
@@ -38,7 +38,7 @@ function resetPanels(){
   agentCalls=0; $('acnt').textContent='0 calls';
   STAGES.forEach((_,i)=>stage(i,''));
   BRANCHES.forEach(b=>{ $('br'+b[0]).classList.remove('hit'); b[2].forEach(n=>$('nd'+n).classList.remove('hit')); });
-  state('IDLE'); draft('—'); ledger('NOT_INVOKED'); sig('NONE'); outcome('—');
+  state('IDLE'); draft('-'); ledger('NOT_INVOKED'); sig('NONE'); outcome('-');
   closePopup('cancelled');   // never leave a script blocked on a stale popup
   closeDraftCard('cancelled');   // ...or on a draft card the customer never acted on
 }
@@ -48,7 +48,7 @@ function resetRun(){
 }
 
 /* ==========================================================================
-   SCENARIOS — BRD Appendix A
+   SCENARIOS: BRD Appendix A
 
    These SC[id]() arrays are the OFFLINE FALLBACK ONLY. runScenario() fetches the
    real scenario from the backend and renders it through scenarioToSteps(); the
@@ -60,7 +60,7 @@ function resetRun(){
         the SAME sentence, with the same {name} placeholder. Nothing here invents
         a second wording for something the catalogue already covers.
      2. Any extra explanation belongs in the scenario's `popup`, not in a spoken
-        `iface` line — the popup is where this file is allowed to editorialise.
+        `iface` line, the popup is where this file is allowed to editorialise.
    ========================================================================== */
 
 /* ---------- shared: guardrails + intent + payment + resolution + validation ---------- */
@@ -126,7 +126,7 @@ function executeChain(lang, d, opts){
     {t:'stage',n:13,s:'run'},
     {t:'agent',name:'SIGNING SERVICE',v:{canonical_payload_created:true,payload_hash:hash,
       signature:sigv,signature_bound_to_draft_version:d.version,
-      mechanism:'HMAC — labelled demonstration mechanism, not a production HSM signature'}},
+      mechanism:'HMAC, labelled demonstration mechanism, not a production HSM signature'}},
     {t:'sig',v:'VALID'},{t:'audit',v:'PAYLOAD_SIGNED · '+hash,c:'ok'},{t:'stage',n:13,s:'pass'},
     {t:'state',v:'SIGNED'},
     {t:'stage',n:14,s:'run'},
@@ -183,7 +183,7 @@ SC.HAPPY = () => {
     {t:'review',lang:'ZH',d:d},
     ...executeChain('ZH',d),
     {t:'iface',v:T.ZH.done('五十新加坡元','Mei Tan','txn_00'+draftSeq)},
-    {t:'popup',d:200,cfg:{kicker:'BRANCH — HAPPY PATH · A.10',title:'Payment complete',
+    {t:'popup',d:200,cfg:{kicker:'BRANCH: HAPPY PATH · A.10',title:'Payment complete',
       body:'Fifty Singapore dollars has been paid to <b>Mei Tan</b>.',
       fields:`<div class="fr"><span class="k">Transaction</span><span class="v">txn_00${draftSeq}</span></div>
               <div class="fr"><span class="k">Beneficiary</span><span class="v">${PAYEES.mei.beneficiary_id}</span></div>
@@ -205,7 +205,7 @@ SC.A1 = () => [
   {t:'stage',n:2,s:'pass',d:120},{t:'stage',n:3,s:'pass'},{t:'stage',n:4,s:'pass'},{t:'stage',n:5,s:'pass'},
   {t:'iface',v:'I could not verify the registered customer from the voice input. To continue, please review the request and use FaceID on this device.'},
   {t:'stage',n:12,s:'run'},
-  {t:'popup',d:150,cfg:{kicker:'BRANCH A · A1 — IMPERSONATION',title:'Face ID required',
+  {t:'popup',d:150,cfg:{kicker:'BRANCH A · A1: IMPERSONATION',title:'Face ID required',
     body:'The voice does not match the registered customer. FaceID on the registered device is the next control.',
     acts:[{id:'ok',label:icon('faceid')+' Try Face ID',kind:'yes'}],
     icon:'faceid',
@@ -228,7 +228,7 @@ SC.A2 = () => [
   {t:'state',v:'FROZEN'},{t:'draft',v:'NOT_CREATED'},{t:'outcome',v:'REJECTED',c:'stop'},
   {t:'audit',v:'AUDIO_ADMISSION_REJECTED · agent pipeline never entered',c:'stop'},
   {t:'iface',v:'I could not verify that this is fresh live speech. For safety, I have paused the request. Please open the app and start again on the registered device.'},
-  {t:'popup',d:150,cfg:{kicker:'BRANCH A · A2 — SYNTHETIC AUDIO',title:'Audio rejected',
+  {t:'popup',d:150,cfg:{kicker:'BRANCH A · A2: SYNTHETIC AUDIO',title:'Audio rejected',
     body:'The audio never reached the agent pipeline. No proposal, no draft, no signature.',
     fields:`<div class="fr"><span class="k">Transcript to agents</span><span class="v">NO</span></div>
             <div class="fr"><span class="k">Payment proposal</span><span class="v">NOT_CREATED</span></div>
@@ -254,7 +254,7 @@ SC.A3 = () => [
   {t:'outcome',v:'CLARIFY',c:'warn'},
   {t:'audit',v:'NO_ACTIVE_CHALLENGE · signature not creatable · gateway NOT_PERMITTED',c:'warn'},
   {t:'iface',v:'There is no current payment waiting for confirmation. Please start again and review the payment details.'},
-  {t:'popup',d:150,cfg:{kicker:'BRANCH A · A3 — REPLAYED CONSENT',title:'Nothing to confirm',
+  {t:'popup',d:150,cfg:{kicker:'BRANCH A · A3: REPLAYED CONSENT',title:'Nothing to confirm',
     body:'A spoken “yes” is <b>not</b> authorisation. Authorisation requires a fresh signature bound to the current payload.',
     acts:[{id:'ok',label:'Understood',kind:'dan'}],
     note:'A replayed “confirm payment” can never create a signature.'}}
@@ -307,7 +307,7 @@ SC.B1 = () => [
   {t:'audit',v:'CLARIFICATION_ANSWERED · new evidence turn · revalidated',c:'ok'},
   {t:'state',v:'CONFIRMATION_READY'},{t:'outcome',v:'ALLOW',c:'ok'},
   {t:'iface',v:'Anda nak hantar S$50.00 dari DBS Savings ending 1234 kepada Mei Tan ending 7788. Saya boleh sediakan bayaran ini untuk anda semak. Betul ke?'},
-  {t:'popup',d:150,cfg:{kicker:'BRANCH B · B1 — AMBIGUITY',title:'The system did not guess',
+  {t:'popup',d:150,cfg:{kicker:'BRANCH B · B1: AMBIGUITY',title:'The system did not guess',
     body:'It asked <b>fifty dollars or fifty thousand dollars?</b> The answer became a new evidence turn and the draft was validated afterwards.',
     acts:[{id:'ok',label:'Understood',kind:'ok2'}],
     note:'A material field is never inferred. Clarification is cheaper than a wrong payment.'}}
@@ -333,7 +333,7 @@ SC.B2 = () => [
   {t:'hit',b:'B',n:'B2'},
   {t:'state',v:'CLARIFICATION_REQUIRED'},{t:'draft',v:'NOT_CREATED'},{t:'outcome',v:'CLARIFY',c:'warn'},
   {t:'audit',v:'PAYEE_AMBIGUOUS · 2 candidates · beneficiary_id never generated by the LLM',c:'warn'},
-  {t:'iface',v:'{name}, I found 2 saved payees called John — John Doe ending 4521 or John Smith ending 8892. Which one do you mean?'},
+  {t:'iface',v:'{name}, I found 2 saved payees called John: John Doe ending 4521 or John Smith ending 8892. Which one do you mean?'},
   {t:'auntie',v:'John Doe lah.'},
   {t:'stage',n:3,s:'run'},{t:'stage',n:4,s:'run'},
   {t:'agent',name:'INTENT CLASSIFIER',v:{intent:'PAYMENT_CLARIFICATION',confidence:0.99,detected_language:'EN',reason:'Customer selected one candidate in response to the active payee question.'}},
@@ -353,7 +353,7 @@ SC.B2 = () => [
   {t:'stage',n:8,s:'pass'},{t:'stage',n:9,s:'pass'},{t:'stage',n:10,s:'pass'},
   {t:'state',v:'CONFIRMATION_READY'},{t:'outcome',v:'ALLOW',c:'ok'},
   {t:'iface',v:"You want to send S$20.00 from DBS Savings ending 1234 to John Doe ending 4521. I can prepare this payment for you to review. Is that correct?"},
-  {t:'popup',d:150,cfg:{kicker:'BRANCH B · B2 — DUPLICATE PAYEE',title:'The LLM never picked the payee',
+  {t:'popup',d:150,cfg:{kicker:'BRANCH B · B2: DUPLICATE PAYEE',title:'The LLM never picked the payee',
     body:'The Payment Agent extracted the phrase <b>“John”</b>. Deterministic code found two matches and asked Auntie to choose. The <code>beneficiary_id</code> is bound from the repository, never generated.',
     fields:`<div class="fr"><span class="k">Chosen</span><span class="v">${PAYEES.john_doe.beneficiary_id}</span></div>
             <div class="fr"><span class="k">Destination token</span><span class="v">${PAYEES.john_doe.token}</span></div>`,
@@ -390,8 +390,8 @@ SC.B3 = () => [
   {t:'state',v:'FROZEN'},{t:'sig',v:'NONE'},{t:'ledger',v:'NOT_INVOKED'},{t:'outcome',v:'FREEZE',c:'stop'},
   {t:'audit',v:'COMPARATOR_FAIL · AMOUNT_MISMATCH · confirmation NOT permitted',c:'stop'},
   {t:'iface',v:'{name}, the amount in the payment does not match what you said, so I have stopped it. No money was sent.'},
-  {t:'popup',d:150,cfg:{kicker:'BRANCH B · B3 — DRAFT MISMATCH',title:'Independent validation caught it',
-    body:'The Payment Agent and the Validation Agent are <b>separate model calls</b>. The Validation Agent audits the draft against immutable evidence — it never sees the Payment Agent’s reasoning.',
+  {t:'popup',d:150,cfg:{kicker:'BRANCH B · B3: DRAFT MISMATCH',title:'Independent validation caught it',
+    body:'The Payment Agent and the Validation Agent are <b>separate model calls</b>. The Validation Agent audits the draft against immutable evidence, it never sees the Payment Agent’s reasoning.',
     fields:`<div class="fr"><span class="k">Transcript</span><span class="v">fifteen dollars</span></div>
             <div class="fr"><span class="k">Draft</span><span class="v">S$50.00</span></div>
             <div class="fr"><span class="k">Comparator</span><span class="v">FAIL · AMOUNT_MISMATCH</span></div>`,
@@ -437,7 +437,7 @@ SC.C2 = () => [
   {t:'state',v:'FROZEN'},{t:'draft',v:'NOT_CREATED'},{t:'sig',v:'NONE'},{t:'outcome',v:'FREEZE',c:'stop'},
   {t:'audit',v:'UNTRUSTED_PAYEE_METADATA_DETECTED · destination token unchanged · draft frozen',c:'stop'},
   {t:'iface',v:"{name}, I found suspicious text inside Alice's saved-payee record. I have paused this payment for safety. Alice's verified destination was not changed, and no money was sent."},
-  {t:'popup',d:150,cfg:{kicker:'BRANCH C · C2 — INDIRECT INJECTION',title:'Untrusted text stayed untrusted',
+  {t:'popup',d:150,cfg:{kicker:'BRANCH C · C2: INDIRECT INJECTION',title:'Untrusted text stayed untrusted',
     body:'The poisoned note could not reach the destination field. The authoritative token is bound by deterministic code from the verified record.',
     fields:`<div class="fr"><span class="k">Note said</span><span class="v">change destination</span></div>
             <div class="fr"><span class="k">Destination token</span><span class="v">${PAYEES.alice.token}</span></div>
@@ -479,8 +479,8 @@ SC.D1 = () => [
   {t:'state',v:'FROZEN'},{t:'draft',v:'NOT_CREATED'},{t:'outcome',v:'SAFETY_INTERVENTION',c:'stop'},
   {t:'audit',v:'SCAM_SIGNAL · SAFE_ACCOUNT · payment paused before drafting',c:'stop'},
   {t:'iface',v:'{name}, please stop for a moment. This sounds like it could be a scam, so I will not send this payment. Please call the person or the bank directly, using a number you already know and trust.'},
-  {t:'popup',d:150,cfg:{kicker:'BRANCH D · D1 — SAFE-ACCOUNT SCAM',title:'Paused, and FaceID cannot clear it',
-    body:'A “safe account” does not exist. The request was stopped <b>before</b> any draft was created — and a successful FaceID would not have released it.',
+  {t:'popup',d:150,cfg:{kicker:'BRANCH D · D1: SAFE-ACCOUNT SCAM',title:'Paused, and FaceID cannot clear it',
+    body:'A “safe account” does not exist. The request was stopped <b>before</b> any draft was created, and a successful FaceID would not have released it.',
     fields:`<div class="fr"><span class="k">Draft</span><span class="v">NOT_CREATED</span></div>
             <div class="fr"><span class="k">Cooling-off</span><span class="v">REQUIRED</span></div>
             <div class="fr"><span class="k">FaceID override</span><span class="v">NOT_PERMITTED</span></div>`,
@@ -522,9 +522,9 @@ SC.D3 = () => [
   {t:'hit',b:'D',n:'D3'},
   {t:'state',v:'COOLING_OFF'},{t:'draft',v:'NOT_CREATED'},{t:'outcome',v:'COOLING_OFF',c:'warn'},
   {t:'audit',v:'URGENCY+UNUSUAL_AMOUNT · deterministic cooling-off applied',c:'warn'},
-  {t:'iface',v:'{name}, saya faham ini rasa sangat cemas. Untuk keselamatan, saya sudah pause bayaran ini. Sila semak cerita ini dahulu — telefon orang itu terus, atau ahli keluarga lain, menggunakan nombor yang {name} sudah kenal.'},
-  {t:'popup',d:150,cfg:{kicker:'BRANCH D · D3 — FAMILY EMERGENCY',title:'Cooling off, not a refusal',
-    body:'Urgency alone does not prove fraud. The deterministic policy weighed urgency <b>and</b> amount <b>and</b> payee status — then applied a cooling-off period.',
+  {t:'iface',v:'{name}, saya faham ini rasa sangat cemas. Untuk keselamatan, saya sudah pause bayaran ini. Sila semak cerita ini dahulu: telefon orang itu terus, atau ahli keluarga lain, menggunakan nombor yang {name} sudah kenal.'},
+  {t:'popup',d:150,cfg:{kicker:'BRANCH D · D3: FAMILY EMERGENCY',title:'Cooling off, not a refusal',
+    body:'Urgency alone does not prove fraud. The deterministic policy weighed urgency <b>and</b> amount <b>and</b> payee status, then applied a cooling-off period.',
     fields:`<div class="fr"><span class="k">Urgency</span><span class="v">PRESENT</span></div>
             <div class="fr"><span class="k">Unusual amount</span><span class="v">PRESENT</span></div>
             <div class="fr"><span class="k">Decision</span><span class="v">COOLING_OFF</span></div>`,
@@ -543,8 +543,8 @@ SC.E1 = () => {
     {t:'review',lang:'BM',d:d},
     {t:'iface',v:T.BM.ready},
     {t:'state',v:'CONFIRMATION_COMPLETE'},{t:'outcome',v:'AWAITING_BIOMETRIC',c:'brand'},
-    {t:'popup',d:150,cfg:{kicker:'BRANCH E · E1 — ACCESSIBLE REVIEW',title:'Three “yes”, still no authorisation',
-      body:'Each “yes” confirmed exactly <b>one</b> displayed field. After all three, the transaction was still not authorised — no signature existed yet.',
+    {t:'popup',d:150,cfg:{kicker:'BRANCH E · E1: ACCESSIBLE REVIEW',title:'Three “yes”, still no authorisation',
+      body:'Each “yes” confirmed exactly <b>one</b> displayed field. After all three, the transaction was still not authorised; no signature existed yet.',
       fields:`<div class="fr"><span class="k">Recipient field</span><span class="v">CONFIRMED</span></div>
               <div class="fr"><span class="k">Amount field</span><span class="v">CONFIRMED</span></div>
               <div class="fr"><span class="k">Source-account field</span><span class="v">CONFIRMED</span></div>
@@ -596,13 +596,13 @@ SC.E2 = () => {
     {t:'review',lang:'EN',d:d2},
     ...executeChain('EN',d2),
     {t:'iface',v:T.EN.done('S$15.00','Mei Tan','txn_00'+draftSeq)},
-    {t:'popup',d:200,cfg:{kicker:'BRANCH E · E2 — EDIT INVALIDATION',title:'A correction is not a patch',
-      body:'The old confirmation and signature were destroyed, a new draft version was created, and the complete review restarted. The system never says “I changed it — approve with FaceID.”',
+    {t:'popup',d:200,cfg:{kicker:'BRANCH E · E2: EDIT INVALIDATION',title:'A correction is not a patch',
+      body:'The old confirmation and signature were destroyed, a new draft version was created, and the complete review restarted. The system never says “I changed it, approve with FaceID.”',
       fields:`<div class="fr"><span class="k">Draft v1</span><span class="v">SUPERSEDED</span></div>
               <div class="fr"><span class="k">Signature v1</span><span class="v">INVALIDATED</span></div>
               <div class="fr"><span class="k">Draft v2</span><span class="v">S$15.00 · revalidated</span></div>`,
       acts:[{id:'ok',label:'Done',kind:'ok2'}],
-      note:'BRD §8.11.3 — a material edit invalidates the confirmation, the signature and the draft version.'}}
+      note:'BRD §8.11.3: a material edit invalidates the confirmation, the signature and the draft version.'}}
   ];
 };
 
@@ -624,8 +624,8 @@ SC.E3 = () => {
   {t:'hit',b:'E',n:'E3'},
   {t:'audit',v:'REVIEW_RESTARTED · confirmation language ZH · previous field confirmations discarded · draft values unchanged',c:'warn'},
   {t:'state',v:'CONFIRMATION_READY'},{t:'outcome',v:'PAYMENT_CLARIFICATION',c:'warn'},
-  {t:'popup',d:150,cfg:{kicker:'BRANCH E · E3 — LANGUAGE MISMATCH',title:'Same money, Auntie’s language',
-    body:'The transaction values did not change by a single cent. The complete review restarted in Mandarin using <b>reviewed deterministic templates</b> — not free-form model output.',
+  {t:'popup',d:150,cfg:{kicker:'BRANCH E · E3: LANGUAGE MISMATCH',title:'Same money, Auntie’s language',
+    body:'The transaction values did not change by a single cent. The complete review restarted in Mandarin using <b>reviewed deterministic templates</b>, not free-form model output.',
     fields:`<div class="fr"><span class="k">Draft values</span><span class="v">UNCHANGED</span></div>
             <div class="fr"><span class="k">Confirmation language</span><span class="v">中文 (ZH)</span></div>
             <div class="fr"><span class="k">Review</span><span class="v">RESTARTED</span></div>`,
@@ -652,7 +652,7 @@ SC.F1 = () => [
   {t:'stage',n:14,s:'fail'},{t:'stage',n:15,s:'skip'},
   {t:'hit',b:'F',n:'F1'},
   {t:'state',v:'REJECTED'},{t:'sig',v:'NONE'},{t:'ledger',v:'NOT_INVOKED'},{t:'outcome',v:'REJECTED',c:'stop'},
-  {t:'popup',d:150,cfg:{kicker:'BRANCH F · F1 — FORGED APPROVAL',title:'The gateway trusts nothing it is told',
+  {t:'popup',d:150,cfg:{kicker:'BRANCH F · F1: FORGED APPROVAL',title:'The gateway trusts nothing it is told',
     body:'The Gateway does not trust <code>approved: true</code>, <code>faceIdPassed: true</code> or any model-generated claim. It requires a fresh signature bound to the exact payload Auntie reviewed.',
     fields:`<div class="fr"><span class="k">Reason</span><span class="v">MISSING_VALID_SIGNATURE</span></div>
             <div class="fr"><span class="k">Ledger invoked</span><span class="v">false</span></div>`,
@@ -686,8 +686,8 @@ SC.F2 = () => {
     {t:'hit',b:'F',n:'F2'},
     {t:'state',v:'REJECTED'},{t:'sig',v:'INVALID'},{t:'ledger',v:'NOT_INVOKED'},{t:'outcome',v:'REJECTED',c:'stop'},
     {t:'iface',v:'This payment no longer matches the payment that was reviewed and signed. It has been rejected. No money was sent.'},
-    {t:'popup',d:150,cfg:{kicker:'BRANCH F · F2 — PAYLOAD BINDING',title:'S$50.00 ≠ S$5,000.00',
-      body:'The signature covers the <b>exact canonical payload</b> — draft id, version, confirmation id, beneficiary, destination token, amount, currency, reference, nonce and idempotency key.',
+    {t:'popup',d:150,cfg:{kicker:'BRANCH F · F2: PAYLOAD BINDING',title:'S$50.00 ≠ S$5,000.00',
+      body:'The signature covers the <b>exact canonical payload</b>: draft id, version, confirmation id, beneficiary, destination token, amount, currency, reference, nonce and idempotency key.',
       fields:`<div class="fr"><span class="k">Signed</span><span class="v">S$50.00</span></div>
               <div class="fr"><span class="k">Submitted</span><span class="v">S$5,000.00</span></div>
               <div class="fr"><span class="k">Reason</span><span class="v">SIGNATURE_PAYLOAD_MISMATCH</span></div>`,
@@ -713,7 +713,7 @@ SC.F3 = () => {
     {t:'agent',name:'MOCK LEDGER',v:{transaction_id:'txn_001',status:'RECORDED',execution_count:1}},
     {t:'ledger',v:'RECORDED · 1'},{t:'audit',v:'LEDGER_RECORDED · txn_001 · execution_count 1',c:'ok'},
     {t:'stage',n:15,s:'pass'},{t:'state',v:'EXECUTED'},{t:'outcome',v:'ACCEPTED',c:'ok'},
-    {t:'sys',v:'— now the attacker retries —'},
+    {t:'sys',v:'-- now the attacker retries --'},
     {t:'attacker',v:'Exact retry with the same idempotency key '+d.idempotency_key+'.'},
     {t:'agent',name:'ZERO-TRUST GATEWAY',
       v:{decision:'RETURN_EXISTING_RESULT',reason_code:'IDEMPOTENT_RETRY',transaction_id:'txn_001'}},
@@ -729,9 +729,9 @@ SC.F3 = () => {
     {t:'audit',v:'PAYLOAD_EXPIRED · ledger_invoked false',c:'stop'},
     {t:'hit',b:'F',n:'F3'},
     {t:'state',v:'REJECTED'},{t:'outcome',v:'REJECTED',c:'stop'},
-    {t:'sys',v:'Attempt 1 executed once (txn_001). Attempts 2–4 changed nothing. Terminal session state: REJECTED.'},
+    {t:'sys',v:'Attempt 1 executed once (txn_001). Attempts 2-4 changed nothing. Terminal session state: REJECTED.'},
     {t:'ledger',v:'RECORDED · 1 (never 4)'},
-    {t:'popup',d:180,cfg:{kicker:'BRANCH F · F3 — REPLAY & IDEMPOTENCY',title:'Four attempts, one ledger entry',
+    {t:'popup',d:180,cfg:{kicker:'BRANCH F · F3: REPLAY & IDEMPOTENCY',title:'Four attempts, one ledger entry',
       body:'An exact technical retry returns the original receipt. A replayed nonce and an expired payload are rejected. The ledger was written <b>once</b>.',
       fields:`<div class="fr"><span class="k">Attempt 1</span><span class="v">ACCEPTED · txn_001</span></div>
               <div class="fr"><span class="k">Attempt 2</span><span class="v">RETURN_EXISTING_RESULT</span></div>
@@ -759,11 +759,11 @@ SC.G1 = () => [
   {t:'hit',b:'G',n:'G1'},
   {t:'state',v:'CLARIFICATION_REQUIRED'},{t:'draft',v:'NOT_CREATED'},{t:'outcome',v:'CLARIFY',c:'warn'},
   {t:'audit',v:'MULTIPLE_RECIPIENTS · clarification opened · draft NOT_CREATED',c:'warn'},
-  {t:'iface',v:'{name}, I can only send money to one person at a time. Which would you like to pay first — John Doe or John Smith?'},
-  {t:'popup',d:150,cfg:{kicker:'BRANCH G · G1 — MULTIPLE RECIPIENTS',title:'One transfer at a time',
+  {t:'iface',v:'{name}, I can only send money to one person at a time. Which would you like to pay first, John Doe or John Smith?'},
+  {t:'popup',d:150,cfg:{kicker:'BRANCH G · G1: MULTIPLE RECIPIENTS',title:'One transfer at a time',
     body:'A request naming two saved payees is clarified down to a single recipient before any draft is built. The MVP is one SGD transfer to one saved payee.',
     acts:[{id:'ok',label:'Understood',kind:'ok2'}],
-    note:'Deterministic policy — fires regardless of what the (untrusted) Payment Agent returned.'}}
+    note:'Deterministic policy, fires regardless of what the (untrusted) Payment Agent returned.'}}
 ];
 
 /* ---- H1 Customer states insufficient funds ---- */
@@ -774,11 +774,11 @@ SC.H1 = () => [
   {t:'hit',b:'H',n:'H1'},
   {t:'state',v:'CLARIFICATION_REQUIRED'},{t:'draft',v:'NOT_CREATED'},{t:'outcome',v:'INSUFFICIENT_FUNDS',c:'warn'},
   {t:'audit',v:'INSUFFICIENT_FUNDS_DETECTED · empathetic abort · draft NOT_CREATED',c:'warn'},
-  {t:'iface',v:"{name}, no worries at all. We don't have to send this right now. If you'd like, just tell me a smaller amount and I can help with that — or we can leave it for today. Nothing has been sent."},
-  {t:'popup',d:150,cfg:{kicker:'BRANCH H · H1 — INSUFFICIENT FUNDS',title:'No pressure to pay',
-    body:'When Auntie says she cannot cover the amount, AuntieJoy responds with empathy and does not push the payment. The conversation stays open so she can name a smaller amount or cancel — no draft is ever built from an affordability statement.',
+  {t:'iface',v:"{name}, no worries at all. We don't have to send this right now. If you'd like, just tell me a smaller amount and I can help with that, or we can leave it for today. Nothing has been sent."},
+  {t:'popup',d:150,cfg:{kicker:'BRANCH H · H1: INSUFFICIENT FUNDS',title:'No pressure to pay',
+    body:'When Auntie says she cannot cover the amount, AuntieJoy responds with empathy and does not push the payment. The conversation stays open so she can name a smaller amount or cancel, no draft is ever built from an affordability statement.',
     acts:[{id:'ok',label:'Understood',kind:'ok2'}],
-    note:'Empathetic abort — the system never pressures the customer to proceed.'}}
+    note:'Empathetic abort, the system never pressures the customer to proceed.'}}
 ];
 
 
@@ -793,8 +793,8 @@ SC.H1 = () => [
    ============================================================================ */
 /* Where the backend lives. Resolved in this order, so the backend can be moved to another
    port or machine WITHOUT editing any code:
-     1. window.AUNTIEJOY_API_BASE — set in the page before these scripts load
-     2. ?api=http://host:port     — quick manual override in the address bar
+     1. window.AUNTIEJOY_API_BASE, set in the page before these scripts load
+     2. ?api=http://host:port, quick manual override in the address bar
      3. default: the host this page was served from, port 8078
    The default deliberately uses the PAGE's own hostname instead of a hardcoded 127.0.0.1:
    when the app is opened from a phone on the same Wi-Fi, 127.0.0.1 would mean the phone
@@ -809,7 +809,7 @@ const API_BASE = (() => {
   return `http://${window.location.hostname || '127.0.0.1'}:8078`;
 })();
 
-// Which event_type values are one of the four LLM agents (§ stages 3/4/5/8) —
+// Which event_type values are one of the four LLM agents (§ stages 3/4/5/8),
 // these get rendered as an agent card (name + JSON), same as the scripted demo.
 const AGENT_NAME_FOR_EVENT = {
   GUARDRAILS_RESULT: 'GUARDRAILS AGENT',
@@ -820,7 +820,7 @@ const AGENT_NAME_FOR_EVENT = {
 };
 
 // A few other event types are still worth showing as a card even though
-// they're deterministic, not an LLM call — the payload is the interesting part.
+// they're deterministic, not an LLM call; the payload is the interesting part.
 const CARD_NAME_FOR_EVENT = Object.assign({
   PAYEE_RESOLUTION: 'PAYEE & ACCOUNT RESOLUTION',
   COMPARATOR_RESULT: 'VALIDATION COMPARATOR',
@@ -832,7 +832,7 @@ const CARD_NAME_FOR_EVENT = Object.assign({
 }, AGENT_NAME_FOR_EVENT);
 
 // Heuristic colouring for the audit-log line, based on keywords in the event
-// name — matches the ok/warn/stop palette the scripted demo already uses.
+// name, matches the ok/warn/stop palette the scripted demo already uses.
 function auditClassFor(eventType){
   if(/REJECT|FROZEN|BLOCK|STOPPED|MISSING|IGNORED|CANCELLED/.test(eventType)) return 'stop';
   if(/REQUIRED|OPENED|RESTARTED|RETRY|REUSED|INCOMPLETE|COOLING/.test(eventType)) return 'warn';
@@ -852,7 +852,7 @@ function stepsForEvent(ev, seenStages){
   if(firstOnStage) steps.push({t:'stage',n:stageN,s:'run'});
 
   // The conversation's own sentence. The backend rendered it from its messages.py catalogue
-  // and already addressed the customer by name, so it is played VERBATIM — the client does not
+  // and already addressed the customer by name, so it is played VERBATIM; the client does not
   // rewrite, re-translate or re-address it. That is the whole point of the INTERFACE_LINE
   // contract: one author for the interface copy.
   if(ev.event_type === 'INTERFACE_LINE' && (ev.payload||{}).text){
@@ -901,7 +901,7 @@ function scenarioToSteps(resp){
   steps.push(...finalStateSteps(resp.session || {}));
 
   // Highlight the MECE branch/node this scenario demonstrates (HAPPY has no branch).
-  if(resp.branch && resp.branch!=='—'){
+  if(resp.branch && resp.branch!=='-'){
     steps.push({t:'hit', b: resp.branch, n: resp.scenario_id});
   }
   return steps;
@@ -930,7 +930,7 @@ async function runScenario(id){
     steps.unshift({t:'audit', v:'LIVE BACKEND · '+API_BASE, c:'ok'});
   }catch(err){
     if(my!==RUN) return;
-    // Backend unreachable — fall back to the scripted version so the demo
+    // Backend unreachable, fall back to the scripted version so the demo
     // still runs, but say so plainly rather than pretending it's live.
     steps=[
       {t:'stage',n:0,s:'pass'},

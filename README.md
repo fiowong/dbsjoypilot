@@ -1,11 +1,11 @@
 # AuntieJoy (draft README)
 
 A voice-first conversational payment prototype built for the **Tencent Cloud AI Singapore
-Hackathon 2026 — DBS Banking Track, Challenge 1 (DCTA: Direct Conversational Transaction Agent,
-Scenario 1 — Voice-Enabled Payment and Transaction)**.
+Hackathon 2026: DBS Banking Track, Challenge 1 (DCTA: Direct Conversational Transaction Agent,
+Scenario 1: Voice-Enabled Payment and Transaction)**.
 
 AuntieJoy lets an elderly customer ("Auntie") make a bank transfer just by talking or typing
-naturally, in English, Mandarin, or Bahasa Melayu — while every payment is independently
+naturally, in English, Mandarin, or Bahasa Melayu, while every payment is independently
 screened, confirmed field-by-field, and signed by deterministic code, never by the LLM itself.
 
 > **This is a hackathon prototype**, not a production banking system. All customer data,
@@ -15,15 +15,15 @@ screened, confirmed field-by-field, and signed by deterministic code, never by t
 
 ## How it works
 
-- **The customer only ever sees one warm conversation** — type, or speak using the mic button.
+- **The customer only ever sees one warm conversation**: type, or speak using the mic button.
 - Behind that conversation, every turn passes through 5 bounded agents (Guardrails, Intent
   Classifier, Payment, Independent Validation, and Personalization) and a 16-stage deterministic
   control chain that alone resolves the payee, checks risk, gets field-by-field confirmation,
   signs the payload, and calls the (mocked) bank ledger.
-- The app's technical inspector panels — control chain, agent contracts, audit log, MECE
-  failure map — show exactly what DBS's systems would see, and can be toggled off for a
+- The app's technical inspector panels (control chain, agent contracts, audit log, MECE
+  failure map) show exactly what DBS's systems would see, and can be toggled off for a
   clean, full-width, customer-only view.
-- 21 scripted BRD demo scenarios (the happy path plus 20 MECE failure branches, A–H) are built
+- 21 scripted BRD demo scenarios (the happy path plus 20 MECE failure branches, A-H) are built
   in as one-click buttons, alongside genuinely live free-text/voice input wired to the real
   backend.
 
@@ -31,7 +31,7 @@ screened, confirmed field-by-field, and signed by deterministic code, never by t
 
 ```
 dbs-auntiejoy/
-  backend/     FastAPI backend — the 5 agents + the deterministic control chain
+  backend/     FastAPI backend: the 5 agents + the deterministic control chain
                (see backend/README.md for the full file-by-file breakdown)
   frontend/    The chat UI + technical inspector panels (plain HTML/CSS/JS, no build step)
 ```
@@ -47,17 +47,17 @@ python3 -m uvicorn app.main:app --host 127.0.0.1 --port 8078
 ```
 This runs against a deterministic mock LLM by default. To connect a real LLM (Tencent Hunyuan
 via TokenHub, or any OpenAI-compatible endpoint), copy `backend/.env.example` to `backend/.env`
-and fill in your own key — see `backend/README.md` for details.
+and fill in your own key, see `backend/README.md` for details.
 
 **Frontend** (from `frontend/`, in a separate terminal):
 ```bash
 python3 -m http.server 8098
 ```
 Then open `http://127.0.0.1:8098` in your browser. The frontend looks for the backend on
-**port 8078 of whatever host served the page** — so opening the app from a phone on the same
+**port 8078 of whatever host served the page**: so opening the app from a phone on the same
 Wi-Fi reaches the laptop's backend, not the phone's own localhost.
 
-If your backend is on a different port or machine, **no code change is needed** — append the
+If your backend is on a different port or machine, **no code change is needed**: append the
 address to the URL:
 
 ```
@@ -66,17 +66,17 @@ http://127.0.0.1:8098/?api=http://127.0.0.1:8077
 
 The "LIVE BACKEND · <address>" line at the top of the audit timeline always shows which
 backend the page actually resolved to, which is the fastest way to spot a port mismatch.
-(A mismatch shows up immediately as `TURN_CALL_FAILED · Failed to fetch` in the same timeline —
+(A mismatch shows up immediately as `TURN_CALL_FAILED · Failed to fetch` in the same timeline,
 a connection to a port with nothing on it is refused instantly.)
 
 ## Live LLM mode
 
-By default the backend runs against a **deterministic mock LLM** — every scenario is 100%
+By default the backend runs against a **deterministic mock LLM**: every scenario is 100%
 reproducible and the suite always passes: `python -m app.selftest --selftest` → **21/21**.
 (If a `HUNYUAN_API_KEY` is set the suite runs against the live model instead, which makes ~80
-network calls and takes a couple of minutes — blank the key for the fast deterministic run.)
+network calls and takes a couple of minutes; blank the key for the fast deterministic run.)
 
-To use a real model, set three env vars (any OpenAI-compatible endpoint — no code change):
+To use a real model, set three env vars (any OpenAI-compatible endpoint, no code change):
 
 ```bash
 export HUNYUAN_API_KEY=<any-non-empty-value>   # presence flips engine to live
@@ -85,8 +85,8 @@ export AUNTIEJOY_LLM_MODEL=<model-id>          # e.g. deepseek-v4-flash-202605
 python -m app.selftest --selftest              # re-run against the live model
 ```
 
-**Fail-closed by design.** Each agent tries the live model; *any* error — timeout, malformed
-JSON, or a schema mismatch — drops that one agent to the deterministic mock, and the turn still
+**Fail-closed by design.** Each agent tries the live model; *any* error (timeout, malformed
+JSON, or a schema mismatch) drops that one agent to the deterministic mock, and the turn still
 completes correctly. The demo never breaks even if the model is flaky. The agent cards in the UI
 show `"engine": "live"` or `"engine": "mock"` so you can see which ran.
 
@@ -103,8 +103,8 @@ between), so upstream flakiness is far rarer than in the bundled stress selftest
 
 ## Tech stack
 
-- **Backend:** Python, FastAPI, Pydantic — deterministic state machine + 5 typed-schema LLM agents
-- **LLM:** OpenAI-compatible client (any endpoint — e.g. Tencent Hunyuan via TokenHub, or DeepSeek),
+- **Backend:** Python, FastAPI, Pydantic: deterministic state machine + 5 typed-schema LLM agents
+- **LLM:** OpenAI-compatible client (any endpoint, e.g. Tencent Hunyuan via TokenHub, or DeepSeek),
   temperature 0, fail-closed to a deterministic mock on any error; a reply normaliser absorbs benign
   model variance before schema validation
 - **Frontend:** Vanilla HTML/CSS/JS (no framework, no build step)
@@ -114,8 +114,8 @@ between), so upstream flakiness is far rarer than in the bundled stress selftest
 
 ## Team
 
-- **Ignatius** — business logic and frontend
-- **Fionna Wong** — backend, control-chain architecture, Tencent Cloud / LLM integration
+- **Ignatius**: business logic and frontend
+- **Fionna Wong**: backend, control-chain architecture, Tencent Cloud / LLM integration
 
 ## Status
 

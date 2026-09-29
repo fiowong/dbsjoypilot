@@ -13,7 +13,7 @@ from .data import CUSTOMERS, SAVED_PAYEES, BILLERS, CARDS, OWN_ACCOUNTS, POLICY
 from .parsing import PAYEE_ALIASES
 from . import nicknames
 
-# 7. Deterministic controls — the half that is allowed to move money
+# 7. Deterministic controls, the half that is allowed to move money
 # =====================================================================
 class DeterministicResolution(BaseModel):
     outcome: Literal["RESOLVED", "NEEDS_CLARIFICATION", "FREEZE"]
@@ -27,7 +27,7 @@ class DeterministicResolution(BaseModel):
     reason: Optional[str] = None
     # Set on the FREEZE path so the customer can be told *which* record was suspicious.
     payee_display: Optional[str] = None
-    # "display_name" or "nickname" — how the payee was bound. Audited on PAYEE_RESOLUTION so the
+    # "display_name" or "nickname", how the payee was bound. Audited on PAYEE_RESOLUTION so the
     # inspector can show that a nickname pointed at a trusted beneficiary, and that the nickname
     # itself never supplied the destination.
     matched_via: Optional[str] = None
@@ -46,11 +46,11 @@ def freeze_message_key(reason: Optional[str]) -> str:
 
 
 def detect_multiple_recipients(text: str, customer_id: str) -> Optional[List[str]]:
-    """§MVP — one saved-payee transfer at a time. Return the display names of 2+ *distinct* saved
+    """§MVP, one saved-payee transfer at a time. Return the display names of 2+ *distinct* saved
     payees named in the turn, else None.
 
     Matching is on the full display name or a full-name alias only, so a bare "john" (which is
-    ambiguous between the two Johns) is NOT counted here — that case is the existing PAYEE_AMBIGUOUS
+    ambiguous between the two Johns) is NOT counted here, that case is the existing PAYEE_AMBIGUOUS
     clarification, a different situation. This keeps a request like "pay John" from being misread as
     "pay both Johns".
     """
@@ -83,7 +83,7 @@ def detect_multiple_recipients(text: str, customer_id: str) -> Optional[List[str
 
 def resolve_payee_and_account(customer_id: str, proposal: PaymentProposal,
                               payee_phrase: Optional[str]) -> DeterministicResolution:
-    """§8.3.2 — the LLM proposes a phrase; deterministic code binds the authoritative record."""
+    """§8.3.2, the LLM proposes a phrase; deterministic code binds the authoritative record."""
     if proposal.status != "PROPOSAL_READY":
         return DeterministicResolution(outcome="NEEDS_CLARIFICATION",
                                        clarification_field=proposal.clarification_field,
@@ -117,10 +117,11 @@ def resolve_payee_and_account(customer_id: str, proposal: PaymentProposal,
             destination_token=biller.masked,
             amount_minor=proposal.amount_minor or biller.latest_amount_minor, currency=proposal.currency,
             reference="", payee_display=biller.display_name, payee_masked=biller.masked,
-            account_masked=account.masked))
+            account_masked=account.masked,
+            source_account_display=account.display_name))
 
     # A credit-card payment settles the customer's own card balance from a source account. The
-    # amount is the card's latest balance (PRODUCT_RULE) — a number they happened to say alongside
+    # amount is the card's latest balance (PRODUCT_RULE), a number they happened to say alongside
     # "credit card" is never the amount; that would be a false read-back, exactly as for a bill.
     if proposal.transaction_type == "CREDIT_CARD_PAYMENT":
         cards = CARDS.get(customer_id, [])
@@ -147,7 +148,8 @@ def resolve_payee_and_account(customer_id: str, proposal: PaymentProposal,
             destination_token=card.masked,
             amount_minor=proposal.amount_minor or card.latest_balance_minor, currency=proposal.currency,
             reference="", payee_display=card.display_name, payee_masked=card.masked,
-            account_masked=account.masked))
+            account_masked=account.masked,
+            source_account_display=account.display_name))
 
     # An own-account move shifts money between the customer's own accounts (e.g. savings -> joint).
     # The destination is an internal account, so it uses BODY_MOVE, not BODY_TRANSFER.
@@ -176,7 +178,8 @@ def resolve_payee_and_account(customer_id: str, proposal: PaymentProposal,
             destination_token=oa.masked,
             amount_minor=proposal.amount_minor or 0, currency=proposal.currency,
             reference="", payee_display=oa.display_name, payee_masked=oa.masked,
-            account_masked=account.masked))
+            account_masked=account.masked,
+            source_account_display=account.display_name))
 
     payees = SAVED_PAYEES.get(customer_id, [])
     needle = (payee_phrase or proposal.recipient_phrase or "").lower()
@@ -184,7 +187,7 @@ def resolve_payee_and_account(customer_id: str, proposal: PaymentProposal,
                if p.display_name.lower().startswith(needle) or needle in p.display_name.lower()]
     matched_via = "display_name"
     if not matches and needle:
-        # A NICKNAME the customer uses out loud. The nickname supplies the LOOKUP KEY only — the
+        # A NICKNAME the customer uses out loud. The nickname supplies the LOOKUP KEY only, the
         # payee record, its masked ending and its destination token all come from the trusted
         # repository, so a nickname can never introduce a destination of its own.
         by_nickname = nicknames.find(customer_id, needle)
@@ -197,7 +200,7 @@ def resolve_payee_and_account(customer_id: str, proposal: PaymentProposal,
                                        clarification_key="PAYEE_NOT_FOUND")
     if len(matches) > 1:
         # The candidates travel as structured records. The question that names them is built
-        # from this list by messages.candidate_options() — so the customer is always told
+        # from this list by messages.candidate_options(), so the customer is always told
         # WHICH John, instead of a generic "which one do you mean?".
         return DeterministicResolution(
             outcome="NEEDS_CLARIFICATION", clarification_field="RECIPIENT",
@@ -206,7 +209,7 @@ def resolve_payee_and_account(customer_id: str, proposal: PaymentProposal,
                          "maskedDestination": p.masked} for p in matches])
 
     payee = matches[0]
-    # §6.4 C2 / §A.6 — untrusted display metadata may never establish or replace the destination
+    # §6.4 C2 / §A.6, untrusted display metadata may never establish or replace the destination
     if payee.untrusted_note and re.search(
             r"ignore|skip|change the destination|instruction|override", payee.untrusted_note, re.I):
         return DeterministicResolution(outcome="FREEZE",
@@ -219,7 +222,7 @@ def resolve_payee_and_account(customer_id: str, proposal: PaymentProposal,
                                        payee_display=payee.display_name)
 
     # The agent proposes a phrase ("usd", "savings", "current"); deterministic code binds the
-    # authoritative record. A phrase nothing matches — or no phrase at all — falls back to the
+    # authoritative record. A phrase nothing matches, or no phrase at all, falls back to the
     # customer's FIRST eligible account, which is the one the demo's everyday transfers use.
     want = (proposal.source_account_phrase or "").lower()
     account = next((a for a in eligible if want and want in a.display_name.lower()), None)
@@ -232,7 +235,8 @@ def resolve_payee_and_account(customer_id: str, proposal: PaymentProposal,
         destination_token=payee.destination_token,
         amount_minor=proposal.amount_minor or 0, currency=proposal.currency,
         reference="", payee_display=payee.display_name, payee_masked=payee.masked,
-        account_masked=account.masked), matched_via=matched_via)
+        account_masked=account.masked,
+        source_account_display=account.display_name), matched_via=matched_via)
 
 
 class ComparatorResult(BaseModel):
@@ -242,7 +246,7 @@ class ComparatorResult(BaseModel):
 
 def compare_validation_result(validation: ValidationResult, draft: Draft,
                               frozen: bool) -> ComparatorResult:
-    """§8.9 — the Validation Agent's PASS value is insufficient by itself."""
+    """§8.9, the Validation Agent's PASS value is insufficient by itself."""
     names = [c.field_name for c in validation.field_checks]
     if len(names) != len(REQUIRED_VALIDATION_FIELDS):
         return ComparatorResult(result="FAIL", reason="WRONG_FIELD_CHECK_COUNT")
@@ -277,7 +281,7 @@ class RiskOutcome(BaseModel):
 
 
 def evaluate_risk(draft: Draft, session: dict, guardrail: Optional[GuardrailResult]) -> RiskOutcome:
-    """§8.10 — risk consequences are selected by configuration, never by a model."""
+    """§8.10: risk consequences are selected by configuration, never by a model."""
     reasons: List[str] = []
     if draft.amount_minor > POLICY["max_transfer_minor"]:
         reasons.append("AMOUNT_ABOVE_SYNTHETIC_LIMIT")
@@ -306,7 +310,7 @@ def evaluate_risk(draft: Draft, session: dict, guardrail: Optional[GuardrailResu
 
 # A reported "safe account" instruction is the one unambiguous scam pattern: stop it outright.
 # Every other safety signal is weighed by the deterministic policy, which may prefer a
-# cooling-off — a delay, not an accusation (§A.7 D1 vs D3).
+# cooling-off, a delay, not an accusation (§A.7 D1 vs D3).
 HARD_STOP_SCAM = re.compile(r"\bsafe account\b", re.I)
 
 
@@ -323,7 +327,7 @@ def evaluate_safety_policy(guardrail: GuardrailResult, text: str) -> RiskOutcome
                        limit_minor=POLICY["max_transfer_minor"], disclosure=POLICY["disclosure"])
 
 
-# ---------- signing, gateway, ledger (§8.11.4–8.11.6) ----------
+# ---------- signing, gateway, ledger (§8.11.4-8.11.6) ----------
 def canonical_payload(draft: Draft, confirmation: Confirmation, nonce: str,
                       idempotency_key: str, issued_at: datetime) -> dict:
     return {
@@ -351,7 +355,7 @@ def payload_hash(payload: dict) -> str:
 
 
 def sign_payload(payload: dict) -> str:
-    """HMAC — explicitly a demonstration mechanism. A bare SHA-256 is not a signature (§8.11.4)."""
+    """HMAC, explicitly a demonstration mechanism. A bare SHA-256 is not a signature (§8.11.4)."""
     return "sig_" + hmac.new(Settings.SIGNING_SECRET.encode(),
                              json.dumps(payload, sort_keys=True, separators=(",", ":")).encode(),
                              hashlib.sha256).hexdigest()[:32]
@@ -417,7 +421,7 @@ def gateway_verify(payload: dict, signature: str, claimed: dict, draft: Draft,
     checks["comparator"] = "PASS" if comparator.result == "PASS" else "FAIL"
     # STEP_UP is an allowed risk outcome whose extra verification (the transaction-specific
     # FaceID at stage 12) has already been satisfied by the time we reach the gateway, so it
-    # passes — exactly like a PASS. REJECT/COOLING_OFF still fail. This makes the amount-based
+    # passes, exactly like a PASS. REJECT/COOLING_OFF still fail. This makes the amount-based
     # step-up symmetric with the voice-based step-up (which keeps risk=PASS and only sets
     # session.step_up_required).
     checks["risk_policy"] = "PASS" if risk.decision in (RiskDecision.PASS, RiskDecision.STEP_UP) else "FAIL"

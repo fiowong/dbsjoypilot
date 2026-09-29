@@ -1,4 +1,4 @@
-"""Ears — speech to text.
+"""Ears, speech to text.
 
 Provider: Tencent Cloud realtime ASR over WebSocket (product doc 1093/48982).
 
@@ -7,7 +7,7 @@ Two rules this module exists to protect:
 1. **The engine is a provider, not a decider.** It turns sound into text. It never decides
    what AuntieJoy says or does. Everything downstream is owned by the orchestrator.
 
-2. **Never invent evidence.** Tencent's realtime ASR does not return a confidence score —
+2. **Never invent evidence.** Tencent's realtime ASR does not return a confidence score,
    the result carries only per-word ``stable_flag``. So instead of reporting a number the
    engine never gave, we derive a proxy from how many words the engine itself considers
    stable, and we return that *together with* ``confidence_source`` so the audit trail can
@@ -110,7 +110,7 @@ class TencentRealtimeASR:
     async def connect(self) -> None:
         if not Settings.LIVE_ASR:
             raise ASRError(
-                "ASR is not configured — set TENCENTCLOUD_SECRET_ID, "
+                "ASR is not configured, set TENCENTCLOUD_SECRET_ID, "
                 "TENCENTCLOUD_SECRET_KEY and TENCENTCLOUD_APPID"
             )
         try:
@@ -131,7 +131,7 @@ class TencentRealtimeASR:
             "vad_silence_time": "1000",
             "filter_empty_result": "1",
         }
-        # Only ask for per-word detail when the engine can actually give it — that detail
+        # Only ask for per-word detail when the engine can actually give it; that detail
         # is the sole basis for our confidence proxy.
         if self.engine in WORD_INFO_ENGINES:
             params["word_info"] = "1"
@@ -241,7 +241,7 @@ def _stability_confidence(result: dict) -> Optional[float]:
 
     Tencent marks each recognised word with ``stable_flag``: 1 means the engine has settled
     on that word and will not revise it. The share of settled words is a genuine, engine-
-    produced measure of how cleanly the audio was understood — so we use it, and we label
+    produced measure of how cleanly the audio was understood, so we use it, and we label
     it as such rather than dressing it up as a vendor confidence score.
     """
     words = result.get("word_list") or []
@@ -271,4 +271,4 @@ def _code_meaning(msg: Optional[dict]) -> str:
         6001: "overseas calls must use the Tencent Cloud international site",
     }
     code = msg.get("code")
-    return f"{code} — {meanings.get(code, msg.get('message', 'unknown'))}"
+    return f"{code}, {meanings.get(code, msg.get('message', 'unknown'))}"

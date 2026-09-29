@@ -7,7 +7,7 @@ from .config import Settings
 from .agent_runtime import AgentUnavailable
 
 # =====================================================================
-# 5. LLM client — OpenAI-compatible, temperature 0, fail closed.
+# 5. LLM client, OpenAI-compatible, temperature 0, fail closed.
 #    Resilient: exponential backoff + honours 429 Retry-After, and logs the
 #    REAL cause (exception type / HTTP status / body) instead of an empty string
 #    so live-mode transport failures are diagnosable (see aj-2026-09-23 transport fix).
@@ -41,7 +41,7 @@ async def llm_complete(system_prompt: str, user_payload: dict) -> str:
                     json=body,
                 )
                 if resp.status_code == 429:
-                    # Rate limited — wait the server's Retry-After (or our backoff) and retry.
+                    # Rate limited, wait the server's Retry-After (or our backoff) and retry.
                     last_error = httpx.HTTPStatusError(
                         "rate limited (429)", request=resp.request, response=resp)
                     if attempt < Settings.AGENT_MAX_RETRIES:
@@ -53,7 +53,7 @@ async def llm_complete(system_prompt: str, user_payload: dict) -> str:
                     break
                 resp.raise_for_status()
                 return resp.json()["choices"][0]["message"]["content"]
-        except Exception as exc:                      # noqa: BLE001 — fail closed on anything
+        except Exception as exc:                      # noqa: BLE001, fail closed on anything
             last_error = exc
             if attempt < Settings.AGENT_MAX_RETRIES:
                 await asyncio.sleep(backoff)
@@ -95,7 +95,7 @@ async def check_llm_health() -> bool:
                       "messages": [{"role": "user", "content": "ping"}],
                       "max_tokens": 1})
             return resp.status_code == 200
-    except Exception:                      # noqa: BLE001 — health must never raise
+    except Exception:                      # noqa: BLE001, health must never raise
         return False
 
 

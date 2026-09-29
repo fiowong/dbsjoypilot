@@ -1,4 +1,4 @@
-/* 1.5/6 icons.js — load right after translations.js and BEFORE ui.js.
+/* 1.5/6 icons.js, load right after translations.js and BEFORE ui.js.
    A single stroke-based SVG icon set for the DBS app surface.
 
    Why this file exists: the dashboard tiles and the mic button used OS emoji for primary
@@ -8,7 +8,7 @@
 
    Usage:  icon('mic')                 -> <svg class="ic">…</svg>
            icon('mic','ic-lg')         -> extra class for sizing
-   Never hard-code an emoji into banking chrome again — add a path here instead. */
+   Never hard-code an emoji into banking chrome again, add a path here instead. */
 
 const ICONS = {
   /* ---- actions ---- */
@@ -41,7 +41,7 @@ const ICONS = {
 
 /* Renders one icon. `cls` is optional extra class names (sizing/colour live in styles.css,
    so an icon never needs an inline style). aria-hidden because every icon in this app sits
-   beside a real text label — the label is what a screen reader should read. */
+   beside a real text label, the label is what a screen reader should read. */
 function icon(name, cls){
   const body = ICONS[name] || '';
   return `<svg class="ic${cls ? ' ' + cls : ''}" viewBox="0 0 24 24" fill="none" stroke="currentColor"`

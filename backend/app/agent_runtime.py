@@ -5,7 +5,7 @@ from typing import get_args, get_origin, Literal, Union, Optional
 from pydantic import BaseModel, ValidationError
 
 # =====================================================================
-# 2. Shared typed-agent runtime — BRD §8.4
+# 2. Shared typed-agent runtime, BRD §8.4
 #    All four agents go through this. Fail closed on any deviation.
 # =====================================================================
 class AgentUnavailable(Exception):
@@ -15,7 +15,7 @@ class AgentUnavailable(Exception):
 def _log_fallback(agent_hint: str, detail: str, raw: str) -> None:
     """Surface the REAL reason a live agent fell back to mock. The fail-closed path swallows
     the exception, which hid live-mode failures during the hackathon (same gap as the earlier
-    'every agent shows mock' mystery). Logging to stderr only — `raw` is the MODEL REPLY, never
+    'every agent shows mock' mystery). Logging to stderr only, `raw` is the MODEL REPLY, never
     the customer's transcribed speech."""
     snippet = (raw or "")[:400].replace("\n", " ")
     print(f"[AGENT_LIVE_FALLBACK] {agent_hint}: {detail} | raw={snippet!r}",
@@ -216,7 +216,7 @@ def extract_json_object(raw: str) -> dict:
 
 
 def typed_call(raw: str, model_cls: type[BaseModel]) -> BaseModel:
-    """Key presence alone is insufficient — validate enums, required fields, ranges (§8.4)."""
+    """Key presence alone is insufficient, validate enums, required fields, ranges (§8.4)."""
     obj = extract_json_object(raw)
     obj = _normalize_obj(obj, model_cls)
     try:

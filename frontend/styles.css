@@ -3,12 +3,12 @@
    Design system: the official DBS brand palette.
 
      DBS Red    #EC1C24   (primary action, accents, brand marks)
-     DBS Black  #111111   (headers, dark surfaces — never flat #000000)
+     DBS Black  #111111   (headers, dark surfaces, never flat #000000)
      Canvas     #F4F5F7   (app background)
      Hairline   #E5E7EB   (1px borders instead of coloured glows)
 
    Elevation rule: surfaces separate with a hairline border plus a micro-shadow
-   (--sh-1 / --sh-2). There are no blurry red glow shadows anywhere — those read
+   (--sh-1 / --sh-2). There are no blurry red glow shadows anywhere, those read
    as a prototype. Icons are inline SVG (see icons.js), never OS emoji.
    ========================================================================== */
 :root{
@@ -73,7 +73,7 @@
   --screen-r:47px;
   --statusbar-h:48px;
 
-  /* ---- layout rhythm — scales down automatically via clamp() on small screens ---- */
+  /* ---- layout rhythm: scales down automatically via clamp() on small screens ---- */
   --gutter:clamp(14px, 3.5vw, 28px);
   --radius:16px;
   --font:'Inter',system-ui,-apple-system,'SF Pro Text','Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;
@@ -119,13 +119,13 @@ button{font-family:inherit}
 .dbsmark-img{display:block;height:30px;width:auto}
 
 /* ==========================================================================
-   SCREEN SWITCHER — one DBS app screen at a time, inside the device
+   SCREEN SWITCHER, one DBS app screen at a time, inside the device
    ========================================================================== */
 .scr{display:none;position:absolute;inset:0;flex-direction:column;overflow:hidden}
 .scr.on{display:flex}
 
 /* ==========================================================================
-   STAGE — device on the left, technical inspector on the right
+   STAGE, device on the left, technical inspector on the right
    ========================================================================== */
 .stage{display:flex;gap:var(--gutter);align-items:flex-start}
 .stage .device{margin-inline:auto}
@@ -157,7 +157,7 @@ button{font-family:inherit}
     0 26px 60px rgba(0,0,0,.6),
     inset 0 0 0 2px #46464f;
 }
-/* side buttons — subtle, but they sell the hardware */
+/* side buttons, subtle, but they sell the hardware */
 .device::before,
 .device::after{
   content:'';position:absolute;width:3px;border-radius:2px;background:#3a3a42;z-index:1;
@@ -177,7 +177,7 @@ button{font-family:inherit}
   width:104px;height:28px;border-radius:16px;background:#000;z-index:9;
   pointer-events:none;
 }
-/* mock iOS status bar — white, because every screen header is black */
+/* mock iOS status bar, white, because every screen header is black */
 .statusbar{
   position:absolute;top:0;left:0;right:0;height:var(--statusbar-h);z-index:8;
   display:flex;align-items:center;justify-content:space-between;
@@ -241,7 +241,7 @@ button{font-family:inherit}
   background:#F9FAFB;outline:0;transition:.15s;
 }
 .lgin input:focus{border-color:var(--dbs-red);background:#fff;box-shadow:0 0 0 3px rgba(236,28,36,.10)}
-/* trailing validity check — only shown once the field actually validates */
+/* trailing validity check, only shown once the field actually validates */
 .lgok{
   position:absolute;right:12px;top:50%;transform:translateY(-50%);
   width:17px;height:17px;border-radius:50%;background:var(--ok);color:#fff;
@@ -295,7 +295,7 @@ button{font-family:inherit}
 .appbar-x:hover{border-color:var(--dbs-red);color:#fff}
 .appbody{flex:1;overflow-y:auto;background:var(--dbs-gray);padding:15px;min-height:0}
 
-/* balance hero — dark gradient surface, masked number, currency pill, radial glow */
+/* balance hero, dark gradient surface, masked number, currency pill, radial glow */
 .balcard{
   background:linear-gradient(140deg,#1D1D20 0%,#111111 58%,#0B0B0C 100%);
   color:#fff;border-radius:16px;padding:15px 16px 13px;margin-bottom:14px;
@@ -331,7 +331,7 @@ button{font-family:inherit}
   color:var(--muted);margin:18px 0 9px;
 }
 
-/* AuntieJoy entry — a white card with a red accent badge and a pulsing mic dot,
+/* AuntieJoy entry, a white card with a red accent badge and a pulsing mic dot,
    not a full-bleed red block. */
 .enable{
   width:100%;border:1px solid var(--line);border-radius:16px;padding:14px;
@@ -366,7 +366,7 @@ button{font-family:inherit}
 .enable .earrow{color:var(--faint);flex-shrink:0}
 .enable .earrow .ic{width:18px;height:18px}
 
-/* quick action tiles — 2x2, consistent height, hairline borders, SVG icons */
+/* quick action tiles, 2x2, consistent height, hairline borders, SVG icons */
 .tiles{display:grid;grid-template-columns:1fr 1fr;gap:9px}
 .tile{
   background:#fff;border:1px solid var(--line);border-radius:14px;padding:12px;
@@ -409,7 +409,7 @@ button{font-family:inherit}
    ========================================================================== */
 /* ONE consolidated LIGHT app bar: back control on the left, identity + trust state centred.
    It is the same surface as the transcript, so the phone reads as one calm page instead of
-   a black band with a card under it. No avatar — the assistant introduces itself in the
+   a black band with a card under it. No avatar, the assistant introduces itself in the
    message card. `.aback` is absolutely positioned so the title centres on the SCREEN rather
    than on the space left over beside the button. */
 .abar{
@@ -446,7 +446,7 @@ button{font-family:inherit}
 .chat::-webkit-scrollbar{width:6px}.chat::-webkit-scrollbar-thumb{background:#D5D5DD;border-radius:3px}
 
 /* --------------------------------------------------------------------------
-   COMPOSER — language pills and the text/mic row are ONE sticky unit.
+   COMPOSER, language pills and the text/mic row are ONE sticky unit.
    `.cinput` is a column so the pills sit above the field instead of beside it.
    -------------------------------------------------------------------------- */
 .cinput{display:flex;flex-direction:column;flex-shrink:0;
@@ -457,7 +457,7 @@ button{font-family:inherit}
   padding:5px 13px;font-size:11.5px;font-weight:700;font-family:inherit;cursor:pointer;
   letter-spacing:.2px;transition:background .14s,color .14s}
 .lt:hover{background:#E9EAEE}
-/* the selected language is the only black chip on the page — an unambiguous "this one" */
+/* the selected language is the only black chip on the page, an unambiguous "this one" */
 .lt.on{background:var(--ink);color:#fff}
 .cinrow{display:flex;gap:8px;align-items:center}
 .cinput .fld{flex:1;min-width:0;background:var(--card);border:1px solid var(--line);border-radius:22px;
@@ -505,7 +505,7 @@ button{font-family:inherit}
 .bub{padding:10px 13px;border-radius:14px;font-size:13.5px;line-height:1.5}
 .bub.you{background:var(--dbs-red);color:#fff;border-bottom-right-radius:5px;font-weight:600}
 .bub.attacker{background:var(--stop);color:#fff;border-bottom-right-radius:5px;font-weight:600}
-.bub.iface{background:#fff;border:1px solid var(--dbs-line);border-bottom-left-radius:5px;color:var(--ink2);box-shadow:var(--sh-1)}
+.bub.iface{background:#fff;border:1px solid var(--dbs-line);border-bottom-left-radius:5px;color:var(--ink2);box-shadow:var(--sh-1);white-space:pre-line}
 .bub.sys{background:#fff;border:1px dashed var(--line);color:#52525B;font-size:11.5px;
   font-family:ui-monospace,Menlo,Consolas,monospace;line-height:1.55}
 
@@ -517,7 +517,7 @@ button{font-family:inherit}
    ========================================================================== */
 .intro{background:#fff;border:1px solid var(--line);border-radius:16px;padding:14px;
   box-shadow:var(--sh-1)}
-/* Identity row: monogram + name + a quiet role tag. No dark band — the card is the
+/* Identity row: monogram + name + a quiet role tag. No dark band, the card is the
    introduction, so it does not need a header shouting louder than its content. */
 .intro .ihead{display:flex;align-items:center;gap:8px}
 .intro .ajav{
@@ -551,7 +551,7 @@ button{font-family:inherit}
 .chip:hover{border-color:var(--brand);color:var(--brand-ink);background:var(--brand-tint)}
 
 /* ==========================================================================
-   INLINE DRAFT CARD — "Voice Command Recognized"
+   INLINE DRAFT CARD: "Voice Command Recognized"
    The light-red hairline is the whole signal: this is a PROPOSAL, not a payment.
    ========================================================================== */
 .dcard{background:#fff;border:1.5px solid var(--brand-line);border-radius:14px;padding:14px;
@@ -646,7 +646,7 @@ button{font-family:inherit}
 .acard{background:#17171B;border:1px solid #33333C;border-radius:10px;padding:9px 11px}
 .acard .ah{font-size:9.5px;font-weight:800;letter-spacing:.6px;color:var(--brand);margin-bottom:6px}
 .acard pre{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:10.5px;line-height:1.6;color:#C9C9D4;white-space:pre-wrap;word-break:break-word}
-/* JSON syntax highlighting for the raw payload. Tuned for the dark .acard surface —
+/* JSON syntax highlighting for the raw payload. Tuned for the dark .acard surface,
    the original palette (#7c3aed / #0f766e / #b45309) was picked for a white card and
    is unreadable here. */
 .acard .jk{color:#C4B5FD}
@@ -764,13 +764,13 @@ button{font-family:inherit}
 .personalize-btn.active{background:#12301F;border-color:#1F5C3A;color:#7FE0A8}
 
 /* hide the inspector when the customer is looking at the app, or when the
-   technical-panels switch is off — the device then centres itself via its
+   technical-panels switch is off, the device then centres itself via its
    auto inline margins. */
 body.tech-hidden .ins{display:none}
 #studio.appmode .ins{display:none}
 
 /* ==========================================================================
-   scenario rail — backup only
+   scenario rail, backup only
    ========================================================================== */
 .rail{
   background:var(--studio2);border:1px dashed var(--studio-line);border-radius:var(--radius);
@@ -798,7 +798,7 @@ body.tech-hidden .ins{display:none}
 .sbtn.on{background:var(--brand);border-color:var(--brand);color:#fff;box-shadow:0 0 0 3px rgba(236,28,36,.22)}
 
 /* ==========================================================================
-   modal / popup — a DBS verification sheet
+   modal / popup, a DBS verification sheet
    The popup lives inside .device-screen, so it is clipped to the phone's rounded screen and
    can never spill onto the laptop page. It starts below the status bar the way a native iOS
    sheet does, leaving the mock status bar and the dynamic island visible above it.
@@ -814,7 +814,7 @@ body.tech-hidden .ins{display:none}
   max-height:100%;overflow-y:auto;
   box-shadow:var(--sh-3);animation:pop .22s cubic-bezier(.2,1.1,.4,1)}
 @keyframes pop{from{transform:translateY(14px) scale(.97);opacity:0}to{transform:none;opacity:1}}
-/* Header is a DBS-black bar with a clean icon badge — no cartoon illustration. */
+/* Header is a DBS-black bar with a clean icon badge, no cartoon illustration. */
 .mtop{background:var(--dbs-black);padding:15px 16px 16px;text-align:center;position:relative;
   border-bottom:2px solid var(--dbs-red)}
 .mtop .kicker{font-size:9px;font-weight:800;letter-spacing:1px;color:#E7E7EC;
@@ -852,7 +852,7 @@ body.tech-hidden .ins{display:none}
 .fstep i{width:26px;height:4px;border-radius:2px;background:#E4E4EA;display:block}
 .fstep i.on{background:var(--brand)}
 .fstep i.done{background:var(--ok)}
-/* FaceID scan frame — a hairline DBS-red frame with a slow halo, not a glowing blob. */
+/* FaceID scan frame, a hairline DBS-red frame with a slow halo, not a glowing blob. */
 .faceid{
   width:92px;height:92px;border-radius:24px;border:2px solid var(--brand);
   margin:4px auto 14px;display:flex;align-items:center;justify-content:center;

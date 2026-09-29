@@ -1,10 +1,10 @@
-/* 5.5/6 tts.js — the mouth. Loads AFTER live.js (needs API_BASE + guessLang).
+/* 5.5/6 tts.js, the mouth. Loads AFTER live.js (needs API_BASE + guessLang).
  *
  * Speaks the backend's INTERFACE_LINE text by asking our own /tts endpoint, which proxies
  * Cartesia and returns raw mono 16-bit PCM at 24 kHz as it's synthesised. Audio plays
  * through a chunked WebAudio queue so the first syllable reaches the customer within a
- * fraction of a second of the bubble appearing — instead of after the whole sentence has
- * been generated. Any new user input — typing a message or pressing the mic — triggers
+ * fraction of a second of the bubble appearing, instead of after the whole sentence has
+ * been generated. Any new user input (typing a message or pressing the mic) triggers
  * barge-in: stopSpeaking() cuts Auntie off mid-sentence so she never talks over the customer.
  *
  * This file composes no wording of its own: it only voices text the backend already authored.
@@ -18,7 +18,7 @@
  *      following sample by one byte, which sounds like crackling. So we carry a trailing
  *      odd byte forward and decode whole samples only.
  *
- *   2. NEVER START AUDIO FROM A JS CALLBACK — SCHEDULE IT ON THE AUDIO CLOCK.
+ *   2. NEVER START AUDIO FROM A JS CALLBACK: SCHEDULE IT ON THE AUDIO CLOCK.
  *      Waiting for a clip's `onended` before starting the next one means waiting on the
  *      main thread, which is busy drawing bubbles, stage cards and audit rows. That wait
  *      is a gap of a few to tens of milliseconds, and with ~70 chunks per sentence it is
@@ -27,7 +27,7 @@
  */
 // Cartesia sonic-latest always emits mono 16-bit signed little-endian PCM at 24 kHz,
 // matching the format we request in tts.py. The browser needs to know this to build
-// AudioBuffers without first asking the server — keeping it as a constant makes it
+// AudioBuffers without first asking the server, keeping it as a constant makes it
 // impossible for the two sides to drift apart unnoticed.
 const TTS_SAMPLE_RATE = 24000;
 
@@ -40,7 +40,7 @@ const TTS_START_BUFFER_SEC = 0.12;
 const TTS_SCHEDULE_LEAD_SEC = 0.03;
 
 let _ttsCtx = null;
-let _ttsChain = null;   // { sources:Set<AudioBufferSourceNode>, stopRequested:bool } — the stream being spoken
+let _ttsChain = null;   // { sources:Set<AudioBufferSourceNode>, stopRequested:bool }, the stream being spoken
 let _ttsAbort = null;   // AbortController for the in-flight /tts fetch
 let _ttsEnabled = true; // flips to false after a hard failure (e.g. TTS not configured)
 
@@ -62,7 +62,7 @@ function _ttsLang(lang){
   return 'EN';
 }
 
-/* Speak one line. `lang` is optional — when omitted we guess from the text (same heuristic
+/* Speak one line. `lang` is optional; when omitted we guess from the text (same heuristic
    the ears/intent use). Fire-and-forget: we never block the rest of the UI on audio. */
 async function speak(text, lang){
   if(!_ttsEnabled || !text) return;
@@ -88,7 +88,7 @@ async function speak(text, lang){
   }
   _ttsAbort = null;
   if(!res.ok || !res.body){
-    // 503 = not configured on the server — no point retrying every line.
+    // 503 = not configured on the server, no point retrying every line.
     if(res && res.status === 503) _ttsEnabled = false;
     return;
   }
@@ -107,8 +107,8 @@ async function speak(text, lang){
   let carry = null;       // 0/1 leftover byte when a chunk ended in the middle of a sample
 
   // Hand every waiting buffer to Web Audio at an exact time on the AUDIO CLOCK.
-  // Rule 2 in action: because each start time is computed up front — the next buffer
-  // starts exactly where the previous one ends — playback is sample-accurate and there
+  // Rule 2 in action: because each start time is computed up front, the next buffer
+  // starts exactly where the previous one ends, playback is sample-accurate and there
   // is no seam for a JS callback to leave a gap in.
   const schedule = (flushAll) => {
     if(chain.stopRequested || !pending.length) return;
@@ -176,7 +176,7 @@ async function speak(text, lang){
       console.warn('[auntiejoy] tts stream failed:', err.message);
     }
   }
-  schedule(true);   // the sentence has finished arriving — flush whatever is left
+  schedule(true);   // the sentence has finished arriving, flush whatever is left
 
   // Keep the chain reachable until the audio has actually finished, so barge-in can still
   // silence the tail of a sentence that arrived faster than it plays.

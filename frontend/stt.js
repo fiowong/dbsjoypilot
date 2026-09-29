@@ -1,4 +1,4 @@
-/* 5.5/6 stt.js — the ears. Loads AFTER scenarios.js (which defines API_BASE) and BEFORE
+/* 5.5/6 stt.js, the ears. Loads AFTER scenarios.js (which defines API_BASE) and BEFORE
    live.js (which drives it).
 
    Captures Auntie's microphone as 16 kHz mono 16-bit PCM, streams it to the backend over a
@@ -80,7 +80,7 @@ class SttClient {
     this.running = false;
     this.onState('finishing');
     this._stopMic();
-    if (!this.ws) return null;          // never connected — nothing to wait for
+    if (!this.ws) return null;          // never connected, nothing to wait for
     // Send the trailing partial chunk (<200 ms) so the engine hears the full utterance
     // before we tell it the stream is over.
     if (typeof this._flushAudio === 'function') this._flushAudio();
@@ -91,7 +91,7 @@ class SttClient {
     return result;
   }
 
-  /* Abandon the utterance — no transcript wanted. */
+  /* Abandon the utterance, no transcript wanted. */
   cancel() {
     this.running = false;
     this._stopMic();
@@ -139,7 +139,7 @@ class SttClient {
     } else if (m.type === 'interim') {
       if (m.text) this.onInterim(m.text);
     } else if (m.type === 'final') {
-      // confidence is null when the engine reported nothing — pass that through untouched.
+      // confidence is null when the engine reported nothing, pass that through untouched.
       this._fire('final', m);
       this.onFinal({ text: m.text || '', confidence: m.confidence,
                      confidenceSource: m.confidence_source, engine: m.engine });
@@ -169,7 +169,7 @@ class SttClient {
     this.stream = await navigator.mediaDevices.getUserMedia({
       // Echo cancellation + noise suppression are tuned for VoIP (so the other person
       // doesn't hear themselves), not for ASR. They clip soft consonants and fricatives
-      // and noticeably hurt recognition accuracy — especially on quieter / elderly
+      // and noticeably hurt recognition accuracy, especially on quieter / elderly
       // voices. Disable both; we still want mono, and the AudioContext below forces 16 kHz.
       audio: { echoCancellation: false, noiseSuppression: false, channelCount: 1 }
     });
@@ -218,7 +218,7 @@ class SttClient {
       src.connect(this.node); this.node.connect(sink); sink.connect(this.ctx.destination);
       return;
     } catch (e) {
-      /* ScriptProcessor is deprecated but universally available — a fine fallback. */
+      /* ScriptProcessor is deprecated but universally available, a fine fallback. */
       const node = this.ctx.createScriptProcessor(2048, 1, 1);
       node.onaudioprocess = e => {
         const f = e.inputBuffer.getChannelData(0);

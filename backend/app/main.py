@@ -20,7 +20,7 @@ from .scenarios import SCENARIOS, ScenarioResponse, run_scenario
 # 13. FastAPI surface
 # =====================================================================
 app = FastAPI(title="AuntieJoy", version="1.0",
-              description="DBS DCTA Scenario 1 — voice-first conversational payments. "
+              description="DBS DCTA Scenario 1, voice-first conversational payments. "
                           "Four bounded agents, sixteen deterministic controls.")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
@@ -31,7 +31,7 @@ async def health() -> dict:
     reachable = await check_llm_health() if configured else False
     return {
         "status": "ok",
-        # engine reflects ACTUAL reachability, not mere key presence — a key can be set while
+        # engine reflects ACTUAL reachability, not mere key presence; a key can be set while
         # the upstream service is down, and /health must not claim "live" in that case.
         "engine": "live" if reachable else "mock",
         "llm_configured": configured,
@@ -51,10 +51,10 @@ async def health() -> dict:
         "agents": ["GUARDRAILS AGENT", "INTENT CLASSIFIER", "PAYMENT AGENT",
                    "INDEPENDENT VALIDATION AGENT", "PERSONALIZATION AGENT"],
         "stages": len(STAGES),
-        # The MECE failure map is branches A–H. Counted from SCENARIOS so it can never drift
-        # out of sync with the UI rail (which labels the map "A–H / 20 NODES"). The HAPPY
-        # path is recorded under branch "—", so it is excluded from the A–H total.
-        "branches": f"A–H / {sum(1 for v in SCENARIOS.values() if v.get('branch') in 'ABCDEFGH')} scenarios",
+        # The MECE failure map is branches A-H. Counted from SCENARIOS so it can never drift
+        # out of sync with the UI rail (which labels the map "A-H / 20 NODES"). The HAPPY
+        # path is recorded under branch "-", so it is excluded from the A-H total.
+        "branches": f"A-H / {sum(1 for v in SCENARIOS.values() if v.get('branch') in 'ABCDEFGH')} scenarios",
         "disclosure": POLICY["disclosure"],
         "audit_db": Settings.DB_PATH,
     }
@@ -118,14 +118,14 @@ async def session_detail(session_id: str) -> dict:
 
 
 # =====================================================================
-# 14. Ears — streaming speech to text (Tencent Cloud realtime ASR)
+# 14. Ears, streaming speech to text (Tencent Cloud realtime ASR)
 #
 # Protocol (browser -> server):
 #   {"type":"start","language":"en"}   open one ASR session for one utterance
 #   <binary frames>                    16 kHz, 16-bit, mono PCM, ~200 ms per frame
 #   {"type":"end"}                     utterance finished; server replies with the final
 # Server -> browser:
-#   {"type":"ready","live":bool}       on connect — tells the client whether ASR can run
+#   {"type":"ready","live":bool}       on connect, tells the client whether ASR can run
 #   {"type":"started","engine":...}    session open
 #   {"type":"interim","text":...}      partial result
 #   {"type":"final","text":...,"confidence":..|null,"confidence_source":...}
@@ -217,7 +217,7 @@ async def ws_stt(ws: WebSocket) -> None:
 
 
 # =====================================================================
-# 15. Mouth — text to speech (Cartesia Sonic), proxied so the key stays server-side.
+# 15. Mouth, text to speech (Cartesia Sonic), proxied so the key stays server-side.
 #
 # The browser POSTs the INTERFACE_LINE text (and language) here; we stream it from
 # Cartesia and return one WAV. The frontend never sees the Cartesia key.
@@ -231,13 +231,13 @@ class TTSRequest(BaseModel):
 async def tts(req: TTSRequest) -> StreamingResponse:
     """Stream Cartesia audio to the browser as it is synthesised.
 
-    The body is raw mono 16-bit signed little-endian PCM at SAMPLE_RATE Hz — no WAV
-    container — so the first byte the browser receives is the first byte of audio it
+    The body is raw mono 16-bit signed little-endian PCM at SAMPLE_RATE Hz, no WAV
+    container, so the first byte the browser receives is the first byte of audio it
     can play. The matching audio parameters are echoed in response headers so the
     frontend knows what to feed into Web Audio without an out-of-band handshake.
     """
     if not Settings.LIVE_TTS or not Settings.TTS_VOICE_ID:
-        # Same contract as before — the frontend disables its mouth permanently on 503.
+        # Same contract as before, the frontend disables its mouth permanently on 503.
         from fastapi import HTTPException
         raise HTTPException(status_code=503, detail="tts not configured")
 
@@ -246,7 +246,7 @@ async def tts(req: TTSRequest) -> StreamingResponse:
             async for chunk in synthesize_stream(req.text, req.language):
                 yield chunk
         except TTSError as exc:
-            # Once the response body has started, headers are already committed — we can't
+            # Once the response body has started, headers are already committed; we can't
             # flip the status code. The browser logs the broken pipe and falls back; logging
             # the upstream reason here keeps the audit trail honest.
             import logging
@@ -257,7 +257,7 @@ async def tts(req: TTSRequest) -> StreamingResponse:
         _pcm_stream(),
         media_type="application/octet-stream",
         headers={
-            # Tell the browser exactly what format to expect — Cartesia's sonic-latest is
+            # Tell the browser exactly what format to expect, Cartesia's sonic-latest is
             # always mono 16-bit little-endian PCM at the sample rate we asked for.
             "X-Audio-Sample-Rate": str(SAMPLE_RATE),
             "X-Audio-Channels": "1",

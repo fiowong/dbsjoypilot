@@ -3,20 +3,20 @@ from .config import Settings
 from .models import SourceAccount, Payee, Biller, Card, OwnAccount
 
 # =====================================================================
-# 3. Trusted synthetic repositories — §8.3.2 authoritative-data separation
+# 3. Trusted synthetic repositories, §8.3.2 authoritative-data separation
 #    Every number below is synthetic. None of it is real DBS data.
 # =====================================================================
 CUSTOMERS: Dict[str, Dict[str, Any]] = {
     "cust_auntie_001": {
         "customer_id": "cust_auntie_001",
         "display_name": "Tan Mei Ling",
-        "preferred_name": "Mei Ling",    # what the app calls the customer in chat — a trusted
+        "preferred_name": "Mei Ling",    # what the app calls the customer in chat, a trusted
                                           # field from this record, never taken from the chat text
-        "tier": "STANDARD",              # trusted source — never taken from chat (§A.6 C3)
+        "tier": "STANDARD",              # trusted source, never taken from chat (§A.6 C3)
         "language_preference": "ZH",
         "accounts": [
             # Order matters: the FIRST eligible account is the default source when the customer
-            # does not name one, so Savings stays first — that is the account the demo's everyday
+            # does not name one, so Savings stays first; that is the account the demo's everyday
             # transfers come from.
             SourceAccount(account_id="acct_savings_001", display_name="DBS Savings",
                           masked="ending 1234", eligible=True),
@@ -35,7 +35,7 @@ CUSTOMERS: Dict[str, Dict[str, Any]] = {
 
 # Nicknames are seeded here, on the trusted payee record, rather than only in the parsing
 # alias table: they belong to the PERSON, and the resolver reads them from here (see
-# controls.resolve_payee_and_account). "Ah Girl" / "Ah Boy" are deliberately NOT seeded — the
+# controls.resolve_payee_and_account). "Ah Girl" / "Ah Boy" are deliberately NOT seeded, the
 # demo teaches them, so the first run shows the learning and every run after shows the memory.
 SAVED_PAYEES: Dict[str, List[Payee]] = {
     "cust_auntie_001": [
@@ -53,7 +53,7 @@ SAVED_PAYEES: Dict[str, List[Payee]] = {
     ]
 }
 
-# Billers — companies the customer pays a recurring bill to. In real DBS these are picked from
+# Billers, companies the customer pays a recurring bill to. In real DBS these are picked from
 # a biller directory, NOT registered as saved payees, so "Pay my StarHub bill" resolves here
 # rather than against SAVED_PAYEES. The masked field is the bill reference, not a bank account.
 BILLERS: Dict[str, List[Biller]] = {
@@ -63,7 +63,7 @@ BILLERS: Dict[str, List[Biller]] = {
     ]
 }
 
-# Credit cards — the customer settles their own card balance from a source account. The balance
+# Credit cards, the customer settles their own card balance from a source account. The balance
 # is the authoritative amount (PRODUCT_RULE), not a number the customer says alongside it.
 CARDS: Dict[str, List[Card]] = {
     "cust_auntie_001": [
@@ -72,7 +72,7 @@ CARDS: Dict[str, List[Card]] = {
     ]
 }
 
-# Own (internal) accounts the customer can move money to — e.g. their joint account. Distinct
+# Own (internal) accounts the customer can move money to, e.g. their joint account. Distinct
 # from SAVED_PAYEES: the destination is the customer's own account, so the move stays inside
 # their banking relationship (BODY_MOVE, not BODY_TRANSFER).
 OWN_ACCOUNTS: Dict[str, List[OwnAccount]] = {
@@ -84,6 +84,6 @@ OWN_ACCOUNTS: Dict[str, List[OwnAccount]] = {
 
 POLICY = {
     "max_transfer_minor": Settings.DEMO_MAX_TRANSFER_MINOR,
-    "disclosure": "synthetic demonstration limit — not a real DBS limit",
+    "disclosure": "synthetic demonstration limit, not a real DBS limit",
     "high_risk_payee_ids": [],
 }
