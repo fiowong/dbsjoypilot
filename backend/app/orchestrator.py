@@ -427,9 +427,9 @@ async def _run_turn(req: TurnRequest) -> TurnResponse:
     # S$10,000 sekarang" has both shapes in it) and answer SAFETY_INTERVENTION, which used to leave
     # the demo saying the scam line for a turn that was attacking the assistant, with an audit
     # reason that named the wrong thing. Overriding it blindly would be just as wrong the other
-    # way: BLOCK_INJECTION ends "I am still here to help you send money", which is the last thing
-    # to say to somebody a scammer is leaning on. So the two are separated by the same cue the
-    # mock scam rule already uses:
+    # way: BLOCK_INJECTION is a refusal, and a refusal that ends by offering to send the money
+    # anyway reads as an invitation to somebody who has just tried to hijack the assistant. So the
+    # two are separated by the same cue the mock scam rule already uses:
     #   * the turn names an EMERGENCY next to a transfer -> a person is under pressure, the scam
     #     path below keeps it, only the audit records that the turn also carried an injection;
     #   * anything else -> the model over-triggered on urgency, escalate to BLOCK as before.
