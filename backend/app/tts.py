@@ -82,8 +82,13 @@ async def _cartesia_pcm_chunks(text: str, ui_lang: str) -> AsyncIterator[bytes]:
         raise TTSError(
             "TTS is not configured, set CARTESIA_API_KEY (and CARTESIA_VOICE_ID)"
         )
-    if not Settings.TTS_VOICE_ID:
-        raise TTSError("TTS voice not configured, set CARTESIA_VOICE_ID")
+    # The voice follows the language Auntie is answering in, so the same conversation can
+    # switch tongue without her voice staying stuck in the first one. Falls back to the
+    # single shared voice when no per-language id is configured (see Settings.tts_voice_for).
+    voice_id = Settings.tts_voice_for(ui_lang)
+    if not voice_id:
+        raise TTSError("TTS voice not configured, set CARTESIA_VOICE_ID (or one "
+                       "CARTESIA_VOICE_ID_EN / _ZH / _BM per language)")
 
     lang = language_for(ui_lang)
     model = Settings.TTS_MODEL or "sonic-latest"
@@ -104,7 +109,7 @@ async def _cartesia_pcm_chunks(text: str, ui_lang: str) -> AsyncIterator[bytes]:
         await ws.send(json.dumps({
             "model_id": model,
             "transcript": text,
-            "voice": Settings.TTS_VOICE_ID,
+            "voice": voice_id,
             "language": lang,
             "output_format": {
                 "container": "raw",

@@ -47,7 +47,14 @@ async def health() -> dict:
         "asr_reports_confidence": False,   # Tencent realtime ASR has no confidence field
         "tts_configured": Settings.LIVE_TTS,
         "tts_model": Settings.TTS_MODEL or "sonic-latest",
-        "tts_voice_set": bool(Settings.TTS_VOICE_ID),
+        # True when ANY voice id exists; the per-language ones are optional extras, so a
+        # single-voice setup must still report a working mouth.
+        "tts_voice_set": Settings.tts_voice_configured(),
+        "tts_voice_per_language": {
+            "EN": bool(Settings.tts_voice_for("EN")),
+            "ZH": bool(Settings.tts_voice_for("ZH")),
+            "BM": bool(Settings.tts_voice_for("BM")),
+        },
         "agents": ["GUARDRAILS AGENT", "INTENT CLASSIFIER", "PAYMENT AGENT",
                    "INDEPENDENT VALIDATION AGENT", "PERSONALIZATION AGENT"],
         "stages": len(STAGES),
@@ -236,7 +243,9 @@ async def tts(req: TTSRequest) -> StreamingResponse:
     can play. The matching audio parameters are echoed in response headers so the
     frontend knows what to feed into Web Audio without an out-of-band handshake.
     """
-    if not Settings.LIVE_TTS or not Settings.TTS_VOICE_ID:
+    # Gated on the voice for THIS language: a language with no id of its own falls back to
+    # the shared voice, so the mouth only goes quiet when there is no voice at all.
+    if not Settings.LIVE_TTS or not Settings.tts_voice_for(req.language):
         # Same contract as before, the frontend disables its mouth permanently on 503.
         from fastapi import HTTPException
         raise HTTPException(status_code=503, detail="tts not configured")

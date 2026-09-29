@@ -69,7 +69,34 @@ class Settings:
     TTS_API_KEY = os.getenv("CARTESIA_API_KEY", "")
     TTS_MODEL = os.getenv("CARTESIA_MODEL", "sonic-3-2026-01-12")
     TTS_VOICE_ID = os.getenv("CARTESIA_VOICE_ID", "")
+    # One voice per conversation language, so Auntie never reads Mandarin in an English
+    # timbre. Every one of these is OPTIONAL: a language with no voice of its own falls
+    # back to the shared CARTESIA_VOICE_ID, so a single-voice setup keeps working exactly
+    # as it did before and an operator can adopt the feature one language at a time.
+    TTS_VOICE_ID_EN = os.getenv("CARTESIA_VOICE_ID_EN", "")
+    TTS_VOICE_ID_ZH = os.getenv("CARTESIA_VOICE_ID_ZH", "")
+    TTS_VOICE_ID_BM = os.getenv("CARTESIA_VOICE_ID_BM", "")
     LIVE_TTS = bool(TTS_API_KEY)
+
+    @classmethod
+    def tts_voice_for(cls, ui_lang: str) -> str:
+        """The Cartesia voice id to speak `ui_lang` (EN / ZH / BM) in.
+
+        Per-language when one is configured, otherwise the single shared voice. Never
+        raises and never invents an id: an unset language degrades to the shared voice,
+        and "" means genuinely unconfigured, which the caller reports as unavailable
+        rather than silently speaking in the wrong tongue.
+        """
+        per_language = {"EN": cls.TTS_VOICE_ID_EN,
+                        "ZH": cls.TTS_VOICE_ID_ZH,
+                        "BM": cls.TTS_VOICE_ID_BM}
+        return per_language.get((ui_lang or "EN").strip().upper()) or cls.TTS_VOICE_ID
+
+    @classmethod
+    def tts_voice_configured(cls) -> bool:
+        """True when at least one voice id exists, so /health and /tts can gate on it."""
+        return bool(cls.TTS_VOICE_ID or cls.TTS_VOICE_ID_EN
+                    or cls.TTS_VOICE_ID_ZH or cls.TTS_VOICE_ID_BM)
 
 
 def now_iso() -> str:
