@@ -45,6 +45,12 @@ class Session:
         self.pending_validations: List[ValidationResult] = []
         self.pending_schedules: List[Optional[dict]] = []
         self.pending_references: List[Optional[str]] = []
+        # The nickname the customer used for THIS queued payment, one entry per draft in the same
+        # order as pending_drafts. session.nickname_used is a single slot that the first payment
+        # consumes, so without a per-draft list the read-back of the second and later payments
+        # falls back to the payee's own name ("to Mei Tan ending 7788") and loses the "I found
+        # Ah Girl as Mei Tan" attribution the first read-back gave for the very same payment.
+        self.pending_nicknames: List[Optional[str]] = []
         self.draft_index: int = 0
         self.multi_total: int = 0
         # True while a multi-instruction read-back has just ASKED the customer something

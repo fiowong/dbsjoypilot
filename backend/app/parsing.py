@@ -735,6 +735,18 @@ _WEEKDAYS = {
 }
 _WEEKDAY_NAMES = [name for name, _ in sorted(_WEEKDAYS.items(), key=lambda kv: kv[1])]
 
+# A day named only to be REPLACED. "instead of monday make it tuesday" names two weekdays and
+# means the second; "make it tuesday instead of monday" names the same two and means the first.
+# Word order cannot tell those apart, but the cue can: whichever weekday follows the cue is the
+# one being dropped. Trilingual for the same reason the other safeguards are.
+_WEEKDAY_DISCARD_RE = re.compile(
+    r"\b(instead of|instead|rather than|other than|not|no longer|replace|change from|"
+    r"bukan|daripada)\b"
+    r"|不是|改为|不要", re.IGNORECASE)
+# How far past a cue its weekday can sit: "instead of next monday" is 13 characters, so 24 is
+# generous without reaching so far that an unrelated later day is swallowed.
+_WEEKDAY_DISCARD_WINDOW = 24
+
 # Ordinals as actually spoken, "the third of next month", since a date phrase is usually said
 # aloud rather than typed as "3rd". The digit form is handled by the same pattern.
 _ORDINAL_WORDS = {
@@ -886,6 +898,42 @@ def _time_spec_from_text(lowered: str) -> Dict[str, int]:
     return {"hour": hour, "minute": minute}
 
 
+def _weekday_spec(lowered: str) -> Optional[dict]:
+    """The weekday the customer means, or None when they named none.
+
+    One weekday, nothing to choose. With TWO, the one that follows a discard cue is the day
+    being replaced, not the day wanted, and it is dropped:
+
+        "instead of monday make it tuesday"   -> tuesday
+        "make it tuesday instead of monday"   -> tuesday
+
+    Both phrasings name monday first or second and mean tuesday either way, so word order alone
+    cannot answer this, the cue can. Anything the cue does not resolve keeps the day named
+    first, which is exactly what this extractor did before, so no existing behaviour moves.
+    """
+    found = []
+    for name, index in _WEEKDAYS.items():
+        for match in re.finditer(rf"\b{name}\b", lowered):
+            found.append((match.start(), index, name))
+    if not found:
+        return None
+    found.sort()
+
+    discarded = set()
+    if len(found) > 1:
+        for cue in _WEEKDAY_DISCARD_RE.finditer(lowered):
+            limit = cue.end() + _WEEKDAY_DISCARD_WINDOW
+            for start, _index, _name in found:
+                # The FIRST weekday after the cue is the one the cue points at.
+                if cue.end() <= start < limit:
+                    discarded.add(start)
+                    break
+    kept = [entry for entry in found if entry[0] not in discarded]
+    _start, index, name = kept[0] if kept else found[0]
+    return {"kind": "weekday", "weekday": index,
+            "next": bool(re.search(rf"\bnext\s+{name}\b", lowered))}
+
+
 def schedule_spec_from_text(text: str) -> Optional[dict]:
     """The deterministic EXTRACTOR: a spoken future time -> a day/time spec, or None.
 
@@ -943,11 +991,7 @@ def schedule_spec_from_text(text: str) -> Optional[dict]:
     if day is None and _SCHEDULE_IN_A_WEEK_RE.search(lowered):
         day = {"kind": "in_days", "days": 7}
     if day is None:
-        for name, index in _WEEKDAYS.items():
-            if re.search(rf"\b{name}\b", lowered):
-                day = {"kind": "weekday", "weekday": index,
-                       "next": bool(re.search(rf"\bnext\s+{name}\b", lowered))}
-                break
+        day = _weekday_spec(lowered)
     if day is None:
         return None
 

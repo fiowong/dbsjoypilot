@@ -51,9 +51,15 @@ and fill in your own key, see `backend/README.md` for details.
 
 **Frontend** (from `frontend/`, in a separate terminal):
 ```bash
-python3 -m http.server 8098
+python3 serve.py
 ```
-Then open `http://127.0.0.1:8098` in your browser. The frontend looks for the backend on
+Then open `http://127.0.0.1:8098` in your browser.
+
+Use `serve.py`, not `python3 -m http.server`. The built-in server lets the browser keep
+its own copy of `live.js`, `styles.css` and the rest, so an edit you just made stays
+invisible until you hard-reload. `serve.py` answers everything with `Cache-Control:
+no-store`, so the page is always the code on disk. `python3 serve.py 8099` changes the
+port. The frontend looks for the backend on
 **port 8078 of whatever host served the page**: so opening the app from a phone on the same
 Wi-Fi reaches the laptop's backend, not the phone's own localhost.
 

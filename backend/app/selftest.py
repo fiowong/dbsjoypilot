@@ -1,11 +1,45 @@
 import argparse
 import sys
+from datetime import date
 from .config import Settings
+from .parsing import parse_schedule
 from .session import STAGES
 from .scenarios import SCENARIOS, run_scenario
 from .main import app
 from .agents import PersonalizationAgent
 from .models import PersonalizationSignals
+
+# The schedule extractor, unit-tested against a frozen clock the same way the Personalization
+# Agent is. A date is the one field a demo cannot fake, so "which day did she mean" is checked
+# here rather than left to whichever scenario happens to mention a weekday.
+# (text, expected relative phrase) with TODAY frozen to Tuesday 29 September 2026.
+SCHEDULE_TODAY = date(2026, 9, 29)
+SCHEDULE_CASES = [
+    # The parked case: two weekdays, the first is the one being REPLACED.
+    ("instead of monday make it tuesday", "tuesday"),
+    ("make it tuesday instead of monday", "tuesday"),
+    ("rather than wednesday make it thursday", "thursday"),
+    ("next monday instead of friday", "next monday"),
+    # A single weekday is untouched, the extractor must not start second-guessing it.
+    ("send it on monday", "monday"),
+    ("on monday instead", "monday"),
+    # Two weekdays with no cue at all: unchanged, the first one named.
+    ("pay on monday and tuesday", "monday"),
+    ("tomorrow", "tomorrow"),
+]
+
+
+def _test_schedule() -> int:
+    failures = 0
+    for text, expected in SCHEDULE_CASES:
+        result = parse_schedule(text, today=SCHEDULE_TODAY)
+        actual = result["relative"] if result else None
+        ok = actual == expected
+        failures += not ok
+        print(f"{'PASS' if ok else 'FAIL'} schedule  {text!r} -> {actual!r}")
+        if not ok:
+            print(f"        -> expected {expected!r}")
+    return failures
 
 # 14a. Personalization Agent, unit-tested directly against its own documented weight
 # table, the same way you'd test any pure scoring function (§ observed-friction policy).
@@ -115,10 +149,15 @@ async def selftest() -> int:
     print()
     personalization_failures = _test_personalization()
     failures += personalization_failures
+    print()
+    schedule_failures = _test_schedule()
+    failures += schedule_failures
 
-    print(f"\n{len(SCENARIOS) - (failures - personalization_failures)}/{len(SCENARIOS)} scenarios passed.")
+    scenario_failures = failures - personalization_failures - schedule_failures
+    print(f"\n{len(SCENARIOS) - scenario_failures}/{len(SCENARIOS)} scenarios passed.")
     print(f"{len(PERSONALIZATION_CASES) - personalization_failures}/{len(PERSONALIZATION_CASES)} "
           "personalization cases passed.")
+    print(f"{len(SCHEDULE_CASES) - schedule_failures}/{len(SCHEDULE_CASES)} schedule cases passed.")
     print("Ledger invocations across all scenarios: "
           f"{sum(1 for s in ('HAPPY', 'E2', 'F3'))} expected, "
           f"{await _ledger_rows_in(('HAPPY', 'E2', 'F3'))} observed "
