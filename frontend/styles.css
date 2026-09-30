@@ -751,6 +751,11 @@ button{font-family:inherit}
 .techtoggle input::after{content:'';position:absolute;top:2px;left:2px;width:13px;height:13px;border-radius:50%;background:#fff;transition:.16s}
 .techtoggle input:checked{background:var(--brand)}
 .techtoggle input:checked::after{left:15px}
+/* Voice Mode is deliberately INDISTINGUISHABLE from the Technical panels switch. It is a
+   backstage rehearsal control: when it is on, nothing on screen may differ from normal, so
+   the demo shows the system escalating rather than a label announcing it. Do NOT add a
+   checked-state colour, body class, banner or badge here. */
+.voicetoggle input:checked{background:var(--brand)}
 
 /* small ghost buttons in the top bar */
 .ghostbtn{font-size:10.5px;font-weight:700;letter-spacing:.4px;padding:5px 10px;border-radius:999px;

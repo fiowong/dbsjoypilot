@@ -12,6 +12,45 @@ if(techToggle){
   techToggle.onchange = () => document.body.classList.toggle('tech-hidden', !techToggle.checked);
 }
 
+/* ==========================================================================
+   VOICE MODE - a DEMO SWITCH for the "this is not Auntie" escalation
+
+   What it does: when ON, every turn is submitted with a low ASR confidence and an explicit
+   SPEAKER_MISMATCH verdict, which is the audio-risk adapter's signal that the registered
+   customer could NOT be confirmed from the voice.
+
+   How the real decision is made (unchanged - this switch does not weaken anything):
+     stage 1 sees voice_risk=SPEAKER_MISMATCH
+       -> result STEP_UP_REQUIRED, session.step_up_required = True
+       -> VOICE_STEP_UP_REQUIRED audit event at stage 1
+       -> the customer is told identity could not be established from voice alone, and that
+          secondary out-of-band confirmation is required before anything proceeds.
+
+   What it deliberately does NOT do: it never sets the verdict to SYNTHETIC. That is a
+   different, harsher branch (REJECTED, the transcript never reaches the agents), and
+   conflating the two would overstate what the demo is showing. A mismatched but real
+   speaker is exactly the step-up case.
+
+   When OFF the behaviour is byte-for-byte what it was: voice_risk is left null and the
+   backend's own heuristic applies (assume the registered customer).
+
+   DISCREET BY DESIGN: Voice Mode is a backstage rehearsal switch, so turning it on must NOT
+   announce itself anywhere the audience can see. It changes ONLY what the backend is told
+   about the speaker - no banner, no chat line, no state readout, no coloured edge.
+   ========================================================================== */
+const voiceToggle = $('voiceToggle');
+// Read at submit time, not cached, so toggling mid-conversation takes effect on the next turn.
+function voiceModeOn(){
+  return !!(voiceToggle && voiceToggle.checked);
+}
+if(voiceToggle){
+  voiceToggle.onchange = () => {
+    // Intentionally silent: no state(), no sysLine(), no body class, no visual change at all.
+    // Anything that announced the mode would have to be hidden again before a demo, so there
+    // is nothing to hide.
+  };
+}
+
 function buildStatic(){
   chainEl.innerHTML = STAGES.map((s,i)=>
     `<div class="stg" id="stg${i}"><span class="no">${String(i).padStart(2,'0')}</span>`+

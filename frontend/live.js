@@ -340,12 +340,25 @@ async function liveFreeTurn(text, viaVoice, asrConfidence, asrSource){
     // A number alone is not evidence. Where it came from travels with it, so the audit trail
     // never mistakes a stand-in for a measurement the engine actually reported.
     const hasConf = (typeof asrConfidence==='number' && asrConfidence>=0 && asrConfidence<=1);
+    // VOICE MODE (demo switch, top bar). When ON we declare the speaker as unverified:
+    // voice_risk=SPEAKER_MISMATCH makes stage 1 pause for secondary out-of-band confirmation.
+    // The confidence is driven BELOW the 0.60 admission floor too, because that is what a
+    // genuine speaker mismatch looks like on the wire - it is evidence, not a verdict.
+    // When OFF neither field is sent, so the backend behaves exactly as it always did.
+    const vMode = (typeof voiceModeOn === 'function') && voiceModeOn();
     resp = await postJSON('/turn', {
       session_id: FREE_SESSION_ID, text, via_voice: !!viaVoice,
-      asr_confidence: hasConf ? asrConfidence
-                              : (viaVoice ? 0.93 : 0.99),   // stand-in, labelled as such below
-      asr_confidence_source: hasConf ? (asrSource || 'engine_reported')
-                                     : (viaVoice ? 'unreported' : 'typed')
+      asr_confidence: vMode
+        ? 0.41                              // unverified speaker: far below the 0.60 floor
+        : (hasConf ? asrConfidence          // real engine confidence, when the browser gives one
+                   : (viaVoice ? 0.93 : 0.99)),   // stand-in, labelled as such below
+      // Never send a bare number: the source tells the backend whether the value above is
+      // a measurement or just a stand-in, so a placeholder can never trigger a challenge.
+      asr_confidence_source: vMode ? 'engine_reported'
+        : (hasConf ? (asrSource || 'engine_reported')
+                   : (viaVoice ? 'unreported' : 'typed')),
+      // Omitted entirely when Voice Mode is off, so the backend's own heuristic decides.
+      ...(vMode ? { voice_risk: 'SPEAKER_MISMATCH' } : {})
     });
   }catch(err){
     // A timeout and a refusal are different failures and must not be reported as one thing.

@@ -27,6 +27,15 @@
       <span class="bdg mock">MOCK VOICE-RISK · SIMULATED FACEID · SYNTHETIC LEDGER</span>
       <span class="bdg live" id="engine">5 AGENTS · 16-STAGE CHAIN</span>
       <label class="techtoggle"><input type="checkbox" id="techToggle" checked><span>Technical panels</span></label>
+      <!-- DEMO SWITCH - VOICE MODE.
+           Off (default): every turn is treated as Auntie herself, exactly as before.
+           On: the turn is submitted as a voice that is NOT the registered customer, so the
+           audio-risk adapter returns SPEAKER_MISMATCH and the control chain takes the
+           escalation route - secondary out-of-band confirmation before anything can proceed.
+           It changes only the EVIDENCE about who is speaking; no control-chain rule is
+           bypassed or softened, and the ledger still cannot be reached without the step-up. -->
+      <label class="techtoggle voicetoggle" title="Demo: submit the turn as a voice that is not the registered customer">
+        <input type="checkbox" id="voiceToggle"><span>Voice mode</span></label>
       <button class="ghostbtn" id="railToggle" title="Backup: run one of the MECE scenarios">Scenarios</button>
       <button class="ghostbtn" id="restartBtn" title="Back to the DBS app">DBS app</button>
       <button class="personalize-btn" id="personalizeBadge" title="How AuntieJoy is adapting to this conversation">Personalisation: Standard</button>
