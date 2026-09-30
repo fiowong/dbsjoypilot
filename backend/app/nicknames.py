@@ -5,7 +5,7 @@ enforced here rather than trusted to callers:
 
   1. The store holds ONLY a beneficiary_id. Never a display name, a masked ending, an account
      number or a destination token. The payee record always comes from the trusted repository
-     (SAVED_PAYEES), so a stale or hand-edited file cannot introduce a destination the
+     (the trusted repository), so a stale or hand-edited file cannot introduce a destination the
      repository does not already contain, an unknown id simply resolves to nothing.
   2. teach() refuses to bind anything that is not already a saved payee of that customer. Chat
      can express a preference; it can never create a payee or a destination.
@@ -27,7 +27,7 @@ import threading
 from typing import Dict, Optional, Tuple
 
 from .config import Settings
-from .data import SAVED_PAYEES
+from .repository import get_repository
 from .models import Payee
 
 _LOCK = threading.Lock()
@@ -75,14 +75,14 @@ def _write(data: Dict[str, Dict[str, str]]) -> None:
 
 
 def _payee_by_id(customer_id: str, beneficiary_id: str) -> Optional[Payee]:
-    return next((p for p in SAVED_PAYEES.get(customer_id, [])
+    return next((p for p in get_repository().get_saved_payees(customer_id)
                  if p.beneficiary_id == beneficiary_id), None)
 
 
 def seeded_index(customer_id: str) -> Dict[str, Payee]:
     """Nicknames shipped on the trusted payee records."""
     index: Dict[str, Payee] = {}
-    for payee in SAVED_PAYEES.get(customer_id, []):
+    for payee in get_repository().get_saved_payees(customer_id):
         for nickname in payee.nicknames:
             key = nickname.strip().lower()
             if key:

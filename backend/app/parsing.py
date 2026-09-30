@@ -4,7 +4,7 @@ from datetime import date, datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 
 from .config import Settings
-from .data import BILLERS, CARDS, OWN_ACCOUNTS, SAVED_PAYEES
+from .repository import get_repository
 # Imported under a local name so the call site reads as a question about the turn, not as a
 # module reference. nicknames.py reads its file lazily, so importing it here costs no I/O.
 from .nicknames import match_in_text as nickname_match
@@ -507,7 +507,7 @@ def is_known_payee_phrase(phrase: Optional[str], customer_id: Optional[str] = No
         return True
     if customer_id and nickname_match(customer_id, phrase):
         return True
-    for payee in SAVED_PAYEES.get(customer_id or "", []):
+    for payee in get_repository().get_saved_payees(customer_id or ""):
         name = payee.display_name.lower()
         if key == name or key == name.split()[0]:
             return True
@@ -613,8 +613,8 @@ def _billers_for(customer_id: Optional[str]) -> List:
     (a single-customer demo, so flattening is safe and lets the Intent classifier detect a bill
     without knowing the session's customer_id)."""
     if customer_id:
-        return BILLERS.get(customer_id, [])
-    return [b for lst in BILLERS.values() for b in lst]
+        return get_repository().get_billers(customer_id)
+    return get_repository().get_all_billers()
 
 
 def parse_biller_phrase(text: str, customer_id: Optional[str] = None) -> Optional[str]:
@@ -647,14 +647,14 @@ def lookup_biller(customer_id: Optional[str], name: str):
 # ---------------------------------------------------------------------------
 def _cards_for(customer_id: Optional[str]) -> List:
     if customer_id:
-        return CARDS.get(customer_id, [])
-    return [c for lst in CARDS.values() for c in lst]
+        return get_repository().get_cards(customer_id)
+    return get_repository().get_all_cards()
 
 
 def _own_accounts_for(customer_id: Optional[str]) -> List:
     if customer_id:
-        return OWN_ACCOUNTS.get(customer_id, [])
-    return [o for lst in OWN_ACCOUNTS.values() for o in lst]
+        return get_repository().get_own_accounts(customer_id)
+    return get_repository().get_all_own_accounts()
 
 
 def parse_card_phrase(text: str, customer_id: Optional[str] = None) -> Optional[str]:

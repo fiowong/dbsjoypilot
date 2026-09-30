@@ -13,7 +13,7 @@ frontend, the mock agents and the deterministic controls.
 Addressing
 ----------
 Templates use the ``{name}`` placeholder. It is filled from the trusted customer record
-(``data.CUSTOMERS[...]["preferred_name"]``) and never from anything the customer typed
+(``repository.get_customer(...)[...]["preferred_name"]``) and never from anything the customer typed
 (§A.6 C3). If the record has no preferred name the placeholder falls back to "Auntie".
 
 The same ``{name}`` convention is used by the frontend's own chrome strings in
@@ -22,7 +22,7 @@ The same ``{name}`` convention is used by the frontend's own chrome strings in
 from typing import Dict, List, Optional
 
 from .parsing import detect_language, dominant_language
-from .data import CUSTOMERS
+from .repository import get_repository
 from .config import money
 
 FALLBACK_NAME = "Auntie"
@@ -79,14 +79,12 @@ MESSAGES: Dict[str, Dict[str, str]] = {
     "BLOCK_INJECTION": {
         "EN": "I'm sorry, {name}, I can't do that. I can't take on a new role, approve a payment "
               "on my own, or skip any of the bank's safety checks. No payment has been created "
-              "and nothing has been sent. If there's something else you need, tell me the way "
-              "you normally would and I'll help.",
+              "and nothing has been sent.",
         "ZH": "对不起，{name}，这个我做不到。我不能改变自己的角色，不能自己批准付款，也不能跳过银行的任何安全检查。"
-              "目前没有建立任何付款，也没有汇出款项。如果您需要其他帮忙，像平常那样告诉我就好。",
+              "目前没有建立任何付款，也没有汇出款项。",
         "BM": "Maaf {name}, saya tak boleh buat begitu. Saya tak boleh tukar peranan, tak boleh "
               "luluskan pembayaran sendiri, dan tak boleh langkah sebarang pemeriksaan "
-              "keselamatan bank. Tiada pembayaran dicipta dan tiada wang dihantar. Kalau {name} "
-              "perlukan bantuan lain, beritahu saya seperti biasa.",
+              "keselamatan bank. Tiada pembayaran dicipta dan tiada wang dihantar.",
     },
     "PAUSE_SCAM": {
         "EN": "{name}, please stop for a moment. This sounds like it could be a scam, so I will "
@@ -860,7 +858,7 @@ def interface_language(turn: str, detected: Optional[str] = None) -> str:
 
 def customer_name(session) -> str:
     """The trusted preferred name for this session's customer (§A.6 C3)."""
-    record = CUSTOMERS.get(getattr(session, "customer_id", None)) or {}
+    record = get_repository().get_customer(getattr(session, "customer_id", None)) or {}
     return record.get("preferred_name") or FALLBACK_NAME
 
 
@@ -873,7 +871,7 @@ def source_account_phrase(customer_id: Optional[str],
     Returns "" when the account is not on the record, so the read-back omits the clause rather
     than inventing a name.
     """
-    record = CUSTOMERS.get(customer_id) or {}
+    record = get_repository().get_customer(customer_id) or {}
     for account in record.get("accounts", []):
         if account.account_id == source_account_id:
             return f"{account.display_name} {account.masked}".strip()

@@ -56,6 +56,12 @@ class Settings:
     SIGNING_SECRET = os.getenv("AUNTIEJOY_SIGNING_SECRET", "demo-only-not-a-production-hsm")
     PAYLOAD_TTL_SECONDS = 120
     DB_PATH = os.getenv("AUNTIEJOY_DB", "auntiejoy_audit.db")
+    # The trusted-repository database: customers, their accounts, saved payees, billers,
+    # cards and their own accounts. Deliberately a SEPARATE file from the audit log, for the
+    # same reason nicknames.json is: the audit is hash-chained and append-only, while this is
+    # the authoritative master data the resolver reads on every turn. Override in tests so a
+    # run never touches the real file.
+    REPO_DB_PATH = os.getenv("AUNTIEJOY_REPO_DB", "auntiejoy_repo.db")
     # Nicknames the customer taught us ("ah girl" -> a beneficiary_id). Deliberately a SEPARATE
     # file from the audit log: the audit is hash-chained and append-only, while this is mutable
     # customer preference. Override in tests so a run never touches the real file.

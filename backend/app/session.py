@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import Dict, List, Optional
 from .config import Settings
 from .models import SessionState, Draft, Confirmation, ValidationResult, PersonalizationSignals
-from .data import CUSTOMERS
+from .repository import get_repository
 
 # 9. The 16-stage control chain, §8.2
 # =====================================================================
@@ -126,7 +126,7 @@ class Session:
     def to_public(self) -> dict:
         # The preferred name is trusted data from the customer record, never taken from
         # anything the customer typed (§A.6 C3). The app addresses the customer with it.
-        customer = CUSTOMERS.get(self.customer_id) or {}
+        customer = get_repository().get_customer(self.customer_id) or {}
         return {
             "session_id": self.session_id,
             "customer_id": self.customer_id,

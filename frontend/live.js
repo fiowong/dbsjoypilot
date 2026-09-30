@@ -251,34 +251,45 @@ async function liveConfirmOnce(session, lang, my){
   if(my!==RUN) return null;
   syncPersonalization(resp.session);
   const seenStages=new Set();
-  const steps = eventsToSteps(resp.events, seenStages).concat(finalStateSteps(resp.session));
+  // Walk events ourselves (not via eventsToSteps) so the receipt card lands at the exact
+  // spot the backend intends: right AFTER its own payment's "All done..." line, not before
+  // it, and not after whatever the NEXT queued instruction said. For a single payment the
+  // card still appears once, in the same place a customer expects it. For a multi-instruction
+  // turn (payment #1 done, payment #2 still being read back) the card stays beside payment #1
+  // instead of slipping below payment #2.
+  const steps = [];
+  let pendingReceipt = null;
+  for(const ev of resp.events){
+    steps.push(...stepsForEvent(ev, seenStages));
+    if(ev.event_type === 'LEDGER_RECORDED' && !pendingReceipt){
+      const txn = (resp.session.execution && resp.session.execution.transaction_id) || d.draft_id;
+      pendingReceipt = {t:'receipt', lang,
+        o:{
+          stamp: new Date().toLocaleString('en-SG',{day:'2-digit',month:'short',year:'numeric',
+                  hour:'2-digit',minute:'2-digit'}),
+          amount: money(d.amount_minor, d.currency),
+          to:     d.payee_display + (d.payee_masked ? ' · ' + d.payee_masked : ''),
+          // The real source-account name comes from the backend (source_account_display), so
+          // a Current Account transfer is never mislabelled "DBS Savings". Fall back to the
+          // old hard-coded label only if the field is somehow absent.
+          from:   (d.source_account_display ? d.source_account_display + ' · ' : 'DBS Savings · ')
+                  + (d.account_masked || 'ending 1234'),
+          ref:    txn
+        }};
+    } else if(pendingReceipt && ev.event_type === 'INTERFACE_LINE'){
+      // The first INTERFACE_LINE after LEDGER_RECORDED is the backend's own "All done..."
+      // sentence. Drop the receipt right behind it so the two travel as a pair.
+      steps.push(pendingReceipt);
+      pendingReceipt = null;
+    }
+  }
+  // Safety net: a LEDGER_RECORDED with no INTERFACE_LINE following (shouldn't happen on
+  // the live path, where say_line always follows the emit) still needs the card to show
+  // somewhere rather than disappear.
+  if(pendingReceipt) steps.push(pendingReceipt);
+  steps.push(...finalStateSteps(resp.session));
   await play(steps, my);
   if(my!==RUN) return null;
-  // A real executed payment gets the full DBS receipt treatment, so the confirmation reads
-  // as a digibank record rather than as a chat message claiming success. The SPOKEN line is
-  // still the backend's own reviewed INTERFACE_LINE (played above); this card only SHOWS it,
-  // and every value on it comes from the canonical draft and the execution record.
-  //
-  // Keyed off the ledger record THIS confirmation produced rather than off the session's final
-  // state: in a multi-instruction turn the backend has already advanced to the next draft by
-  // the time this response lands, so the state reads CONFIRMATION_READY even though a payment
-  // was just recorded. The event is what actually tells the two apart, and for a single
-  // payment it coincides with state==='EXECUTED' exactly as before.
-  if(resp.events.some(e => e.event_type === 'LEDGER_RECORDED')){
-    const txn = (resp.session.execution && resp.session.execution.transaction_id) || d.draft_id;
-    receiptCard({
-      stamp: new Date().toLocaleString('en-SG',{day:'2-digit',month:'short',year:'numeric',
-              hour:'2-digit',minute:'2-digit'}),
-      amount: money(d.amount_minor, d.currency),
-      to:     d.payee_display + (d.payee_masked ? ' · ' + d.payee_masked : ''),
-      // The real source-account name comes from the backend (source_account_display), so a
-      // Current Account transfer is never mislabelled "DBS Savings". Fall back to the old
-      // hard-coded label only if the field is somehow absent.
-      from:   (d.source_account_display ? d.source_account_display + ' · ' : 'DBS Savings · ')
-              + (d.account_masked || 'ending 1234'),
-      ref:    txn
-    }, lang);
-  }
   return resp.session;
 }
 

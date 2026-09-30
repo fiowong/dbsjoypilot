@@ -6,10 +6,11 @@ import re
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Literal, Optional, Tuple
 from pydantic import BaseModel, Field
-from .config import Settings, now_iso, money
+from .config import Settings, money
 from .models import (Draft, Confirmation, PaymentProposal, ValidationResult, GuardrailResult,
-                      REQUIRED_VALIDATION_FIELDS)
-from .data import CUSTOMERS, SAVED_PAYEES, BILLERS, CARDS, OWN_ACCOUNTS, POLICY
+                      REQUIRED_VALIDATION_FIELDS, SourceAccount)
+from .data import POLICY
+from .repository import get_repository
 from .parsing import PAYEE_ALIASES
 from . import nicknames
 
@@ -54,7 +55,7 @@ def detect_multiple_recipients(text: str, customer_id: str) -> Optional[List[str
     clarification, a different situation. This keeps a request like "pay John" from being misread as
     "pay both Johns".
     """
-    payees = SAVED_PAYEES.get(customer_id, [])
+    payees = get_repository().get_saved_payees(customer_id)
     lowered = text.lower()
     nick_index = nicknames.index(customer_id)
     found: List[str] = []
@@ -81,6 +82,17 @@ def detect_multiple_recipients(text: str, customer_id: str) -> Optional[List[str
     return distinct if len(distinct) >= 2 else None
 
 
+def _eligible_accounts(customer_id: str) -> List[SourceAccount]:
+    """The customer's eligible funding accounts, read from the trusted repository.
+
+    One helper so every transaction shape picks a source account the same way. An unknown
+    customer yields no accounts, which the caller turns into NO_ELIGIBLE_SOURCE_ACCOUNT
+    rather than a KeyError: a missing record must freeze the payment, never crash the turn.
+    """
+    record = get_repository().get_customer(customer_id) or {}
+    return [a for a in record.get("accounts", []) if a.eligible]
+
+
 def resolve_payee_and_account(customer_id: str, proposal: PaymentProposal,
                               payee_phrase: Optional[str]) -> DeterministicResolution:
     """§8.3.2, the LLM proposes a phrase; deterministic code binds the authoritative record."""
@@ -93,7 +105,7 @@ def resolve_payee_and_account(customer_id: str, proposal: PaymentProposal,
     # comes from the proposal (the outstanding bill), and the source account is chosen exactly
     # as for a saved-payee transfer.
     if proposal.transaction_type == "BILL_PAYMENT":
-        billers = BILLERS.get(customer_id, [])
+        billers = get_repository().get_billers(customer_id)
         needle = (payee_phrase or proposal.recipient_phrase or "").lower()
         biller = next((b for b in billers
                        if b.display_name.lower().startswith(needle)
@@ -102,7 +114,7 @@ def resolve_payee_and_account(customer_id: str, proposal: PaymentProposal,
             return DeterministicResolution(outcome="NEEDS_CLARIFICATION",
                                            clarification_field="RECIPIENT",
                                            clarification_key="PAYEE_NOT_FOUND")
-        eligible = [a for a in CUSTOMERS[customer_id]["accounts"] if a.eligible]
+        eligible = _eligible_accounts(customer_id)
         if not eligible:
             return DeterministicResolution(outcome="FREEZE", reason="NO_ELIGIBLE_SOURCE_ACCOUNT",
                                            payee_display=biller.display_name)
@@ -124,7 +136,7 @@ def resolve_payee_and_account(customer_id: str, proposal: PaymentProposal,
     # amount is the card's latest balance (PRODUCT_RULE), a number they happened to say alongside
     # "credit card" is never the amount; that would be a false read-back, exactly as for a bill.
     if proposal.transaction_type == "CREDIT_CARD_PAYMENT":
-        cards = CARDS.get(customer_id, [])
+        cards = get_repository().get_cards(customer_id)
         needle = (payee_phrase or proposal.recipient_phrase or "").lower()
         card = next((c for c in cards
                      if c.display_name.lower().startswith(needle)
@@ -133,7 +145,7 @@ def resolve_payee_and_account(customer_id: str, proposal: PaymentProposal,
             return DeterministicResolution(outcome="NEEDS_CLARIFICATION",
                                            clarification_field="RECIPIENT",
                                            clarification_key="PAYEE_NOT_FOUND")
-        eligible = [a for a in CUSTOMERS[customer_id]["accounts"] if a.eligible]
+        eligible = _eligible_accounts(customer_id)
         if not eligible:
             return DeterministicResolution(outcome="FREEZE", reason="NO_ELIGIBLE_SOURCE_ACCOUNT",
                                            payee_display=card.display_name)
@@ -154,7 +166,7 @@ def resolve_payee_and_account(customer_id: str, proposal: PaymentProposal,
     # An own-account move shifts money between the customer's own accounts (e.g. savings -> joint).
     # The destination is an internal account, so it uses BODY_MOVE, not BODY_TRANSFER.
     if proposal.transaction_type == "OWN_ACCOUNT_TRANSFER":
-        oas = OWN_ACCOUNTS.get(customer_id, [])
+        oas = get_repository().get_own_accounts(customer_id)
         needle = (payee_phrase or proposal.recipient_phrase or "").lower()
         oa = next((o for o in oas
                    if o.display_name.lower().startswith(needle)
@@ -163,7 +175,7 @@ def resolve_payee_and_account(customer_id: str, proposal: PaymentProposal,
             return DeterministicResolution(outcome="NEEDS_CLARIFICATION",
                                            clarification_field="RECIPIENT",
                                            clarification_key="PAYEE_NOT_FOUND")
-        eligible = [a for a in CUSTOMERS[customer_id]["accounts"] if a.eligible]
+        eligible = _eligible_accounts(customer_id)
         if not eligible:
             return DeterministicResolution(outcome="FREEZE", reason="NO_ELIGIBLE_SOURCE_ACCOUNT",
                                            payee_display=oa.display_name)
@@ -181,7 +193,7 @@ def resolve_payee_and_account(customer_id: str, proposal: PaymentProposal,
             account_masked=account.masked,
             source_account_display=account.display_name))
 
-    payees = SAVED_PAYEES.get(customer_id, [])
+    payees = get_repository().get_saved_payees(customer_id)
     needle = (payee_phrase or proposal.recipient_phrase or "").lower()
     matches = [p for p in payees
                if p.display_name.lower().startswith(needle) or needle in p.display_name.lower()]
@@ -216,7 +228,7 @@ def resolve_payee_and_account(customer_id: str, proposal: PaymentProposal,
                                        reason="UNTRUSTED_PAYEE_METADATA_DETECTED",
                                        payee_display=payee.display_name)
 
-    eligible = [a for a in CUSTOMERS[customer_id]["accounts"] if a.eligible]
+    eligible = _eligible_accounts(customer_id)
     if not eligible:
         return DeterministicResolution(outcome="FREEZE", reason="NO_ELIGIBLE_SOURCE_ACCOUNT",
                                        payee_display=payee.display_name)

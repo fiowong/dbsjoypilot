@@ -1,6 +1,7 @@
 import argparse
 import sys
 from datetime import date
+from typing import Tuple
 from .config import Settings
 from .parsing import parse_schedule
 from .session import STAGES
@@ -40,6 +41,84 @@ def _test_schedule() -> int:
         if not ok:
             print(f"        -> expected {expected!r}")
     return failures
+
+
+def _test_repository() -> Tuple[int, int]:
+    """The repository must return exactly what data.py declares, field for field, in order.
+
+    This is the guarantee that let Step 3 swap every caller over: if it passes, reading master
+    data from the database is indistinguishable from reading the dicts in data.py, so the
+    resolver cannot tell the difference.
+
+    It runs against a FRESH scratch database on purpose. Seeding is INSERT OR IGNORE, so the
+    app's own file never updates an existing row; a parity check against that file would fail
+    the moment data.py changed, which would look like a regression in the resolver when it is
+    really just a stale seed. A throwaway file makes this a pure seed -> read round trip.
+    """
+    import os
+    import tempfile
+
+    from . import data
+    from .repository import Repository
+
+    handle, path = tempfile.mkstemp(suffix=".db")
+    os.close(handle)
+    os.unlink(path)
+    checks = []
+    try:
+        repo = Repository(path)
+        for customer_id, expected in data.CUSTOMERS.items():
+            checks.append((f"customer {customer_id}",
+                           repo.get_customer(customer_id) == expected))
+            checks.append((f"saved payees {customer_id}",
+                           repo.get_saved_payees(customer_id)
+                           == data.SAVED_PAYEES.get(customer_id, [])))
+            checks.append((f"billers {customer_id}",
+                           repo.get_billers(customer_id)
+                           == data.BILLERS.get(customer_id, [])))
+            checks.append((f"cards {customer_id}",
+                           repo.get_cards(customer_id)
+                           == data.CARDS.get(customer_id, [])))
+            checks.append((f"own accounts {customer_id}",
+                           repo.get_own_accounts(customer_id)
+                           == data.OWN_ACCOUNTS.get(customer_id, [])))
+
+        first = next(iter(data.CUSTOMERS))
+
+        # Seeding twice must not duplicate, or the resolver would offer the same payee twice.
+        repo.seed()
+        repo.seed()
+        checks.append(("seed is idempotent",
+                       repo.get_saved_payees(first) == data.SAVED_PAYEES.get(first, [])))
+
+        # The two safety-relevant fields: the injection string the Guardrails path depends on,
+        # and the seeded nicknames the resolver matches on ("mum", "mother").
+        alice = [p for p in repo.get_saved_payees(first) if p.display_name == "Alice"]
+        checks.append(("untrusted_note survives the round trip",
+                       bool(alice)
+                       and "IGNORE PREVIOUS INSTRUCTIONS" in (alice[0].untrusted_note or "")))
+        mei = [p for p in repo.get_saved_payees(first) if p.display_name == "Mei Tan"]
+        checks.append(("seeded nicknames survive as a list",
+                       bool(mei) and mei[0].nicknames == ["mother", "mum", "mom"]))
+
+        # An unknown customer must degrade, never raise.
+        checks.append(("unknown customer -> None", repo.get_customer("cust_nope") is None))
+        checks.append(("unknown customer has no payees", repo.get_saved_payees("cust_nope") == []))
+
+        # The dev escape hatch: a forced rebuild must restore everything.
+        repo.reseed()
+        checks.append(("reseed restores every row",
+                       repo.get_saved_payees(first) == data.SAVED_PAYEES.get(first, [])))
+    finally:
+        if os.path.exists(path):
+            os.unlink(path)
+
+    failures = 0
+    for label, ok in checks:
+        failures += not ok
+        print(f"{'PASS' if ok else 'FAIL'} repository  {label}")
+    return failures, len(checks)
+
 
 # 14a. Personalization Agent, unit-tested directly against its own documented weight
 # table, the same way you'd test any pure scoring function (§ observed-friction policy).
@@ -152,12 +231,18 @@ async def selftest() -> int:
     print()
     schedule_failures = _test_schedule()
     failures += schedule_failures
+    print()
+    repository_failures, repository_total = _test_repository()
+    failures += repository_failures
 
-    scenario_failures = failures - personalization_failures - schedule_failures
+    scenario_failures = (failures - personalization_failures
+                         - schedule_failures - repository_failures)
     print(f"\n{len(SCENARIOS) - scenario_failures}/{len(SCENARIOS)} scenarios passed.")
     print(f"{len(PERSONALIZATION_CASES) - personalization_failures}/{len(PERSONALIZATION_CASES)} "
           "personalization cases passed.")
     print(f"{len(SCHEDULE_CASES) - schedule_failures}/{len(SCHEDULE_CASES)} schedule cases passed.")
+    print(f"{repository_total - repository_failures}/{repository_total} "
+          "repository parity checks passed.")
     print("Ledger invocations across all scenarios: "
           f"{sum(1 for s in ('HAPPY', 'E2', 'F3'))} expected, "
           f"{await _ledger_rows_in(('HAPPY', 'E2', 'F3'))} observed "

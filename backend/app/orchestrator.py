@@ -5,11 +5,12 @@ from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Literal, Optional
 from fastapi import HTTPException
 from pydantic import BaseModel, Field
-from .config import Settings, now_iso, money
+from .config import Settings, money
 from .models import (SessionState, Draft, Confirmation, ValidationResult, GuardrailResult,
                       IntentResult, PaymentProposal, FieldCheck, GuardrailDecision, RiskCategory,
                       REQUIRED_VALIDATION_FIELDS)
-from .data import CUSTOMERS, SAVED_PAYEES, POLICY
+from .data import POLICY
+from .repository import get_repository
 from .parsing import (parse_amount, parse_corrected_amount, last_committed_amount,
                        parse_payee_phrase, parse_reference, detect_language, instruction_text,
                        ambiguous_amount_pair, parse_card_phrase, parse_own_account_phrase,
@@ -126,7 +127,7 @@ def _ending(masked: str) -> str:
 
 
 def _payee_by_id(customer_id: str, beneficiary_id: str):
-    return next((p for p in SAVED_PAYEES.get(customer_id, [])
+    return next((p for p in get_repository().get_saved_payees(customer_id)
                  if p.beneficiary_id == beneficiary_id), None)
 
 
@@ -143,7 +144,7 @@ def _payees_named_in(text: str, customer_id: str) -> List:
     question rather than being guessed at.
     """
     lowered = (text or "").lower()
-    payees = SAVED_PAYEES.get(customer_id, [])
+    payees = get_repository().get_saved_payees(customer_id)
 
     def named(phrase: str) -> bool:
         return bool(re.search(rf"\b{re.escape(phrase.lower())}\b", lowered))
@@ -167,7 +168,7 @@ def _saved_payee_options(customer_id: str) -> List[dict]:
     has never heard before.
     """
     return [{"beneficiary_id": p.beneficiary_id, "displayName": p.display_name,
-             "maskedDestination": p.masked} for p in SAVED_PAYEES.get(customer_id, [])]
+             "maskedDestination": p.masked} for p in get_repository().get_saved_payees(customer_id)]
 
 
 async def run_turn(req: TurnRequest) -> TurnResponse:
