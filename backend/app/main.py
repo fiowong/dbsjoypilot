@@ -17,6 +17,21 @@ from .orchestrator import (TurnRequest, TurnResponse, ConfirmRequest, run_turn, 
                             FieldSignalRequest, run_field_signal)
 from .scenarios import SCENARIOS, ScenarioResponse, run_scenario
 
+# ---- logging ----------------------------------------------------------------
+# Uvicorn only wires up its own `uvicorn*` loggers, so every `auntiejoy.*` logger
+# (tts, stt, audit) ends up with no handler at all. Python's built-in "lastResort"
+# handler is WARNING-only, which silently drops everything we emit at INFO - that is
+# why `tts cart: lang=... voice_id=...` never reached the terminal. Attach one console
+# handler to the shared "auntiejoy" parent; child loggers propagate up to it.
+import logging
+
+_auntiejoy_log = logging.getLogger("auntiejoy")
+_auntiejoy_log.setLevel(logging.INFO)
+if not _auntiejoy_log.handlers:
+    _handler = logging.StreamHandler()
+    _handler.setFormatter(logging.Formatter("%(levelname)s: %(name)s: %(message)s"))
+    _auntiejoy_log.addHandler(_handler)
+
 # 13. FastAPI surface
 # =====================================================================
 app = FastAPI(title="AuntieJoy", version="1.0",

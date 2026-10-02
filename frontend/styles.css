@@ -945,22 +945,18 @@ body.tech-hidden .ins{display:none}
   background:rgba(255,255,255,.85);padding:4px 10px;border-radius:20px;display:inline-block;
   max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
-/* ---------- the state animation slot ----------
-   One stage at the top of every card, holding either the still portrait (the default) or one
-   of the conversation-state clips. The still is always painted underneath, so a slow or
-   undecodable clip degrades to the portrait rather than to an empty box. Centred inside .mtop
-   so Auntie is centred on the card, not biased to one side.
-
-   Sizing is iggy's, exactly: 4:3, max-height:190px, width:78%, and `cover`. `cover` matters —
-   the clip then FILLS the rounded stage edge to edge, so the card reads as one rounded
-   picture. (`contain` was tried and REVERTED: it left the clip as a smaller hard rectangle
-   floating inside the pink frame, with visible sharp edges where it met the background —
-   noticeably worse.) The clip's own framing puts Auntie's crown almost flush with its top
-   edge, so on windows tall enough for `max-height` to bind, a plain `cover` would shave a
-   couple of pixels off the TOP. `object-position:center top` on .mmedia moves that shave to
-   the clip's EMPTY bottom instead, so her head is never the thing that gets trimmed. */
-.popStage{position:relative;aspect-ratio:4 / 3;max-height:190px;width:78%;
-  margin:10px auto 0;overflow:hidden;border-radius:15px;align-self:center}
+/* ---------- the state animation slot ---------- */
+.popStage{
+  position:relative;
+  /* aspect-ratio:4 / 3;
+  max-height:190px; */
+  height:180px;
+  width:78%;
+  margin:10px auto 0;
+  overflow:hidden;
+  border-radius:15px;
+  align-self:center
+}
 .popStage .mstill{position:absolute;left:50%;bottom:-13%;transform:translateX(-50%);
   /* height:100% (was 118%): with bottom:-13%, a 118% tall box put the image's top ~5% ABOVE
      the stage, and overflow:hidden on .popStage clipped Auntie's head off the top. 100% keeps

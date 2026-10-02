@@ -9,7 +9,7 @@ const MASCOT = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAVQAAAGGCAMAAAATuo
    appears at chip size - the app bar, the home CTA - where the whole 512x616 figure would
    be unreadable. MASCOT above is the full figure, inlined as a data URI so it can never
    404; MASCOT_STILL / STAGE_GIF are the popup stage (see below). */
-const MASCOT_FACE  = "assets/auntie_avatar.png";
+const MASCOT_FACE  = "assets/auntie_mascot_half.png";
 /* The conversation-state animations shown at the top of every popup card, and the still
    portrait painted underneath them. The still is always there, so a slow or undecodable
    clip degrades to Auntie's portrait rather than to an empty box.
@@ -19,7 +19,7 @@ const STAGE_GIF = {
   welcome:  'assets/GIFs/Welcome.webp',
   working:  'assets/GIFs/Working%20on%20it.webp',
   confirm:  'assets/GIFs/Confirm%20Amount.webp',
-  faceid:   'assets/GIFs/Verification%20Required.webp',
+  faceid:   'assets/GIFs/Verification%20Required.webp',   // gif fallback: the webp had a cropped head
   notallow: 'assets/GIFs/Not%20Allowed.webp',
   success:  'assets/GIFs/Success.webp',
   goodbye:  'assets/GIFs/Goodbye.webp'

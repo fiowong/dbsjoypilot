@@ -267,7 +267,7 @@ function introCard(){
   d.innerHTML=
     `<div class="intro">
        <div class="ihead">
-         <span class="iav"><img src="assets/auntie_avatar.png" alt="Joy"></span>
+         <span class="iav"><img src="assets/auntie_mascot_half.png" alt="Joy"></span>
          <div class="imeta">
            <div class="inm">Joy</div>
            <div class="isub">voice-first payments</div>
@@ -275,14 +275,14 @@ function introCard(){
          <img class="dbslogo" src="assets/dbs-logo-white.png" alt="DBS">
        </div>
        <div class="ibody">
-         <div class="ihi">Welcome back! How can Joy help?</div>
+         <div class="ihi">Good to see you! How can I make your day easier?</div>
          <div class="itxt">Tell me who you'd like to pay and how much.
            You'll review and authorize before any money moves.</div>
          <div class="cmdlabel">SAMPLE VOICE COMMANDS</div>
          <div class="chips">
-           <button class="chip" type="button" data-say="Pay Mei Tan 50 dollars">&ldquo;Pay Mei Tan $50&rdquo;</button>
+           <button class="chip" type="button" data-say="Pay Mei Tan 50 dollars">&ldquo;Pay Mei Tan $50 tomorrow&rdquo;</button>
            <button class="chip" type="button" data-say="Send Ah Boy one fifty">&ldquo;Send Ah Boy one fifty&rdquo;</button>
-           <button class="chip" type="button" data-say="付三十块给Uncle Lim">&ldquo;付 30块 给 Uncle Lim&rdquo;</button>
+           <button class="chip" type="button" data-say="付三十块给Uncle Lim">&ldquo;付30块给Uncle Lim&rdquo;</button>
            <button class="chip" type="button" data-say="Bayar Ibu 20 dollar">&ldquo;Bayar Ibu 20 dollar&rdquo;</button>
          </div>
        </div>
