@@ -474,54 +474,102 @@ button{font-family:inherit}
 .tab{
   flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;
   background:transparent;border:0;padding:6px 0 4px;color:#7a7a86;cursor:pointer;
-  font-family:inherit;font-size:10.5px;font-weight:600;line-height:1.1;transition:.14s;
+  font-family:inherit;font-size:10.5px;font-weight:600;line-height:1.1;
+  /* outline:0 kills the browser's blue focus ring on click. */
+  outline:0;
+  transition:color .14s;
 }
 .tab img{width:24px;height:24px;display:block;opacity:.85}
+/* Active tab = brighter icon + label (no background fill - a pill here made the
+   "Pay & Transfer" label wrap onto two lines and looked bulky). */
 .tab.on{color:#fff}
-.tab.on img{opacity:1;filter:drop-shadow(0 0 4px rgba(255,255,255,.30))}
+.tab.on img{opacity:1;filter:none}
 
-/* section heading (Pay & Transfer). Inset now that .appbody carries no side padding. */
+/* section heading (Pay & Transfer). Inset now that .appbody carries no side padding;
+   a slightly larger top margin so the heading doesn't sit flush against the dark appbar. */
 .appsec{
   font-size:10.5px;font-weight:800;letter-spacing:1px;text-transform:uppercase;
-  color:var(--muted);margin:18px 0 9px;padding:0 14px;
+  color:var(--muted);margin:24px 0 12px;padding:0 14px;
 }
 
-/* ---- Pay & Transfer list, matching iggy / the real digibank ----
-   A single white card holding the rows, hairline dividers between them, and NO drop shadow:
-   the real app's lists sit flat on the grey, and a shadow here made the card float for no
-   reason. Rows are a touch taller than they were (14px/15px) so each one is a real tap
-   target rather than a thin strip. */
-.applist{
-  background:#fff;border:1px solid var(--dbs-line);border-radius:15px;overflow:hidden;
+/* ---- Pay & Transfer (hero + elevated cards + recent payees) ----
+   Joy gets her own featured card, the manual routes are individual rounded cards, the
+   empty space below is a Recent Payees shortcut row, and the safety disclaimer sits at
+   the bottom. (.applist/.approw/.pnote - the old flat list - were removed with the
+   redesign; don't reintroduce them.) */
+
+/* Hero: "Pay with Joy". Light blue so the flagship AI feature reads apart from the
+   utility cards below. */
+.payhero{
+  background:#EAF4FF;
+  border-radius:16px;
   margin:0 14px 10px;
+  padding:16px 14px 14px;
 }
-.approw{
-  width:100%;display:flex;align-items:center;gap:13px;padding:14px 15px;
-  background:#fff;border:0;border-bottom:1px solid var(--dbs-line);
-  cursor:pointer;text-align:left;transition:.13s;
+.payhero-top{display:flex;align-items:center;gap:12px;margin-bottom:14px}
+.payhero-av{
+  width:56px;height:56px;border-radius:50%;
+  background:#fff;padding:3px;flex-shrink:0;
+  box-shadow:0 2px 8px rgba(0,0,0,.10);
 }
-.approw:last-child{border-bottom:0}
-.approw:hover{background:var(--brand-tint)}
-.approw .ri{
-  width:36px;height:36px;border-radius:11px;background:var(--dbs-gray);flex-shrink:0;
-  display:flex;align-items:center;justify-content:center;color:var(--muted);
+.payhero-av img{width:100%;height:100%;border-radius:50%;object-fit:cover;object-position:50% 14%}
+.payhero-meta{min-width:0;flex:1}
+.payhero-t{font-size:15px;font-weight:800;color:#111;letter-spacing:-.2px;line-height:1.25}
+.payhero-tag{
+  display:inline-block;font-size:9px;font-weight:700;
+  color:var(--dbs-red);letter-spacing:.5px;text-transform:uppercase;
+  background:#fff;border:1px solid var(--dbs-red);
+  padding:1px 5px;border-radius:5px;margin-left:5px;vertical-align:2px;
 }
-.approw .ri .ic{width:18px;height:18px}
-.approw .rt{flex:1;min-width:0}
-.approw .rn{font-size:13px;font-weight:700;color:var(--dbs-ink)}
-.approw .rd{font-size:11px;color:var(--muted);margin-top:2px}
-.approw .rc{color:var(--faint);flex-shrink:0}
-.approw .rc .ic{width:16px;height:16px}
-/* The Joy row is the one route that IS built, so it reads as the hero: tinted, red icon. */
-.approw.hero{background:var(--brand-tint)}
-.approw.hero .ri{background:var(--dbs-red);color:#fff}
+.payhero-d{font-size:11.5px;color:#3a3a3a;margin-top:3px;line-height:1.4}
+.payhero-btn{
+  width:100%;background:var(--dbs-red);color:#fff;border:0;
+  border-radius:10px;padding:11px;font-size:13.5px;font-weight:800;
+  cursor:pointer;font-family:inherit;
+}
+.payhero-btn:hover{filter:brightness(1.06)}
 
-/* Reassurance line under the list. This screen can name payees but cannot move money, and
-   saying so is the whole point of the build - so it is stated on the screen, not buried. */
-.pnote{
-  font-size:10.5px;line-height:1.55;color:var(--muted);
-  margin:0 14px;padding:4px 0 10px;text-align:center;
+/* Manual options: individual elevated rounded cards (was a single flat list). */
+.paycards{margin:0 14px 10px;display:flex;flex-direction:column;gap:8px}
+.paycard{
+  display:flex;align-items:center;gap:12px;
+  background:#fff;border:1px solid var(--dbs-line);border-radius:12px;
+  padding:13px 14px;width:100%;text-align:left;cursor:pointer;
+  font-family:inherit;box-shadow:0 1px 3px rgba(0,0,0,.04);
 }
+.paycard-ic{
+  width:36px;height:36px;border-radius:11px;background:var(--dbs-gray);
+  display:flex;align-items:center;justify-content:center;
+  flex-shrink:0;color:#3a3a3a;
+}
+.paycard-ic .ic{width:18px;height:18px}
+.paycard-meta{flex:1;min-width:0}
+.paycard-t{font-size:13px;font-weight:700;color:var(--dbs-ink)}
+.paycard-d{font-size:11px;color:var(--muted);margin-top:2px}
+.paycard-chev{color:var(--faint);flex-shrink:0}
+.paycard-chev .ic{width:16px;height:16px}
+
+/* Recent Payees: 1-tap shortcuts. Initial avatars in the brand tint. */
+.recent{
+  margin:0 14px 10px;
+  background:#fff;border:1px solid var(--dbs-line);border-radius:12px;
+  padding:14px;box-shadow:0 1px 3px rgba(0,0,0,.04);
+}
+.recent-h{font-size:13px;font-weight:800;color:var(--dbs-ink);margin-bottom:12px}
+.recent-row{display:flex;gap:14px;overflow-x:auto;padding-bottom:2px}
+.recent-av{
+  flex:0 0 auto;width:52px;height:52px;border-radius:50%;
+  background:var(--brand-tint);border:1px solid var(--brand-line);
+  display:flex;align-items:center;justify-content:center;
+  cursor:pointer;font-family:inherit;color:var(--brand-ink);
+}
+.recent-av:hover{filter:brightness(.97)}
+.recent-init{font-size:13px;font-weight:800;color:var(--brand-ink)}
+.recent-add{background:#fff;border:1px dashed var(--dbs-line);color:#999}
+.recent-add .ic{width:20px;height:20px}
+
+/* Bottom safety disclaimer (.paynote) was removed on 2 Oct - it duplicated what the
+   Home screen already says and the Pay list now ends with the Recent payees row. */
 
 /* ==========================================================================
    3 · AUNTIEJOY CHAT  (inside the device)

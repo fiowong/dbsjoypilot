@@ -117,41 +117,59 @@ const HOME_HTML = `
       <div class="hero2-link">Notify me</div></div>
   </div>`;
 
-/* Pay & Transfer is a deliberate echo of the real digibank list: icon, name, supporting
-   line, chevron. Icons come from icons.js SVG, not emoji - banking chrome must not depend
-   on the OS emoji font rendering identically on a judge's laptop.
+/* Pay & Transfer: Joy is the hero (her photo, a red "Talk to Joy" button), the manual
+   routes sit underneath as individual elevated cards, Recent payees fills the gap with
+   one-tap shortcuts. The safety disclaimer used to live at the bottom of this list, but
+   it duplicated what the Home screen already says, so it was removed.
+   Icons come from icons.js SVG, not emoji - banking chrome must not depend on the OS emoji
+   font rendering identically on a judge's laptop.
    The payee names are dbs's own registry (data.py): never copy iggy's chip/row strings,
    "Mei Ling" and "Daniel Tan" are not people in this demo. */
 const PAY_HTML = `
-  <div class="appsec" style="margin-top:0">Pay &amp; Transfer</div>
-  <div class="applist">
-    <button class="approw hero" type="button" data-go="joy">
-      <span class="ri">${icon('mic')}</span>
-      <span class="rt"><div class="rn">Ask Joy instead</div>
-        <div class="rd">Say it in English, 中文 or Bahasa Melayu</div></span>
-      <span class="rc">${icon('chevronRight')}</span>
+  <div class="appsec">Pay &amp; Transfer</div>
+
+  <section class="payhero">
+    <div class="payhero-top">
+      <span class="payhero-av"><img src="assets/auntie_mascot_half.png" alt="Joy"></span>
+      <span class="payhero-meta">
+        <div class="payhero-t">Pay with Joy<span class="payhero-tag">Voice Assist</span></div>
+        <div class="payhero-d">Say it in English, 中文 or Bahasa Melayu</div>
+      </span>
+    </div>
+    <button class="payhero-btn" type="button" data-go="joy" data-blank="1">Talk to Joy</button>
+  </section>
+
+  <div class="paycards">
+    <button class="paycard" type="button" data-go="saved">
+      <span class="paycard-ic">${icon('user')}</span>
+      <span class="paycard-meta"><div class="paycard-t">To a saved payee</div>
+        <div class="paycard-d">Mei Tan · John Doe · Alice</div></span>
+      <span class="paycard-chev">${icon('chevronRight')}</span>
     </button>
-    <button class="approw" type="button" data-go="saved">
-      <span class="ri">${icon('user')}</span>
-      <span class="rt"><div class="rn">To a saved payee</div>
-        <div class="rd">Mei Tan · John Doe · Alice</div></span>
-      <span class="rc">${icon('chevronRight')}</span>
+    <button class="paycard" type="button" data-go="new">
+      <span class="paycard-ic">${icon('plus')}</span>
+      <span class="paycard-meta"><div class="paycard-t">To a new payee</div>
+        <div class="paycard-d">Add an account number or PayNow ID</div></span>
+      <span class="paycard-chev">${icon('chevronRight')}</span>
     </button>
-    <button class="approw" type="button" data-go="new">
-      <span class="ri">${icon('plus')}</span>
-      <span class="rt"><div class="rn">To a new payee</div>
-        <div class="rd">Add an account number or PayNow ID</div></span>
-      <span class="rc">${icon('chevronRight')}</span>
-    </button>
-    <button class="approw" type="button" data-go="paynow">
-      <span class="ri">${icon('paynow')}</span>
-      <span class="rt"><div class="rn">PayNow transfer</div>
-        <div class="rd">Mobile number, NRIC or UEN</div></span>
-      <span class="rc">${icon('chevronRight')}</span>
+    <button class="paycard" type="button" data-go="paynow">
+      <span class="paycard-ic">${icon('paynow')}</span>
+      <span class="paycard-meta"><div class="paycard-t">PayNow transfer</div>
+        <div class="paycard-d">Mobile number, NRIC or UEN</div></span>
+      <span class="paycard-chev">${icon('chevronRight')}</span>
     </button>
   </div>
-  <div class="pnote">Nothing is sent from this screen. Joy always shows you the details first,
-    and DBS checks every payment before it goes out.</div>`;
+
+  <section class="recent">
+    <div class="recent-h">Recent payees</div>
+    <div class="recent-row">
+      <button class="recent-av" type="button" data-go="saved" aria-label="Mei Tan"><span class="recent-init">MT</span></button>
+      <button class="recent-av" type="button" data-go="saved" aria-label="John Doe"><span class="recent-init">JD</span></button>
+      <button class="recent-av" type="button" data-go="saved" aria-label="Alice"><span class="recent-init">A</span></button>
+      <button class="recent-av" type="button" data-go="saved" aria-label="John Smith"><span class="recent-init">JS</span></button>
+      <button class="recent-av recent-add" type="button" data-go="new" aria-label="Add a payee">${icon('plus')}</button>
+    </div>
+  </section>`;
 
 /* Which bottom tab reads as active. One helper so the nav and any deep link
    (a quick-action tile, the promo card) all move the highlight the same way. */

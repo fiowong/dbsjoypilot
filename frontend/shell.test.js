@@ -122,17 +122,23 @@ ok('Home is the tab that is highlighted',
 // The bottom nav actually switches screens, and moves its own highlight with it.
 doc.querySelector('#tabnav .tab[data-tab="pay"]').dispatchEvent(new window.MouseEvent('click', { bubbles:true }));
 ok('Pay & Transfer tab opens the Pay & Transfer list',
-   !!$('appBody').querySelector('.applist') && scrOn('appwin'));
+   !!$('appBody').querySelector('.payhero') && scrOn('appwin'));
 ok('and the Pay tab is the one highlighted',
    doc.querySelector('#tabnav .tab.on').dataset.tab === 'pay',
    doc.querySelector('#tabnav .tab.on').dataset.tab);
-ok('the list has all four routes', $('appBody').querySelectorAll('.approw').length === 4,
-   $('appBody').querySelectorAll('.approw').length + ' rows');
-ok('the Joy route is the one marked hero',
-   $('appBody').querySelector('.approw.hero').dataset.go === 'joy',
-   $('appBody').querySelector('.approw.hero').dataset.go);
-ok('the screen says plainly that it cannot move money',
-   /Nothing is sent from this screen/.test($('appBody').querySelector('.pnote').textContent));
+ok('Joy hero card is present (Pay with Joy + Talk to Joy)',
+   !!$('appBody').querySelector('.payhero-btn') &&
+   $('appBody').querySelector('.payhero-btn').dataset.go === 'joy',
+   $('appBody').querySelector('.payhero-btn') ? $('appBody').querySelector('.payhero-btn').dataset.go : 'missing');
+ok('Talk to Joy is a FRESH entry to the chat (data-blank="1") - without it showJoy() renders an empty transcript',
+   $('appBody').querySelector('.payhero-btn').dataset.blank === '1',
+   $('appBody').querySelector('.payhero-btn').dataset.blank || 'no data-blank');
+ok('the three manual options are elevated cards',
+   $('appBody').querySelectorAll('.paycard').length === 3,
+   $('appBody').querySelectorAll('.paycard').length + ' cards');
+ok('the Recent Payees section lists the four saved payees',
+   $('appBody').querySelectorAll('.recent-av:not(.recent-add)').length === 4,
+   $('appBody').querySelectorAll('.recent-av').length + ' avatars');
 ok('no OS emoji in the banking chrome', !/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u.test($('appBody').textContent));
 doc.querySelector('#tabnav .tab[data-tab="home"]').dispatchEvent(new window.MouseEvent('click', { bubbles:true }));
 ok('Home tab returns to the dashboard', !!$('appBody').querySelector('.joy-cta'));

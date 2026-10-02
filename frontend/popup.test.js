@@ -1,6 +1,7 @@
 /* Headless check of the Joy DBS popup layer: where it lives in the DOM, the
    state-animation it picks per card type, that it can never become a dead end, and that
-   every animation actually exists on disk at one shared canvas size.
+   every animation actually exists on disk and parses to a sane pixel size (the stage is
+   CSS-sized, so the clips no longer have to share one canvas).
    Run:  NODE_PATH=<workspace>/node_modules node popup.test.js
    Adapted from iggy's popup.test.js, but rewritten for dbs's actual DOM:
      - dbs keeps #modal as a SIBLING of the three .scr screens (NOT inside #scrJoy), so the
@@ -124,8 +125,12 @@ for (const k of gifNames) {
   const buf = fs.readFileSync(p);
   let w = 0, h = 0;
   const sig = buf.slice(0, 6).toString();
+  // The stage is CSS-sized (aspect-ratio:4/3 + object-fit:cover), so the source art does
+  // NOT all have to share one canvas: five clips are still the legacy 260x195, while
+  // confirm + faceid were re-exported at 800x800 because the small webp cropped the head.
+  // What actually matters is that the file parses and is a sane pixel size.
+  const sane = w => w >= 100 && w <= 2000;
   if (sig.startsWith('RIFF') && buf.slice(8, 12).toString() === 'WEBP') {
-    // WebP: the standard 260x195 stage size; every webp must match it.
     if (buf.slice(12, 16).toString() === 'VP8X') {
       w = 1 + (buf[24] | (buf[25] << 8) | (buf[26] << 16));
       h = 1 + (buf[27] | (buf[28] << 8) | (buf[29] << 16));
@@ -133,16 +138,13 @@ for (const k of gifNames) {
       w = (buf[26] | (buf[27] << 8)) & 0x3fff;
       h = (buf[28] | (buf[29] << 8)) & 0x3fff;
     }
-    if (w === 260 && h === 195) sized++; else { sizedOk = false; }
-    ok('animation ' + k + ' (webp) is 260x195', w === 260 && h === 195, w + 'x' + h);
+    if (sane(w) && sane(h)) sized++; else sizedOk = false;
+    ok('animation ' + k + ' (webp) parses at ' + w + 'x' + h, sane(w) && sane(h), w + 'x' + h);
   } else if (sig === 'GIF87a' || sig === 'GIF89a') {
-    // GIF fallback: faceid's webp had a cropped head, so a full-face gif is used instead.
-    // The popup CSS uses aspect-ratio:4/3 + object-fit:cover, so any reasonable gif size
-    // renders correctly. We only assert it parsed and has positive dimensions.
     w = buf[6] | (buf[7] << 8);
     h = buf[8] | (buf[9] << 8);
-    sized++;
-    ok('animation ' + k + ' (gif fallback) has parseable dimensions', w > 0 && h > 0, w + 'x' + h);
+    if (sane(w) && sane(h)) sized++; else sizedOk = false;
+    ok('animation ' + k + ' (gif) parses at ' + w + 'x' + h, sane(w) && sane(h), w + 'x' + h);
   } else {
     sizedOk = false;
     ok('animation ' + k + ' has a recognised image signature', false, sig);

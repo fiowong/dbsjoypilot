@@ -19,7 +19,7 @@ const STAGE_GIF = {
   welcome:  'assets/GIFs/Welcome.webp',
   working:  'assets/GIFs/Working%20on%20it.webp',
   confirm:  'assets/GIFs/Confirm%20Amount.webp',
-  faceid:   'assets/GIFs/Verification%20Required.webp',   // gif fallback: the webp had a cropped head
+  faceid:   'assets/GIFs/Verification%20Required.webp',   // re-exported 800x800: the 260x195 webp cropped the head
   notallow: 'assets/GIFs/Not%20Allowed.webp',
   success:  'assets/GIFs/Success.webp',
   goodbye:  'assets/GIFs/Goodbye.webp'
