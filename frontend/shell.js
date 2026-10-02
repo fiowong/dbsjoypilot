@@ -17,7 +17,7 @@ const SCREENS = ['scrLogin','appwin','scrJoy'];
 function showScreen(id){
   SCREENS.forEach(s=>{ const el = $(s); if(el) el.classList.toggle('on', s===id); });
   // Every screen header is now dark (login black, digibank red, Joy near-black), so the
-  // mock status bar stays its default WHITE ink on every screen — no light-bar flip needed.
+  // mock status bar stays its default WHITE ink on every screen, no light-bar flip needed.
   if(deviceScreenEl) deviceScreenEl.classList.remove('light-bar');
 }
 
@@ -260,7 +260,7 @@ async function showForgotNotice(){
   });
 }
 
-/* "GET STARTED" — opening a new account is not something this prototype can do. */
+/* "GET STARTED", opening a new account is not something this prototype can do. */
 async function showSignupNotice(){
   await popup({
     kicker:'PROTOTYPE SCOPE',
@@ -293,7 +293,7 @@ function introCard(){
          <img class="dbslogo" src="assets/dbs-logo-white.png" alt="DBS">
        </div>
        <div class="ibody">
-         <div class="ihi">Good to see you! How can I make your day easier?</div>
+         <div class="ihi">Welcome back! How can Joy help?</div>
          <div class="itxt">Tell me who you'd like to pay and how much.
            You'll review and authorize before any money moves.</div>
          <div class="cmdlabel">SAMPLE VOICE COMMANDS</div>
@@ -352,46 +352,21 @@ function showJoy(blank){
 }
 
 /* ---------- shell wiring ---------- */
-/* The launchpad is the real digibank first page: six tiles, and the credential form is one
-   tap deeper behind the "Log in" tile. So #lgBtn opens the form rather than logging in;
-   #lgSubmit is what actually enters digibank. openLoginForm/closeLoginForm hide the hero
-   photo + tile grid too, so the form is the only thing on screen while it is open; the
-   launchpad returns when the customer taps the form's back arrow. */
-const lgFormEl   = $('lgForm');
-const lgWrapEl   = document.querySelector('#scrLogin .lgwrap');
-const lgHeroEl   = lgWrapEl && lgWrapEl.querySelector('.lghero');
-const lgMenuEl   = lgWrapEl && lgWrapEl.querySelector('.lgmenu');
+/* The User ID / PIN form IS the login screen. There is no launchpad behind it any more
+   (the hero photo and the six tiles were removed on 2 Oct), so the form is simply always
+   open on this screen and never has to be shown or hidden. #lgSubmit is what enters
+   digibank; a logout comes back here. */
+const lgFormEl = $('lgForm');
 function openLoginForm(){
-  if(!lgFormEl || !lgWrapEl) { showHome(); return; }
-  if(lgHeroEl) lgHeroEl.style.display = 'none';
-  if(lgMenuEl) lgMenuEl.style.display = 'none';
+  if(!lgFormEl) { showHome(); return; }
   lgFormEl.hidden = false;
   const u = $('lgUser'); if(u) u.focus();
 }
-function closeLoginForm(){
-  if(!lgFormEl || !lgWrapEl) return;
-  lgFormEl.hidden = true;
-  if(lgHeroEl) lgHeroEl.style.display = '';
-  if(lgMenuEl) lgMenuEl.style.display = '';
-}
-/* Go straight to the User ID / PIN form: used at boot and after a logout, so a signed-out
-   customer always lands on the form (matching iggy), not on the launchpad tile grid. */
+/* Used at boot and after a logout, so a signed-out customer always lands on the form. */
 function gotoLoginForm(){ showLogin(); openLoginForm(); }
-
-const lgBtn = $('lgBtn');
-if(lgBtn) lgBtn.addEventListener('click', ev=>{ ev.preventDefault(); openLoginForm(); });
 
 const lgSubmit = $('lgSubmit');
 if(lgSubmit) lgSubmit.addEventListener('click', ev=>{ ev.preventDefault(); showHome(); });
-
-const lgFormBack = $('lgFormBack');
-if(lgFormBack) lgFormBack.addEventListener('click', ev=>{ ev.preventDefault(); closeLoginForm(); });
-
-/* Every other launchpad tile is a real digibank entry point that this prototype does not
-   implement. Same honesty rule as the rest of the build: say so, don't leave a dead control. */
-document.querySelectorAll('.lgmenu-tile[data-go="alt"]').forEach(b=>{
-  b.addEventListener('click', ev=>{ ev.preventDefault(); showAltLoginNotice(); });
-});
 
 const lgFace = $('lgFace');
 if(lgFace) lgFace.addEventListener('click', ev=>{ ev.preventDefault(); showAltLoginNotice(); });
@@ -409,7 +384,7 @@ if(lgUserEl && lgUserOk){
   markValid();
 }
 
-/* "Forgot User ID or PIN?" — the two links now read like the real digibank form. */
+/* "Forgot User ID or PIN?", the two links now read like the real digibank form. */
 ['lgForgotUser','lgForgotPin'].forEach(id=>{
   const el = $(id);
   if(el) el.addEventListener('click', ev=>{ ev.preventDefault(); showForgotNotice(); });
@@ -454,5 +429,5 @@ if(railToggle && railEl) railToggle.addEventListener('click', ev=>{
 
 /* Boot: open straight on the User ID / PIN form, matching iggy. The launchpad (Jewel/Changi
    hero + 6 tiles) is still in the DOM and reachable via the form's back arrow, but the form
-   is the default — same one-tap path a real digibank customer takes. */
+   is the default, same one-tap path a real digibank customer takes. */
 gotoLoginForm();

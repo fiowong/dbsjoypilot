@@ -100,7 +100,7 @@ const SNAP = `(() => {
     appbar:b('#appwin .appbar'), appbody:b('.appbody'),
     abar:b('#scrJoy .abar'), chat:b('#chat'), langtog:b('.langtog'), cinput:b('.cinput'),
     loginBtn:b('#lgSubmit'), enableBtn:b('.enable'),
-    lghero:b('.lghero'), lgmenu:b('.lgmenu'), lgform:b('.lgform'), lgformHead:b('.lgform-head')
+    lgform:b('.lgform'), lgformHead:b('.lgform-head')
   });
 })()`;
 
@@ -132,16 +132,13 @@ const SNAP = `(() => {
     let s = await snap();
     console.log('chrome              : ' + CHROME);
     console.log('viewport            : ' + s.viewport.w + ' x ' + s.viewport.h);
-    console.log('\n--- 1. LOGIN LAUNCHPAD (in the device) ---');
-    // The launchpad is the real digibank first page: hero photo fading to black, six tiles,
-    // and the credential form hidden one tap deeper.
-    ok('credential form is hidden until the Log in tile is tapped', s.lgform.h === 0,
+    console.log('\n--- 1. LOGIN FORM (in the device) ---');
+    // The User ID / PIN form IS the login screen (no launchpad since 2 Oct), so it should be
+    // visible immediately at boot and fill the screen.
+    ok('credential form is visible at boot (no launchpad behind it)', s.lgform.h > 0,
        s.lgform.h + 'px tall');
-    ok('hero photo fills the screen width', Math.abs(s.lghero.w - s.screen.w) < 2,
-       s.lghero.w + ' vs screen ' + s.screen.w);
-    ok('six-tile menu sits inside the screen (no clipping)',
-       s.lgmenu.h > 0 && s.lgmenu.top >= s.screen.top - 1,
-       'menu top ' + s.lgmenu.top + ' vs screen top ' + s.screen.top);
+    ok('login form fills the screen width', Math.abs(s.lgform.w - s.screen.w) < 2,
+       s.lgform.w + ' vs screen ' + s.screen.w);
     console.log('  device            : ' + s.device.w + ' x ' + s.device.h + '  ratio ' + (s.device.h / s.device.w).toFixed(3));
     ok('device keeps phone proportions (ratio > 1.95)', (s.device.h / s.device.w) > 1.95,
        (s.device.h / s.device.w).toFixed(3));
@@ -154,10 +151,8 @@ const SNAP = `(() => {
        'island cx ' + (s.island.left + s.island.w / 2).toFixed(1) + ' vs screen cx ' + (s.screen.left + s.screen.w / 2).toFixed(1));
     ok('island does not overlap the status-bar time', s.gapTimeToIsland > 0, s.gapTimeToIsland + 'px');
     ok('island does not overlap the status-bar icons', s.gapIslandToSig > 0, s.gapIslandToSig + 'px');
-    // ---------- LOG IN FORM (one tap deeper) ----------
-    await click('#lgBtn'); await sleep(400);
-    s = await snap();
-    console.log('\n--- 1b. LOG IN FORM (one tap deeper) ---');
+    // ---------- LOG IN FORM contents (already on screen at boot) ----------
+    console.log('\n--- 1b. LOG IN FORM contents ---');
     const L = s.loginLogo;
     if (!L) throw new Error('login logo not found, #scrLogin .lgform-head img.dbslogo');
     console.log('  login logo        : ' + L.w + ' x ' + L.h + '  rendered ratio ' + L.ratio
@@ -165,7 +160,7 @@ const SNAP = `(() => {
     const drift = Math.abs(L.ratio - 1280 / 382) / (1280 / 382);
     ok('logo aspect ratio preserved (not stretched)', drift < 0.02, 'drift ' + (drift * 100).toFixed(2) + '%');
     // The form's own 22px padding is the content edge the logo should sit on, left-aligned
-    // the way the real digibank form is — never centred.
+    // the way the real digibank form is, never centred.
     const formPad = L.left - s.lgform.left;
     const centredLeft = s.lgform.left + (s.lgform.w - L.w) / 2;
     ok('logo is flush to the form content edge (left-aligned, not centred)',

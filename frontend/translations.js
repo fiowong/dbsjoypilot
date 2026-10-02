@@ -159,9 +159,9 @@ const T = {
       // screen. Like every other piece of chrome it is per-language; the language comes from the
       // mic's language pill, because nothing has been said yet and there is no detected language.
       welcome:{ kicker:'JOY · DBS', title:'Hello! I’m Joy',
-        body:'Tell me <b>who</b> you’d like to pay and <b>how much</b>, in English, 华语 or Bahasa Melayu.',
+        body:'Tell me <b>who</b> you’d like to pay and <b>how much</b>, in English, 中文 or Bahasa Melayu.',
         start:'Start',
-        note:'Nothing is sent until you approve it — and DBS checks every payment first.' }
+        note:'Nothing is sent until you approve it, and DBS checks every payment first.' }
     },
     // Plainer, shorter wording used once a conversation has shown real difficulty
     // (see PERSONALIZATION below), same information, fewer words per sentence.
@@ -214,7 +214,7 @@ const T = {
         hide:'隐藏',
         note:'画面显示期间，还没有汇出任何款项。' },
       welcome:{ kicker:'JOY · DBS', title:'你好，我是 Joy',
-        body:'告诉我您要付给<b>谁</b>、付<b>多少</b>。可以用 English、华语或 Bahasa Melayu。',
+        body:'告诉我您要付给<b>谁</b>、付<b>多少</b>。可以用 English、中文或 Bahasa Melayu。',
         start:'开始',
         note:'在您批准之前不会汇出任何款项——每一笔付款都会先由 DBS 检查。' }
     },
@@ -268,9 +268,9 @@ const T = {
         hide:'Sembunyi',
         note:'Tiada apa-apa dihantar selagi paparan ini ada di skrin.' },
       welcome:{ kicker:'JOY · DBS', title:'Helo! Saya Joy',
-        body:'Beritahu saya <b>kepada siapa</b> anda mahu bayar dan <b>berapa banyak</b>, dalam English, 华语 atau Bahasa Melayu.',
+        body:'Beritahu saya <b>kepada siapa</b> anda mahu bayar dan <b>berapa banyak</b>, dalam English, 中文 atau Bahasa Melayu.',
         start:'Mula',
-        note:'Tiada apa-apa dihantar sehingga anda meluluskannya — dan DBS menyemak setiap pembayaran dahulu.' }
+        note:'Tiada apa-apa dihantar sehingga anda meluluskannya, dan DBS menyemak setiap pembayaran dahulu.' }
     },
     simple:{ intro:'Baik. Kita buat perlahan-lahan, satu demi satu.',
       recipient:n=>`Hantar kepada: ${n}. Betul?`,

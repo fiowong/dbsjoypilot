@@ -33,7 +33,7 @@ const _BM_VOCAB = new Set(['hantar','kepada','dolar','duit','saya','tidak','bole
 
 /* The language the customer used MOST, for a turn that mixes several. EN wins a tie.
    A deliberate mirror of the backend's dominant_language()/language_word_counts() in
-   parsing.py — the processing card is drawn BEFORE the reply arrives, so this is what makes
+   parsing.py, the processing card is drawn BEFORE the reply arrives, so this is what makes
    the card and the answer that follows land in the same tongue. guessLang() above cannot do
    this job: it returns ZH the moment it sees ANY Chinese character, so
    "帮我 bayar bil Starhub from my current account, 然后 transfer…" got a Chinese processing
@@ -51,7 +51,7 @@ function dominantLang(text){
   }
   let best = Math.max(counts.EN, counts.ZH, counts.BM);
   if (best === 0) return 'EN';
-  // EN first, so it takes a tie as the neutral tongue — exactly like the backend.
+  // EN first, so it takes a tie as the neutral tongue, exactly like the backend.
   for (const lang of ['EN','ZH','BM']) if (counts[lang] === best) return lang;
   return 'EN';
 }
@@ -360,7 +360,7 @@ async function liveConfirmOnce(session, lang, my, skipFaceId){
 // misheard amount could never trigger a "please repeat that" challenge.
 // asrSource travels with it so the backend can always tell a measurement from a stand-in.
 
-/* Take the working card down — but ONLY if it is still the working card on screen. If the
+/* Take the working card down, but ONLY if it is still the working card on screen. If the
    customer already hid it, or the review card has taken over, it must not be torn down from
    under them. Used on the paths that raise no card of their own; a path that DOES raise one
    simply lets popup() overwrite #mcard, which is an instant swap with no blank in between. */
@@ -412,7 +412,7 @@ async function liveFreeTurn(text, viaVoice, asrConfidence, asrSource){
   }
   // A turn is in flight and there is nothing to look at yet: put the working card up. It closes
   // itself on a timer AND is dismissable, so a slow request can never become a dead end, and the
-  // turn resolves it either way. Only raised when no other card is already up — a field review or
+  // turn resolves it either way. Only raised when no other card is already up, a field review or
   // a Face ID prompt must never be covered by it. Nothing has been sent at this point; the note
   // on the card says so, because a thinking pause otherwise looks like a silent transaction.
   let workPopup = null;
@@ -476,8 +476,8 @@ async function liveFreeTurn(text, viaVoice, asrConfidence, asrSource){
     BUSY=false; return;
   }
   if(my!==RUN) return;
-  // The answer is in, but the working card is DELIBERATELY STILL UP. What comes next — play()
-  // animating the control chain, then the field review / Face ID card — takes a couple of
+  // The answer is in, but the working card is DELIBERATELY STILL UP. What comes next, play()
+  // animating the control chain, then the field review / Face ID card, takes a couple of
   // seconds, and taking the card down first left the customer staring at a finished transcript
   // with nothing happening: the dead gap. So the card now stays until either the next popup
   // takes it over (popup() overwrites #mcard, so that swap is instant, with no close-then-

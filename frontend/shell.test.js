@@ -84,23 +84,15 @@ ok('all three screens live inside the device screen',
 ok('inspector sits outside the device', !$('device').contains($('agents')));
 ok('only one screen is active at a time', ['scrLogin','appwin','scrJoy'].filter(scrOn).length === 1);
 
-console.log('\n=== 3. LOGIN FORM (boot) -> LAUNCHPAD (back arrow) -> DBS HOME -> ASK JOY TO PAY ===');
-// Matching iggy: the User ID / PIN form is the DEFAULT, the first thing they see. The launchpad
-// (Jewel/Changi hero + 6 tiles) is still in the DOM, behind it, and is reached by the form's
-// back arrow. So the boot path goes straight to the form, not to the tile grid.
+console.log('\n=== 3. LOGIN FORM (boot) -> DBS HOME -> ASK JOY TO PAY ===');
+// The User ID / PIN form IS the login screen. The launchpad (hero photo + six tiles) and
+// the form's back arrow were deleted on 2 Oct, so boot lands on the form and LOGIN goes
+// straight into digibank - there is no tile grid round trip any more.
 ok('login form is OPEN at boot (matching iggy, form-first)',
    $('lgForm').hidden === false && scrOn('scrLogin'));
-ok('launchpad hero is hidden behind the form at boot',
-   doc.querySelector('#scrLogin .lghero').style.display === 'none');
-ok('launchpad tiles are hidden behind the form at boot',
-   doc.querySelector('#scrLogin .lgmenu').style.display === 'none');
-$('lgFormBack').dispatchEvent(new window.MouseEvent('click', { bubbles:true }));
-ok('form back returns to the six-tile launchpad',
-   $('lgForm').hidden === true && scrOn('scrLogin') &&
-   doc.querySelector('#scrLogin .lgmenu').style.display !== 'none' &&
-   doc.querySelector('#scrLogin .lghero').style.display !== 'none');
-$('lgBtn').dispatchEvent(new window.MouseEvent('click', { bubbles:true }));
-ok('Log in tile reopens the credential form', $('lgForm').hidden === false && scrOn('scrLogin'));
+ok('no launchpad remains behind the form (hero + tiles deleted 2 Oct)',
+   !doc.querySelector('#scrLogin .lghero') && !doc.querySelector('#scrLogin .lgmenu'));
+ok('no back arrow on the form (nothing to go back to)', !$('lgFormBack'));
 $('lgSubmit').dispatchEvent(new window.MouseEvent('click', { bubbles:true }));
 ok('login dismissed, app window active', !scrOn('scrLogin') && scrOn('appwin'));
 // Home is the real-digibank dashboard: red cashback hero, 5 quick-action tiles, the ONE
@@ -152,7 +144,7 @@ ok('intro offers suggestion chips', chat.querySelectorAll('.chip').length >= 3,
    chat.querySelectorAll('.chip').length + ' chips');
 ok('transcript contains ONLY the intro card', chat.children.length === 1, chat.children.length + ' children');
 // The intro card is drawn BEFORE the first turn, so no trusted name exists yet. It must NOT
-// invent one — addressing the customer as "Auntie" would read like the assistant talking to
+// invent one, addressing the customer as "Auntie" would read like the assistant talking to
 // itself. The body states the safety contract plainly instead, and carries no name slot.
 const greet = () => (chat.querySelector('.intro .itxt')?.textContent || '').replace(/\s+/g, ' ').trim();
 ok('intro states the review-and-authorize safety contract',
@@ -315,7 +307,7 @@ ok('scanned a meaningful number of classes', markupClasses.size > 60,
 
 console.log('\n=== 9c. VOICE MODE IS DISCREET (nothing announces it) ===');
 // Voice Mode is a backstage rehearsal switch for demoing the unverified-speaker escalation.
-// If it announced itself, it would have to be hidden again before a demo — so it must be
+// If it announced itself, it would have to be hidden again before a demo, so it must be
 // invisible. This test exists because discreetness is very easy to regress by accident.
 (function(){
   const ui   = fs.readFileSync(path.join(dir,'ui.js'),'utf8');
@@ -347,7 +339,7 @@ console.log('\n=== 9c. VOICE MODE IS DISCREET (nothing announces it) ===');
   ok('toggling does not call state() or sysLine()', (function(){
     const i = ui.indexOf('voiceToggle.onchange');
     if (i < 0) return false;
-    // Read to the end of the handler by brace balance, not by the first '}' — a naive
+    // Read to the end of the handler by brace balance, not by the first '}', a naive
     // slice lands inside the comment and would pass or fail for the wrong reason.
     const open = ui.indexOf('{', ui.indexOf('=>', i));
     let depth = 0, end = open;

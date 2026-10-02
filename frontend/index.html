@@ -103,54 +103,13 @@
         </div>
         <div class="island"></div>
 
-        <!-- 1 · DBS digibank LOG IN (image top-half + 6-tile menu)
-             Mirrors the real digibank first page: the hero imagery takes the upper ~62% of
-             the screen, fades to black at the mid-line, and the customer is offered the six
-             top-level entry points as a tap-grid. "Log in" is the DBS-mark tile — the real
-             digibank launchpad, so the credential form lives one tap further in rather than
-             being the very first thing on screen. -->
+        <!-- 1 · DBS digibank LOG IN (the User ID / PIN form IS the screen. The
+             launchpad hero photo, the six tiles and the form's back arrow were
+             removed on 2 Oct: with no launchpad there was nothing to go back to.) -->
         <section class="scr on" id="scrLogin">
           <div class="lgwrap">
 
-            <div class="lghero" aria-hidden="true">
-              <img class="lghero-img" src="assets/login-bg.jpg" alt="">
-              <div class="lghero-fade"></div>
-            </div>
-
-            <div class="lgmenu">
-              <button class="lgmenu-tile" id="lgBtn" type="button" data-go="login">
-                <span class="lgmenu-ico lgmenu-mark">
-                  <img src="assets/dbs-mark-red.png" alt="DBS">
-                </span>
-                <span class="lgmenu-lbl">Log in</span>
-              </button>
-              <button class="lgmenu-tile" type="button" data-go="alt">
-                <span class="lgmenu-ico"><img src="assets/tile-token.png" alt=""></span>
-                <span class="lgmenu-lbl">Digital<br>Token</span>
-              </button>
-              <button class="lgmenu-tile" type="button" data-go="alt">
-                <span class="lgmenu-ico"><img src="assets/tile-paynow.png" alt=""></span>
-                <span class="lgmenu-lbl">PayNow</span>
-              </button>
-              <button class="lgmenu-tile" type="button" data-go="alt">
-                <span class="lgmenu-ico"><img src="assets/tile-overseas.png" alt=""></span>
-                <span class="lgmenu-lbl">Overseas<br>Transfer</span>
-              </button>
-              <button class="lgmenu-tile" type="button" data-go="alt">
-                <span class="lgmenu-ico"><img src="assets/tile-scan.png" alt=""></span>
-                <span class="lgmenu-lbl">Scan &amp;<br>Pay</span>
-              </button>
-              <button class="lgmenu-tile" type="button" data-go="alt">
-                <span class="lgmenu-ico"><img src="assets/tile-apply.png" alt=""></span>
-                <span class="lgmenu-lbl">Apply &amp;<br>More Services</span>
-              </button>
-            </div>
-
-            <!-- form lives one tap deeper, only shown when the customer taps "Log in" -->
-            <div class="lgform" id="lgForm" hidden>
-              <button class="lgform-back" id="lgFormBack" type="button" aria-label="Back">
-                <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 6-6 6 6 6"/></svg>
-              </button>
+            <div class="lgform" id="lgForm">
               <div class="lgform-head">
                 <img class="dbslogo" src="assets/dbs-logo-white.png" alt="DBS">
               </div>
@@ -180,7 +139,7 @@
               <div class="lgsep"><span>New to digibank?</span></div>
               <button class="lgstarted" id="lgStarted" type="button">GET STARTED</button>
 
-              <div class="lgnote">Prototype only — these are sample credentials.
+              <div class="lgnote">Prototype only, these are sample credentials.
                 No real credentials are collected, stored or transmitted.</div>
               <div class="lgfoot">DBS Bank Ltd · Reg. No. 196800306E · Demonstration build</div>
             </div>
@@ -216,7 +175,7 @@
         <!-- 3 · AUNTIEJOY CHAT -->
         <section class="scr" id="scrJoy">
           <!-- DARK app bar (near-black + 3px red underline): back control on the left, identity
-               and trust state centred. Deliberately no avatar here — Joy introduces herself with
+               and trust state centred. Deliberately no avatar here, Joy introduces herself with
                her face only in the intro card, and appears again solely in popups, so the persistent
                chat chrome never shows her twice. The back control is absolutely positioned so the
                title is centred on the SCREEN, not on the space left over after the button. -->
@@ -232,7 +191,7 @@
           </div>
           <div class="chat" id="chat"></div>
           <!-- Language pills live ABOVE the composer as their own row (iggy layout), so the
-               composer below is just the rounded field + mic — one unit. -->
+               composer below is just the rounded field + mic, one unit. -->
           <div class="langtog" id="langtog" title="Which language should the mic listen for?">
             <button class="lt on" data-lang="en-SG" data-l="EN">EN</button>
             <button class="lt" data-lang="zh-CN" data-l="ZH">中文</button>

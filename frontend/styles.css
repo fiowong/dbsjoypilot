@@ -200,86 +200,19 @@ button{font-family:inherit}
   border-radius:1.5px;display:block}
 
 /* ==========================================================================
-   1 · DBS digibank LOG IN  (image top-half, 6-tile menu, fade to black)
-   Mirrors the real digibank launchpad: a hero photo takes ~62% of the screen
-   height, a fade-to-black gradient transitions into the black lower half, and
-   six tap-tiles (Log in / Digital Token / PayNow / Overseas Transfer /
-   Scan & Pay / Apply & More Services) sit in a 3-column grid. The Log in tile
-   carries the real DBS mark. The credential form is one tap deeper.
+   1 · DBS digibank LOG IN  (the User ID / PIN form is the screen)
+   The launchpad (hero photo + six tiles) and the form's back arrow were removed on
+   2 Oct. The form is no longer an overlay on top of anything, so it needs no
+   absolute positioning and no z-index.
    ========================================================================== */
 #scrLogin{background:#000;color:#fff}
 .lgwrap{flex:1;display:flex;flex-direction:column;background:#000;color:#fff;
   overflow:hidden;min-height:0;position:relative}
 
-/* The hero photo + its black-fade. Position absolute so it can bleed to the
-   top of the device behind the status bar / island. The grid below sits on
-   top of the dark portion of the photo. */
-.lghero{
-  position:absolute;inset:0 0 auto 0;height:62%;
-  overflow:hidden;pointer-events:none;
-}
-.lghero-img{
-  position:absolute;inset:0;width:100%;height:100%;object-fit:cover;
-}
-/* Fade to black at the bottom of the photo, mid-line to ~62%. Two stacked
-   gradient stops so the bottom is solidly black regardless of the photo's own
-   lower-edge tone. */
-.lghero-fade{
-  position:absolute;left:0;right:0;top:30%;bottom:0;
-  background:linear-gradient(to bottom,
-    rgba(0,0,0,0) 0%,
-    rgba(0,0,0,0) 28%,
-    rgba(0,0,0,.45) 45%,
-    rgba(0,0,0,.85) 60%,
-    #000 78%);
-}
-
-/* 3-column tile grid — sits on the black bottom half of the photo */
-.lgmenu{
-  position:relative;z-index:2;
-  margin-top:55%;                       /* drop down to the dark area */
-  padding:0 14px;
-  display:grid;grid-template-columns:repeat(3, 1fr);gap:8px 8px;
-  background:#000;
-}
-.lgmenu-tile{
-  display:flex;flex-direction:column;align-items:center;gap:7px;
-  background:transparent;border:0;color:#fff;cursor:pointer;padding:8px 4px 14px;
-  font-family:inherit;line-height:1.2;
-}
-.lgmenu-ico{
-  width:34px;height:34px;border-radius:50%;
-  display:flex;align-items:center;justify-content:center;flex-shrink:0;
-  background:rgba(255,255,255,.08);
-}
-.lgmenu-ico img{width:22px;height:22px;object-fit:contain;display:block;
-  /* Force PURE WHITE regardless of the source colour. The tile icons are stored DBS-red
-     (they sit on the light quick-action tiles on the home screen), so a plain invert()
-     would turn them cyan here. brightness(0) flattens every channel to black first, then
-     invert(1) lifts it to white — correct for any source icon. */
-  filter:brightness(0) invert(1)}
-.lgmenu-mark{
-  background:transparent;border:0;width:auto;height:auto;
-}
-.lgmenu-mark img{
-  width:34px;height:34px;filter:none;border-radius:8px;
-  box-shadow:0 4px 14px rgba(255,51,51,.35);
-}
-.lgmenu-lbl{font-size:11.5px;font-weight:600;color:#fff;text-align:center;line-height:1.18}
-
-/* ---- the deeper log-in form (one tap past the Log in tile) ---- */
 .lgform{
-  position:absolute;inset:0;z-index:3;background:#000;color:#fff;
+  flex:1;min-height:0;position:relative;background:#000;color:#fff;
   padding:calc(var(--statusbar-h) + 14px) 22px 24px;overflow-y:auto;
 }
-.lgform-back{
-  position:absolute;top:calc(var(--statusbar-h) + 6px);left:14px;
-  width:32px;height:32px;background:transparent;border:0;color:#d6d6de;
-  cursor:pointer;display:flex;align-items:center;justify-content:center;
-  border-radius:50%;z-index:5;font-family:inherit;
-}
-.lgform-back:hover{background:#1a1a1f}
-.lgform-back .ic{width:19px;height:19px}
 .lgform-head{padding:8px 0 22px;display:flex;align-items:flex-start}
 .lgform-head .dbslogo{height:28px}
 
@@ -335,7 +268,7 @@ button{font-family:inherit}
 .lgstarted:hover{background:#0a0a0e}
 .lgnote{font-size:10.5px;color:#5a5a64;line-height:1.55;margin-top:18px;text-align:center}
 
-/* shared DBS primary button — kept above .lgform .lgbtn so the login button can
+/* shared DBS primary button, kept above .lgform .lgbtn so the login button can
    narrow it without a specificity fight */
 .btn-dbs{
   width:100%;border:0;border-radius:12px;padding:14px;margin-top:5px;
@@ -576,7 +509,7 @@ button{font-family:inherit}
    ========================================================================== */
 /* ONE consolidated DARK app bar, mirroring the real digibank / iggy chat header: near-black
    surface with a 3px DBS-red underline. Back control on the left, identity + trust state
-   centred. Deliberately NO avatar — the assistant introduces itself in the message card and
+   centred. Deliberately NO avatar, the assistant introduces itself in the message card and
    appears only in popups, so Joy is never shown twice on this screen. `.aback` is absolutely
    positioned so the title centres on the SCREEN rather than on the space beside the button. */
 .abar{
@@ -687,8 +620,8 @@ button{font-family:inherit}
   box-shadow:var(--sh-1)}
 /* Identity row: a near-black band (like iggy's) carrying Joy's face, the name + role sub and
    the DBS lockup. The avatar is the ONE persistent place on the chat surface where Joy's
-   picture appears — the chat app bar above deliberately has NO avatar, and the popups below
-   are momentary — so Joy is never shown twice in the persistent chat chrome. */
+   picture appears, the chat app bar above deliberately has NO avatar, and the popups below
+   are momentary, so Joy is never shown twice in the persistent chat chrome. */
 .intro .ihead{display:flex;align-items:center;gap:11px;
   background:var(--dbs-black);padding:13px 14px}
 .intro .iav{
@@ -985,7 +918,7 @@ body.tech-hidden .ins{display:none}
   box-shadow:var(--sh-3);animation:pop .22s cubic-bezier(.2,1.1,.4,1)}
 @keyframes pop{from{transform:translateY(14px) scale(.97);opacity:0}to{transform:none;opacity:1}}
 /* Header is a soft pink stage, not a black bar: Auntie is the thing on this card, so she gets
-   the light surface and the full width. No red rule under it — against pink it just muddies
+   the light surface and the full width. No red rule under it, against pink it just muddies
    the edge between the stage and the white body below. */
 .mtop{flex:0 0 auto;background:linear-gradient(160deg,var(--brand-tint),var(--brand-tint2));
   padding:13px 14px 14px;text-align:center;position:relative}
