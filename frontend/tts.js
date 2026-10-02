@@ -43,6 +43,8 @@ let _ttsCtx = null;
 let _ttsChain = null;   // { sources:Set<AudioBufferSourceNode>, stopRequested:bool }, the stream being spoken
 let _ttsAbort = null;   // AbortController for the in-flight /tts fetch
 let _ttsEnabled = true; // flips to false after a hard failure (e.g. TTS not configured)
+let _ttsQueue = Promise.resolve();  // serialises whole utterances: Auntie has one mouth
+let _ttsGeneration = 0;             // bumped by stopSpeaking() so lines still QUEUED are dropped
 
 function _ttsAudioCtx(){
   if(!_ttsCtx){
@@ -63,9 +65,29 @@ function _ttsLang(lang){
 }
 
 /* Speak one line. `lang` is optional; when omitted we guess from the text (same heuristic
-   the ears/intent use). Fire-and-forget: we never block the rest of the UI on audio. */
+   the ears/intent use).
+
+   QUEUED, not fire-and-forget. Auntie has one mouth: two lines spoken in quick succession
+   (a payment completed, then the next payment's question) used to start together and talk
+   over each other, because each call scheduled its own audio on the clock with nothing to
+   serialise them. Each utterance now waits for the previous one's audio to actually FINISH
+   before it even fetches, so lines play back to back instead of on top of each other. The
+   promise resolves when this line has finished PLAYING, which is what the queue chains on. */
 async function speak(text, lang){
   if(!_ttsEnabled || !text) return;
+  const gen = _ttsGeneration;
+  const prev = _ttsQueue;
+  _ttsQueue = (async () => {
+    await prev.catch(() => {});
+    // A barge-in happened while this line was waiting its turn: it must never be spoken.
+    if(gen !== _ttsGeneration) return;
+    await _speakStream(text, lang);
+  })();
+  return _ttsQueue;
+}
+
+/* One utterance: fetch, stream, schedule. Only ever runs one at a time (see speak above). */
+async function _speakStream(text, lang){
   if(typeof lang !== 'string' || !lang){
     lang = (typeof guessLang === 'function') ? guessLang(text) : 'EN';
   }
@@ -82,7 +104,7 @@ async function speak(text, lang){
   }catch(err){
     _ttsAbort = null;
     if(err && err.name !== 'AbortError'){
-      console.warn('[auntiejoy] tts fetch failed:', err.message);
+      console.warn('[joy] tts fetch failed:', err.message);
     }
     return;
   }
@@ -173,24 +195,31 @@ async function speak(text, lang){
     }
   }catch(err){
     if(err && err.name !== 'AbortError'){
-      console.warn('[auntiejoy] tts stream failed:', err.message);
+      console.warn('[joy] tts stream failed:', err.message);
     }
   }
   schedule(true);   // the sentence has finished arriving, flush whatever is left
 
-  // Keep the chain reachable until the audio has actually finished, so barge-in can still
-  // silence the tail of a sentence that arrived faster than it plays.
+  // Hold the line until its audio has actually finished PLAYING. This is what the queue in
+  // speak() chains on: returning as soon as the last buffer was merely SCHEDULED would let the
+  // next line start while this one is still audible, which is the overlap the queue exists to
+  // stop. The chain stays reachable for that whole tail so barge-in can still silence a
+  // sentence that arrived faster than it plays.
   if(chain.stopRequested || !started){
     if(_ttsChain === chain) _ttsChain = null;
-  }else{
-    const msLeft = Math.max(0, (endAt - ctx.currentTime) * 1000) + 80;
-    setTimeout(() => { if(_ttsChain === chain) _ttsChain = null; }, msLeft);
+    return;
   }
+  const msLeft = Math.max(0, (endAt - ctx.currentTime) * 1000) + 80;
+  await new Promise(r => setTimeout(r, msLeft));
+  if(_ttsChain === chain) _ttsChain = null;
 }
 
 /* Barge-in: drop everything queued or playing. Called the moment the customer starts a new
    turn (mic press or typed send) so Auntie yields immediately. */
 function stopSpeaking(){
+  // Drop lines still QUEUED as well as the one playing. Barge-in means Auntie stops talking
+  // entirely, so a sentence waiting its turn must never start up after the customer spoke.
+  _ttsGeneration++;
   if(_ttsAbort){ try { _ttsAbort.abort(); } catch(e){} _ttsAbort = null; }
   const chain = _ttsChain;
   if(chain){

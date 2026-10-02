@@ -79,6 +79,11 @@ class Session:
         self.cooling_off: bool = False
         self.drafts_created: int = 0
         self.step_up_required: bool = False
+        # Why a step-up was raised. "SPEAKER_MISMATCH" = Stage 1 could not verify the speaker, so
+        # the request is HELD: the read-back is suppressed and the payment is not presented until
+        # FaceID passes. "RISK" = the ordinary risk-agent step-up (e.g. a large amount), which
+        # still reads the payment back. Only the speaker mismatch holds.
+        self.step_up_reason: Optional[str] = None
         self.gateway_origin_authorised: bool = True
         self.outcome: str = "-"
         self.confirmation_language: str = "EN"
@@ -150,6 +155,10 @@ class Session:
             "frozen": self.frozen,
             "cancelled": self.cancelled,
             "cooling_off": self.cooling_off,
+            # Identity step-up: the client raises FaceID BEFORE presenting the payment, and must
+            # not present it at all while the request is held.
+            "step_up_required": self.step_up_required,
+            "step_up_reason": self.step_up_reason,
             "ledger": "RECORDED" if self.execution else "NOT_INVOKED",
             "signature": "VALID" if self._signature else "NONE",
             "execution": self.execution,

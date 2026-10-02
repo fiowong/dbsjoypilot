@@ -7,7 +7,7 @@
    jsdom has no layout engine, so it cannot tell whether the logo is stretched or
    whether the phone keeps phone proportions. This launches headless Chrome,
    attaches over the DevTools protocol, and reads back actual rendered geometry
-   for all three screens (login -> home -> AuntieJoy chat).
+   for all three screens (login -> home -> Joy chat).
 
    Run:  node measure.js
    ============================================================================ */
@@ -83,7 +83,7 @@ const SNAP = `(() => {
     return {w:+r.width.toFixed(1),h:+r.height.toFixed(1),left:+r.left.toFixed(1),top:+r.top.toFixed(1)}; };
   const vis = s => { const e=document.querySelector(s); if(!e) return false;
     return getComputedStyle(e).display !== 'none'; };
-  const logo = document.querySelector('#scrLogin .lghead img.dbslogo');
+  const logo = document.querySelector('#scrLogin .lgform-head img.dbslogo');
   const lr = logo && logo.getBoundingClientRect();
   const isl = b('.island'), tm = b('.sb-time'), sg = b('.sb-right');
   const rgt = o => o ? o.left + o.w : null;
@@ -99,7 +99,8 @@ const SNAP = `(() => {
     gapIslandToSig:(isl&&sg)?+(sg.left-rgt(isl)).toFixed(1):null,
     appbar:b('#appwin .appbar'), appbody:b('.appbody'),
     abar:b('#scrJoy .abar'), chat:b('#chat'), langtog:b('.langtog'), cinput:b('.cinput'),
-    loginBtn:b('.btn-dbs'), enableBtn:b('.enable'), lgcard:b('.lgcard'), lghead:b('.lghead')
+    loginBtn:b('#lgSubmit'), enableBtn:b('.enable'),
+    lghero:b('.lghero'), lgmenu:b('.lgmenu'), lgform:b('.lgform'), lgformHead:b('.lgform-head')
   });
 })()`;
 
@@ -131,22 +132,16 @@ const SNAP = `(() => {
     let s = await snap();
     console.log('chrome              : ' + CHROME);
     console.log('viewport            : ' + s.viewport.w + ' x ' + s.viewport.h);
-    console.log('\n--- 1. LOGIN SCREEN (in the device) ---');
-    const L = s.loginLogo;
-    if (!L) throw new Error('login logo not found, #scrLogin .lghead img.dbslogo');
-    console.log('  login logo        : ' + L.w + ' x ' + L.h + '  rendered ratio ' + L.ratio
-      + '  (asset ' + L.natural + ' = ' + (1280 / 382).toFixed(3) + ')');
-    const drift = Math.abs(L.ratio - 1280 / 382) / (1280 / 382);
-    ok('logo aspect ratio preserved (not stretched)', drift < 0.02, 'drift ' + (drift * 100).toFixed(2) + '%');
-    // The header's own 22px padding is the content edge the logo should sit on.
-    const headerPad = L.left - s.lghead.left;
-    const centredLeft = s.lghead.left + (s.lghead.w - L.w) / 2;
-    ok('logo is flush to the header content edge (left-aligned, not centred)',
-       headerPad > 0 && headerPad < 30 && Math.abs(L.left - centredLeft) > 20,
-       'offset from header box ' + headerPad.toFixed(1) + 'px; centred would be ' + centredLeft.toFixed(1)
-       + ', actual ' + L.left);
-    ok('logo sits above the login card (top-left corner)',
-       L.top + L.h <= s.lgcard.top + 1, 'logo bottom ' + (L.top + L.h) + ' vs card top ' + s.lgcard.top);
+    console.log('\n--- 1. LOGIN LAUNCHPAD (in the device) ---');
+    // The launchpad is the real digibank first page: hero photo fading to black, six tiles,
+    // and the credential form hidden one tap deeper.
+    ok('credential form is hidden until the Log in tile is tapped', s.lgform.h === 0,
+       s.lgform.h + 'px tall');
+    ok('hero photo fills the screen width', Math.abs(s.lghero.w - s.screen.w) < 2,
+       s.lghero.w + ' vs screen ' + s.screen.w);
+    ok('six-tile menu sits inside the screen (no clipping)',
+       s.lgmenu.h > 0 && s.lgmenu.top >= s.screen.top - 1,
+       'menu top ' + s.lgmenu.top + ' vs screen top ' + s.screen.top);
     console.log('  device            : ' + s.device.w + ' x ' + s.device.h + '  ratio ' + (s.device.h / s.device.w).toFixed(3));
     ok('device keeps phone proportions (ratio > 1.95)', (s.device.h / s.device.w) > 1.95,
        (s.device.h / s.device.w).toFixed(3));
@@ -159,13 +154,31 @@ const SNAP = `(() => {
        'island cx ' + (s.island.left + s.island.w / 2).toFixed(1) + ' vs screen cx ' + (s.screen.left + s.screen.w / 2).toFixed(1));
     ok('island does not overlap the status-bar time', s.gapTimeToIsland > 0, s.gapTimeToIsland + 'px');
     ok('island does not overlap the status-bar icons', s.gapIslandToSig > 0, s.gapIslandToSig + 'px');
-    ok('login card fits inside the screen (no clipping)', s.lgcard.h <= s.screen.h,
-       s.lgcard.h + ' vs ' + s.screen.h);
+    // ---------- LOG IN FORM (one tap deeper) ----------
+    await click('#lgBtn'); await sleep(400);
+    s = await snap();
+    console.log('\n--- 1b. LOG IN FORM (one tap deeper) ---');
+    const L = s.loginLogo;
+    if (!L) throw new Error('login logo not found, #scrLogin .lgform-head img.dbslogo');
+    console.log('  login logo        : ' + L.w + ' x ' + L.h + '  rendered ratio ' + L.ratio
+      + '  (asset ' + L.natural + ' = ' + (1280 / 382).toFixed(3) + ')');
+    const drift = Math.abs(L.ratio - 1280 / 382) / (1280 / 382);
+    ok('logo aspect ratio preserved (not stretched)', drift < 0.02, 'drift ' + (drift * 100).toFixed(2) + '%');
+    // The form's own 22px padding is the content edge the logo should sit on, left-aligned
+    // the way the real digibank form is — never centred.
+    const formPad = L.left - s.lgform.left;
+    const centredLeft = s.lgform.left + (s.lgform.w - L.w) / 2;
+    ok('logo is flush to the form content edge (left-aligned, not centred)',
+       formPad > 0 && formPad < 30 && Math.abs(L.left - centredLeft) > 20,
+       'offset from form box ' + formPad.toFixed(1) + 'px; centred would be ' + centredLeft.toFixed(1)
+       + ', actual ' + L.left);
+    ok('log-in form fits inside the screen (no clipping)', s.lgform.h <= s.screen.h + 1,
+       s.lgform.h + ' vs ' + s.screen.h);
     ok('login button is inside the device', s.loginBtn.left >= s.device.left &&
        s.loginBtn.left + s.loginBtn.w <= s.device.left + s.device.w);
 
     // ---------- HOME ----------
-    await click('#lgBtn'); await sleep(400);
+    await click('#lgSubmit'); await sleep(400);
     s = await snap();
     console.log('\n--- 2. DBS HOME (in the device) ---');
     ok('home screen is active', s.activeScr.length === 1 && s.activeScr[0] === 'appwin', JSON.stringify(s.activeScr));

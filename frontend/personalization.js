@@ -2,7 +2,7 @@
 // ==========================================================================
 // PERSONALIZATION, adapts to observed difficulty in THIS conversation, not
 // to any guess about who the customer is. The decision itself is made server-side
-// by the Personalization Agent (backend/auntiejoy/agents.py), which reasons only
+// by the Personalization Agent (backend/app/agents.py), which reasons only
 // over structured facts about this session (a clarification point that had to be
 // raised twice, a field rejected twice, two turns in a row that didn't resolve),
 // never the customer's words. This file just reflects that decision and lets the
@@ -94,16 +94,16 @@ if(personalizeBadge){
       COMBINED: "a couple of things kept needing to be repeated",
     }[LAST_PERSONALIZATION_DECISION?.reason_code] || "this conversation needed a bit more back-and-forth";
     const statusLine = PERSONALIZE_MODE==='on' ? "You've turned this on yourself."
-      : PERSONALIZE_MODE==='off' ? "You've turned this off. AuntieJoy won't switch it on itself."
-      : personalizeActive() ? `AuntieJoy noticed ${why}, so it's using simpler wording and double-checking each detail.`
-      : "AuntieJoy is using its standard wording. It'll offer to simplify if a conversation needs a bit more back-and-forth.";
+      : PERSONALIZE_MODE==='off' ? "You've turned this off. Joy won't switch it on itself."
+      : personalizeActive() ? `Joy noticed ${why}, so it's using simpler wording and double-checking each detail.`
+      : "Joy is using its standard wording. It'll offer to simplify if a conversation needs a bit more back-and-forth.";
     const choice = await popup({
-      kicker:'PERSONALISATION', title:'How AuntieJoy is adapting',
+      kicker:'PERSONALISATION', title:'How Joy is adapting',
       body:`${statusLine}<br><br>This only reacts to difficulty in <i>this</i> conversation, never to how someone talks, types, or who they might be.`,
       acts:[
         {id:'on', label:'Keep it simple', kind: PERSONALIZE_MODE==='on'?'yes':''},
         {id:'off', label:'Use standard wording', kind: PERSONALIZE_MODE==='off'?'yes':''},
-        {id:'auto', label:'Let AuntieJoy decide', kind: PERSONALIZE_MODE==='auto'?'yes':''}
+        {id:'auto', label:'Let Joy decide', kind: PERSONALIZE_MODE==='auto'?'yes':''}
       ],
       note:'You can change this anytime. It never overrides what you choose here.'
     });

@@ -41,10 +41,10 @@ MESSAGES: Dict[str, Dict[str, str]] = {
               "sudah hentikan permintaan ini. Sila mula semula pada peranti berdaftar.",
     },
     "VOICE_STEP_UP": {
-        "EN": "I could not verify the registered customer from the voice input. To continue, "
+        "EN": "I could not confirm you are the registered customer. To continue, "
               "please review the request and use FaceID on this device.",
-        "ZH": "我无法从语音确认您是已注册的客户。如果要继续，请先检查这笔请求，然后在这台设备上用 FaceID 确认。",
-        "BM": "Saya tidak dapat mengesahkan pelanggan berdaftar daripada suara itu. Untuk "
+        "ZH": "我无法确认您就是已注册的客户。如果要继续，请先检查这笔请求，然后在这台设备上用 FaceID 确认。",
+        "BM": "Saya tidak dapat mengesahkan anda adalah pelanggan berdaftar. Untuk "
               "teruskan, sila semak permintaan ini dan guna FaceID pada peranti ini.",
     },
 

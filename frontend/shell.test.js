@@ -1,4 +1,4 @@
-/* Headless check of the AuntieJoy DBS shell and the in-transcript cards.
+/* Headless check of the Joy DBS shell and the in-transcript cards.
    Run:  NODE_PATH=<workspace>/node_modules node shell.test.js            */
 const fs = require('fs');
 const path = require('path');
@@ -84,27 +84,74 @@ ok('all three screens live inside the device screen',
 ok('inspector sits outside the device', !$('device').contains($('agents')));
 ok('only one screen is active at a time', ['scrLogin','appwin','scrJoy'].filter(scrOn).length === 1);
 
-console.log('\n=== 3. LOG IN -> DBS HOME -> ENABLE AUNTIEJOY ===');
+console.log('\n=== 3. LOGIN FORM (boot) -> LAUNCHPAD (back arrow) -> DBS HOME -> ASK JOY TO PAY ===');
+// Matching iggy: the User ID / PIN form is the DEFAULT, the first thing they see. The launchpad
+// (Jewel/Changi hero + 6 tiles) is still in the DOM, behind it, and is reached by the form's
+// back arrow. So the boot path goes straight to the form, not to the tile grid.
+ok('login form is OPEN at boot (matching iggy, form-first)',
+   $('lgForm').hidden === false && scrOn('scrLogin'));
+ok('launchpad hero is hidden behind the form at boot',
+   doc.querySelector('#scrLogin .lghero').style.display === 'none');
+ok('launchpad tiles are hidden behind the form at boot',
+   doc.querySelector('#scrLogin .lgmenu').style.display === 'none');
+$('lgFormBack').dispatchEvent(new window.MouseEvent('click', { bubbles:true }));
+ok('form back returns to the six-tile launchpad',
+   $('lgForm').hidden === true && scrOn('scrLogin') &&
+   doc.querySelector('#scrLogin .lgmenu').style.display !== 'none' &&
+   doc.querySelector('#scrLogin .lghero').style.display !== 'none');
 $('lgBtn').dispatchEvent(new window.MouseEvent('click', { bubbles:true }));
+ok('Log in tile reopens the credential form', $('lgForm').hidden === false && scrOn('scrLogin'));
+$('lgSubmit').dispatchEvent(new window.MouseEvent('click', { bubbles:true }));
 ok('login dismissed, app window active', !scrOn('scrLogin') && scrOn('appwin'));
-ok('balance card present', !!$('appBody').querySelector('.balcard'));
-ok('big enable button present', !!$('appBody').querySelector('.enable'));
-$('appBody').querySelector('.enable').dispatchEvent(new window.MouseEvent('click', { bubbles:true }));
-ok('AuntieJoy chat active', scrOn('scrJoy'));
+// Home is the real-digibank dashboard: red cashback hero, 5 quick-action tiles, the ONE
+// Joy CTA, the deposits card, and a 5-tab bottom nav.
+ok('red cashback hero present', !!$('appBody').querySelector('.hero'));
+ok('five quick-action tiles present', $('appBody').querySelectorAll('.qbtn').length === 5,
+   $('appBody').querySelectorAll('.qbtn').length + ' tiles');
+ok('deposits card present', !!$('appBody').querySelector('.dep'));
+ok('deposits quotes the account the backend actually resolves',
+   /DBS Savings ending 1234/.test($('appBody').querySelector('.dep-acc').textContent),
+   $('appBody').querySelector('.dep-acc').textContent);
+ok('exactly ONE Joy entry point on the home screen',
+   $('appBody').querySelectorAll('[data-go="joy"]').length === 1,
+   $('appBody').querySelectorAll('[data-go="joy"]').length + ' entry points');
+ok('bottom tab nav has all five tabs', doc.querySelectorAll('#tabnav .tab').length === 5);
+ok('Home is the tab that is highlighted',
+   doc.querySelector('#tabnav .tab.on').dataset.tab === 'home',
+   doc.querySelector('#tabnav .tab.on').dataset.tab);
+// The bottom nav actually switches screens, and moves its own highlight with it.
+doc.querySelector('#tabnav .tab[data-tab="pay"]').dispatchEvent(new window.MouseEvent('click', { bubbles:true }));
+ok('Pay & Transfer tab opens the Pay & Transfer list',
+   !!$('appBody').querySelector('.applist') && scrOn('appwin'));
+ok('and the Pay tab is the one highlighted',
+   doc.querySelector('#tabnav .tab.on').dataset.tab === 'pay',
+   doc.querySelector('#tabnav .tab.on').dataset.tab);
+ok('the list has all four routes', $('appBody').querySelectorAll('.approw').length === 4,
+   $('appBody').querySelectorAll('.approw').length + ' rows');
+ok('the Joy route is the one marked hero',
+   $('appBody').querySelector('.approw.hero').dataset.go === 'joy',
+   $('appBody').querySelector('.approw.hero').dataset.go);
+ok('the screen says plainly that it cannot move money',
+   /Nothing is sent from this screen/.test($('appBody').querySelector('.pnote').textContent));
+ok('no OS emoji in the banking chrome', !/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u.test($('appBody').textContent));
+doc.querySelector('#tabnav .tab[data-tab="home"]').dispatchEvent(new window.MouseEvent('click', { bubbles:true }));
+ok('Home tab returns to the dashboard', !!$('appBody').querySelector('.joy-cta'));
+ok('and the Home tab is highlighted again',
+   doc.querySelector('#tabnav .tab.on').dataset.tab === 'home');
+
+$('appBody').querySelector('.joy-cta').dispatchEvent(new window.MouseEvent('click', { bubbles:true }));
+ok('Joy chat active', scrOn('scrJoy'));
 ok('intro card rendered', !!chat.querySelector('.intro'));
 ok('intro offers suggestion chips', chat.querySelectorAll('.chip').length >= 3,
    chat.querySelectorAll('.chip').length + ' chips');
 ok('transcript contains ONLY the intro card', chat.children.length === 1, chat.children.length + ' children');
-// The greeting addresses the customer by name, but the intro card is drawn BEFORE the first
-// turn, so at this point no trusted name exists yet. It must NOT invent one (addressing the
-// customer as "Auntie" reads like the assistant talking to itself).
-const greet = () => chat.querySelector('.intro .itext').textContent.replace(/\s+/g, ' ').trim();
-ok('greeting starts nameless rather than inventing a name', /^Hello! Tell me who to pay/.test(greet()), greet());
-ev("CUSTOMER_NAME='Mei Ling'; CUSTOMER_NAME_KNOWN=true; refreshNameSlots();");
-ok('greeting fills the trusted name once the session supplies it',
-   /^Hello Mei Ling! Tell me who to pay/.test(greet()), greet());
-ev("CUSTOMER_NAME='Auntie'; CUSTOMER_NAME_KNOWN=false; refreshNameSlots();");
-ok('and drops it again if the session is reset', /^Hello! Tell me/.test(greet()), greet());
+// The intro card is drawn BEFORE the first turn, so no trusted name exists yet. It must NOT
+// invent one — addressing the customer as "Auntie" would read like the assistant talking to
+// itself. The body states the safety contract plainly instead, and carries no name slot.
+const greet = () => (chat.querySelector('.intro .itxt')?.textContent || '').replace(/\s+/g, ' ').trim();
+ok('intro states the review-and-authorize safety contract',
+   /review and authorize before any money moves/.test(greet()), greet());
+ok('intro never invents the customer name', !/Auntie|Mei Ling/.test(greet()), greet());
 
 console.log('\n=== 4. RESET: resetPanels() KEEPS THE TRANSCRIPT, resetRun() CLEARS IT ===');
 const beforePanels = chat.children.length;
@@ -259,6 +306,58 @@ ok('every class used in markup has a rule in styles.css', unstyled.length === 0,
    'unstyled: ' + unstyled.join(', '));
 ok('scanned a meaningful number of classes', markupClasses.size > 60,
    markupClasses.size + ' classes found');
+
+console.log('\n=== 9c. VOICE MODE IS DISCREET (nothing announces it) ===');
+// Voice Mode is a backstage rehearsal switch for demoing the unverified-speaker escalation.
+// If it announced itself, it would have to be hidden again before a demo — so it must be
+// invisible. This test exists because discreetness is very easy to regress by accident.
+(function(){
+  const ui   = fs.readFileSync(path.join(dir,'ui.js'),'utf8');
+  const chat = $('chat');
+  const toggle = $('voiceToggle');
+  ok('the voice mode switch exists', !!toggle);
+  ok('it defaults to OFF', toggle.checked === false);
+
+  // Toggling must not change a single thing a judge could see.
+  const beforeBody = doc.body.className;
+  const beforeState = $('stState') ? $('stState').textContent : '';
+  toggle.checked = true;
+  toggle.dispatchEvent(new window.MouseEvent('change', { bubbles:true }));
+  ok('turning it on adds no body class', doc.body.className === beforeBody,
+     'now: ' + doc.body.className);
+  ok('turning it on writes nothing to the state readout',
+     (!$('stState') || $('stState').textContent === beforeState),
+     $('stState') ? $('stState').textContent : '');
+  ok('turning it on emits no system/audit line',
+     !/VOICE MODE ON/i.test(chat.textContent));
+  ok('the switch reads as a plain setting, not a warning',
+     !/alert|warning|danger/i.test(toggle.closest('label').className));
+
+  // And the CSS must not re-introduce a tell.
+  ok('no voicemode body-class rule exists', !/body\.voicemode/.test(css));
+  ok('the toggle has no distinct checked colour of its own',
+     !/\.voicetoggle\s+input:checked\s*\{[^}]*background:(?!#?var\(--brand\))/.test(css) ||
+     /\.voicetoggle input:checked\{background:var\(--brand\)\}/.test(css));
+  ok('toggling does not call state() or sysLine()', (function(){
+    const i = ui.indexOf('voiceToggle.onchange');
+    if (i < 0) return false;
+    // Read to the end of the handler by brace balance, not by the first '}' — a naive
+    // slice lands inside the comment and would pass or fail for the wrong reason.
+    const open = ui.indexOf('{', ui.indexOf('=>', i));
+    let depth = 0, end = open;
+    for (let k = open; k < ui.length; k++) {
+      if (ui[k] === '{') depth++;
+      else if (ui[k] === '}') { depth--; if (depth === 0) { end = k; break; } }
+    }
+    const handler = ui.slice(open, end + 1)
+      .replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');   // strip comments first
+    return !/\bstate\s*\(/.test(handler) && !/\bsysLine\s*\(/.test(handler);
+  })());
+  ok('the intent is documented, so nobody re-adds a banner',
+     /DISCREET BY DESIGN|silent/i.test(ui));
+  toggle.checked = false;
+  toggle.dispatchEvent(new window.MouseEvent('change', { bubbles:true }));
+})();
 
 console.log('\n=== 10. NO STRAY ERRORS ===');
 const realErrors = errors.filter(e => !/Not implemented|Could not parse CSS/.test(e));

@@ -7,7 +7,7 @@
 
    Two things this file deliberately does NOT do:
      - It composes no customer-facing wording. It returns text; the orchestrator decides
-       what AuntieJoy says.
+       what Joy says.
      - It never invents a confidence. If the engine reported none, the confidence comes back
        null and the reason is in `confidence_source`, so the caller can say so honestly.
 */

@@ -113,7 +113,7 @@ function executeChain(lang, d, opts){
     {t:'iface',v:T[lang].ready},
     {t:'stage',n:12,s:'run'},
     {t:'popup',d:150,cfg:{kicker:'MOCK FACEID · SIMULATED',title:'Face ID',
-      body:'AuntieJoy is asking for a <b>transaction-specific</b> biometric confirmation on the registered device.',
+      body:'Joy is asking for a <b>transaction-specific</b> biometric confirmation on the registered device.',
       fields:`<div class="fr"><span class="k">Confirmation</span><span class="v">${d.confirmation_id}</span></div>
               <div class="fr"><span class="k">Bound to draft</span><span class="v">${d.draft_id} · v${d.version}</span></div>
               <div class="fr big"><span class="k">Amount</span><span class="v">${money(d.amount_minor, d.currency)}</span></div>`,
@@ -776,7 +776,7 @@ SC.H1 = () => [
   {t:'audit',v:'INSUFFICIENT_FUNDS_DETECTED · empathetic abort · draft NOT_CREATED',c:'warn'},
   {t:'iface',v:"{name}, no worries at all. We don't have to send this right now. If you'd like, just tell me a smaller amount and I can help with that, or we can leave it for today. Nothing has been sent."},
   {t:'popup',d:150,cfg:{kicker:'BRANCH H · H1: INSUFFICIENT FUNDS',title:'No pressure to pay',
-    body:'When Auntie says she cannot cover the amount, AuntieJoy responds with empathy and does not push the payment. The conversation stays open so she can name a smaller amount or cancel, no draft is ever built from an affordability statement.',
+    body:'When Auntie says she cannot cover the amount, Joy responds with empathy and does not push the payment. The conversation stays open so she can name a smaller amount or cancel, no draft is ever built from an affordability statement.',
     acts:[{id:'ok',label:'Understood',kind:'ok2'}],
     note:'Empathetic abort, the system never pressures the customer to proceed.'}}
 ];
@@ -784,7 +784,7 @@ SC.H1 = () => [
 
 /* ============================================================================
    LIVE BACKEND INTEGRATION
-   Talks to the real AuntieJoy FastAPI server (auntiejoy_backend.py) instead of
+   Talks to the real Joy FastAPI server (backend/app/main.py) instead of
    the hand-scripted SC[id]() arrays below. It converts the backend's real
    event log into the exact same step-DSL that play() already knows how to
    render, so none of the rendering/animation code has to change.

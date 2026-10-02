@@ -261,6 +261,7 @@ async def _run_turn(req: TurnRequest) -> TurnResponse:
             return await finish()
         if mock_risk["result"] == "STEP_UP_REQUIRED":
             session.step_up_required = True
+            session.step_up_reason = "SPEAKER_MISMATCH"
             emit("VOICE_STEP_UP_REQUIRED", 1, {
                 "reason_code": "SPEAKER_MISMATCH",
                 "next_control": "transaction-specific mock FaceID",
@@ -1186,7 +1187,8 @@ async def _run_turn(req: TurnRequest) -> TurnResponse:
     _emit_draft_readback(draft, parse_reference(req.text) or None, schedule_dict,
                          lang, session.customer_id, emit, say_line,
                          nickname=session.nickname_used,
-                         colloquial_phrase=colloquial_scale_phrase(req.text))
+                         colloquial_phrase=colloquial_scale_phrase(req.text),
+                         hold=_identity_hold(session))
     # Consumed. The nickname belongs to the payment that produced it; a later payment in the same
     # session must not inherit "I found Ah Girl as Mei Tan" because an earlier one was reached
     # through that name.
@@ -1210,10 +1212,21 @@ def _nickname_for_index(session, index: int) -> Optional[str]:
     return nicknames[index] if 0 <= index < len(nicknames) else None
 
 
+def _identity_hold(session) -> bool:
+    """True while a Stage 1 speaker mismatch is HOLDING the request.
+
+    Only a speaker mismatch holds. The risk agent's own step-up (a large amount) still reads the
+    payment back, because there the customer's identity was never in question - only the size of
+    the transfer was. Conflating the two would hide the payment from a legitimate customer.
+    """
+    return bool(session.step_up_required) and session.step_up_reason == "SPEAKER_MISMATCH"
+
+
 def _emit_draft_readback(draft: Draft, reference: Optional[str], schedule_dict: Optional[dict],
                          lang: str, customer_id: str, emit, say_line,
                          nickname: Optional[str] = None,
-                         colloquial_phrase: Optional[str] = None) -> None:
+                         colloquial_phrase: Optional[str] = None,
+                         hold: bool = False) -> None:
     """Emit the INITIATION_READBACK for a canonical draft.
 
     The read-back SHAPE follows the transaction type, a bill/card reads back the outstanding
@@ -1232,6 +1245,12 @@ def _emit_draft_readback(draft: Draft, reference: Optional[str], schedule_dict: 
     S$1,000.00."), the same "advise first" posture the demo takes for every other field. Standard
     scale words ("thousand") are never flagged.
     """
+    # IDENTITY HOLD. When Stage 1 could not verify the speaker the request is held, and Joy must
+    # not read the payment back: doing so would present the amount and the payee to someone whose
+    # identity is unverified, and would contradict the hold message she just spoke. She says only
+    # VOICE_STEP_UP; the payment is presented once FaceID on this device passes.
+    if hold:
+        return
     if draft.transaction_type == "BILL_PAYMENT":
         body, biller, destination = "BODY_BILL", draft.payee_display, ""
     elif draft.transaction_type == "CREDIT_CARD_PAYMENT":
@@ -1861,6 +1880,12 @@ async def run_confirmation(req: ConfirmRequest) -> TurnResponse:
         say_line("BIOMETRIC_FAILED", 12)
         return TurnResponse(session=session.to_public(), events=events)
 
+    # Identity is now established on this device, so any Stage 1 hold is RELEASED. Without this a
+    # second payment in the same session would stay hidden behind a step-up already satisfied:
+    # _identity_hold() would still be true and its read-back would never be spoken.
+    session.step_up_required = False
+    session.step_up_reason = None
+
     # ---------- Stage 13: canonical payload signing ----------
     # Sign once per draft version. The forgery demonstrations must reuse or mutate the real
     # artifact, otherwise they would be proving something about a freshly-signed payload.
@@ -2027,7 +2052,8 @@ async def run_confirmation(req: ConfirmRequest) -> TurnResponse:
         _emit_draft_readback(nxt, session.pending_references[session.draft_index],
                              session.pending_schedules[session.draft_index], lang,
                              session.customer_id, emit, say_line,
-                             nickname=_nickname_for_index(session, session.draft_index))
+                             nickname=_nickname_for_index(session, session.draft_index),
+                             hold=_identity_hold(session))
         session.nickname_used = None
     return TurnResponse(session=session.to_public(), events=events)
 

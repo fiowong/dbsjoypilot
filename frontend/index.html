@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>AuntieJoy · DBS Voice-First Payments</title>
+<title>Joy · DBS Voice-First Payments</title>
 <!-- Banking-grade type. Inter is the requested DBS/enterprise face; the CSS stack keeps a
      full system fallback, so an offline demo laptop simply renders in system-ui instead. -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -18,8 +18,8 @@
     <div class="logo">
       <img class="dbslogo" src="assets/dbs-logo-white.png" alt="DBS">
       <div>
-        <h1>AuntieJoy</h1>
-        <div class="tag">AuntieJoy listens. DBS protects. Auntie approves.</div>
+        <h1>Joy</h1>
+        <div class="tag">Joy listens. DBS protects. Auntie approves.</div>
       </div>
     </div>
     <div class="badges">
@@ -38,7 +38,7 @@
         <input type="checkbox" id="voiceToggle"><span>Voice mode</span></label>
       <button class="ghostbtn" id="railToggle" title="Backup: run one of the MECE scenarios">Scenarios</button>
       <button class="ghostbtn" id="restartBtn" title="Back to the DBS app">DBS app</button>
-      <button class="personalize-btn" id="personalizeBadge" title="How AuntieJoy is adapting to this conversation">Personalisation: Standard</button>
+      <button class="personalize-btn" id="personalizeBadge" title="How Joy is adapting to this conversation">Personalisation: Standard</button>
     </div>
   </div>
 
@@ -103,56 +103,86 @@
         </div>
         <div class="island"></div>
 
-        <!-- 1 · DBS digibank LOG IN -->
+        <!-- 1 · DBS digibank LOG IN (image top-half + 6-tile menu)
+             Mirrors the real digibank first page: the hero imagery takes the upper ~62% of
+             the screen, fades to black at the mid-line, and the customer is offered the six
+             top-level entry points as a tap-grid. "Log in" is the DBS-mark tile — the real
+             digibank launchpad, so the credential form lives one tap further in rather than
+             being the very first thing on screen. -->
         <section class="scr on" id="scrLogin">
           <div class="lgwrap">
-            <!-- Integrated dark brand header. The DBS mark sits inside the header block rather
-                 than on a cut-off bar, and the build tag is a quiet pill on the right. -->
-            <div class="lghead">
-              <div class="lgrow-top">
-                <img class="dbslogo" src="assets/dbs-logo-white.png" alt="DBS">
-                <span class="lgbuild">SG · v4.12</span>
-              </div>
-              <div class="lgtag">Live more, Bank less</div>
+
+            <div class="lghero" aria-hidden="true">
+              <img class="lghero-img" src="assets/login-bg.jpg" alt="">
+              <div class="lghero-fade"></div>
             </div>
 
-            <div class="lgcard">
-              <h2>Welcome back</h2>
-              <p class="lgsub">Log in to digibank to continue.</p>
+            <div class="lgmenu">
+              <button class="lgmenu-tile" id="lgBtn" type="button" data-go="login">
+                <span class="lgmenu-ico lgmenu-mark">
+                  <img src="assets/dbs-mark-red.png" alt="DBS">
+                </span>
+                <span class="lgmenu-lbl">Log in</span>
+              </button>
+              <button class="lgmenu-tile" type="button" data-go="alt">
+                <span class="lgmenu-ico"><img src="assets/tile-token.png" alt=""></span>
+                <span class="lgmenu-lbl">Digital<br>Token</span>
+              </button>
+              <button class="lgmenu-tile" type="button" data-go="alt">
+                <span class="lgmenu-ico"><img src="assets/tile-paynow.png" alt=""></span>
+                <span class="lgmenu-lbl">PayNow</span>
+              </button>
+              <button class="lgmenu-tile" type="button" data-go="alt">
+                <span class="lgmenu-ico"><img src="assets/tile-overseas.png" alt=""></span>
+                <span class="lgmenu-lbl">Overseas<br>Transfer</span>
+              </button>
+              <button class="lgmenu-tile" type="button" data-go="alt">
+                <span class="lgmenu-ico"><img src="assets/tile-scan.png" alt=""></span>
+                <span class="lgmenu-lbl">Scan &amp;<br>Pay</span>
+              </button>
+              <button class="lgmenu-tile" type="button" data-go="alt">
+                <span class="lgmenu-ico"><img src="assets/tile-apply.png" alt=""></span>
+                <span class="lgmenu-lbl">Apply &amp;<br>More Services</span>
+              </button>
+            </div>
+
+            <!-- form lives one tap deeper, only shown when the customer taps "Log in" -->
+            <div class="lgform" id="lgForm" hidden>
+              <button class="lgform-back" id="lgFormBack" type="button" aria-label="Back">
+                <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 6-6 6 6 6"/></svg>
+              </button>
+              <div class="lgform-head">
+                <img class="dbslogo" src="assets/dbs-logo-white.png" alt="DBS">
+              </div>
 
               <label class="lgf">
-                <span class="lglab">NRIC / Username</span>
                 <span class="lgin">
-                  <input id="lgUser" value="S1234567A" autocomplete="off" spellcheck="false">
+                  <input id="lgUser" value="S1234567A" placeholder="User ID" autocomplete="off" spellcheck="false">
                   <span class="lgok" id="lgUserOk" aria-hidden="true"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="m5 13 4.5 4.5L19 7"/></svg></span>
                 </span>
               </label>
 
               <label class="lgf">
-                <span class="lglab"><span>PIN</span><button type="button" class="lgforgot" id="lgForgot">Forgot PIN?</button></span>
                 <span class="lgin">
-                  <input id="lgPin" type="password" value="SAMPLEPASSWORD1234" autocomplete="off">
-                  <span class="lgok on" aria-hidden="true"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="m5 13 4.5 4.5L19 7"/></svg></span>
+                  <input id="lgPin" type="password" value="SAMPLEPASSWORD1234" placeholder="PIN" autocomplete="off">
                 </span>
               </label>
 
-              <button class="btn-dbs" id="lgBtn" type="button">Log in securely</button>
+              <div class="lgforgot">Forgot <a href="#" id="lgForgotUser">User ID</a> or <a href="#" id="lgForgotPin">PIN</a>?</div>
 
-              <button class="lgalt" id="lgAlt" type="button">
-                <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8V5.5A2.5 2.5 0 0 1 5.5 3H8"/><path d="M16 3h2.5A2.5 2.5 0 0 1 21 5.5V8"/><path d="M21 16v2.5a2.5 2.5 0 0 1-2.5 2.5H16"/><path d="M8 21H5.5A2.5 2.5 0 0 1 3 18.5V16"/><path d="M9 9.5v2"/><path d="M15 9.5v2"/><path d="M9.5 15.5a3.5 3.5 0 0 0 5 0"/></svg>
-                <span>Log in with Digital Token / Face ID</span>
-              </button>
-
-              <div class="lgtrust">
-                <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4.5" y="10.5" width="15" height="10" rx="2.5"/><path d="M8 10.5V7a4 4 0 0 1 8 0v3.5"/></svg>
-                <span>Protected by DBS 256-Bit SSL Encryption · Digital Token enabled</span>
+              <div class="lgrow">
+                <button class="btn-dbs lgbtn" id="lgSubmit" type="button">LOGIN</button>
+                <button class="lgface" id="lgFace" type="button" title="Log in with Face ID" aria-label="Log in with Face ID">
+                  <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8V5.5A2.5 2.5 0 0 1 5.5 3H8"/><path d="M16 3h2.5A2.5 2.5 0 0 1 21 5.5V8"/><path d="M21 16v2.5a2.5 2.5 0 0 1-2.5 2.5H16"/><path d="M8 21H5.5A2.5 2.5 0 0 1 3 18.5V16"/><path d="M9 9.5v2"/><path d="M15 9.5v2"/><path d="M9.5 15.5a3.5 3.5 0 0 0 5 0"/></svg>
+                </button>
               </div>
-            </div>
 
-            <div class="lgfoot">
-              <div class="lgfoot-t">DBS Bank Ltd · Reg. No. 196800306E</div>
-              <div class="lgfoot-s">Demonstration build. Sample credentials only, nothing is
-                collected, stored or transmitted.</div>
+              <div class="lgsep"><span>New to digibank?</span></div>
+              <button class="lgstarted" id="lgStarted" type="button">GET STARTED</button>
+
+              <div class="lgnote">Prototype only — these are sample credentials.
+                No real credentials are collected, stored or transmitted.</div>
+              <div class="lgfoot">DBS Bank Ltd · Reg. No. 196800306E · Demonstration build</div>
             </div>
           </div>
         </section>
@@ -162,45 +192,57 @@
           <div class="appbar">
             <img class="dbslogo sm" src="assets/dbs-logo-white.png" alt="DBS">
             <span class="appbar-t">digibank</span>
+            <!-- Single top-right control, and it is LOG OUT (matching iggy). It used to open
+                 Joy, but Joy is reachable from the home CTA and the Pay & Transfer row, which
+                 is the real customer journey anyway - so this slot does the honest thing. -->
             <button class="appbar-x" id="appBack" type="button">
               <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5"/><path d="m11 18-6-6 6-6"/></svg>
-              <span>AuntieJoy</span>
+              <span>Log out</span>
             </button>
           </div>
           <div class="appbody" id="appBody"></div>
+          <!-- ============== BOTTOM TAB NAV (5 tabs) ==============
+               Stays inside #appwin, never over the device screen edges. Active tab is
+               whatever carries .on: home / pay / wealth / apply / more. -->
+          <nav class="tabnav" id="tabnav" aria-label="digibank navigation">
+            <button class="tab on" data-tab="home"   type="button"><img src="assets/tab-home.png" alt=""><span>Home</span></button>
+            <button class="tab"    data-tab="pay"    type="button"><img src="assets/tab-pay.png" alt=""><span>Pay &amp; Transfer</span></button>
+            <button class="tab"    data-tab="wealth" type="button"><img src="assets/tab-wealth.png" alt=""><span>digiWealth</span></button>
+            <button class="tab"    data-tab="apply"  type="button"><img src="assets/tab-apply.png" alt=""><span>Apply</span></button>
+            <button class="tab"    data-tab="more"   type="button"><img src="assets/tab-more.png" alt=""><span>More</span></button>
+          </nav>
         </section>
 
         <!-- 3 · AUNTIEJOY CHAT -->
         <section class="scr" id="scrJoy">
-          <!-- LIGHT app bar: back control on the left, identity and trust state centred.
-               Deliberately no avatar here, the assistant introduces itself in the message
-               card below, so the header stays a quiet piece of navigation chrome.
-               The back control is absolutely positioned so the title is centred on the
-               SCREEN, not on the space left over after the button. -->
+          <!-- DARK app bar (near-black + 3px red underline): back control on the left, identity
+               and trust state centred. Deliberately no avatar here — Joy introduces herself with
+               her face only in the intro card, and appears again solely in popups, so the persistent
+               chat chrome never shows her twice. The back control is absolutely positioned so the
+               title is centred on the SCREEN, not on the space left over after the button. -->
           <div class="abar">
             <button class="aback" id="joyBack" type="button" aria-label="Back to digibank">
               <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 6-6 6 6 6"/></svg>
               <span>Back</span>
             </button>
             <div class="ameta">
-              <div class="nm">AuntieJoy Voice Assist</div>
+              <div class="nm">Joy Voice Assist</div>
               <div class="sub"><i class="safedot"></i>Protected by DBS Safeguard</div>
             </div>
           </div>
           <div class="chat" id="chat"></div>
-          <!-- Language pills live INSIDE the input container, so the composer is one unit. -->
+          <!-- Language pills live ABOVE the composer as their own row (iggy layout), so the
+               composer below is just the rounded field + mic — one unit. -->
+          <div class="langtog" id="langtog" title="Which language should the mic listen for?">
+            <button class="lt on" data-lang="en-SG" data-l="EN">EN</button>
+            <button class="lt" data-lang="zh-CN" data-l="ZH">中文</button>
+            <button class="lt" data-lang="ms-MY" data-l="BM">BM</button>
+          </div>
           <div class="cinput">
-            <div class="langtog" id="langtog" title="Which language should the mic listen for?">
-              <button class="lt on" data-lang="en-SG" data-l="EN">EN</button>
-              <button class="lt" data-lang="zh-CN" data-l="ZH">中文</button>
-              <button class="lt" data-lang="ms-MY" data-l="BM">BM</button>
-            </div>
-            <div class="cinrow">
-              <input class="fld" id="fld" placeholder="Speak or type payment command…" autocomplete="off">
-              <button class="mic" id="mic" title="Speak" aria-label="Speak">
-                <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="2" width="6" height="13" rx="3"/><path d="M12 19v3"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/></svg>
-              </button>
-            </div>
+            <input class="fld" id="fld" placeholder="Speak or type payment command…" autocomplete="off">
+            <button class="mic" id="mic" title="Speak" aria-label="Speak">
+              <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="2" width="6" height="13" rx="3"/><path d="M12 19v3"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/></svg>
+            </button>
           </div>
         </section>
 

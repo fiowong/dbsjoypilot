@@ -20,6 +20,42 @@ function guessLang(text){
   return 'EN';
 }
 
+// Ordinary Malay words, for the majority count below. Mirrors the backend's _BM_VOCAB
+// (parsing.py): a majority vote needs the small joining words too ("dan", "dari", "satu"),
+// or every Malay sentence scores as mostly English because its nouns happen to be English.
+const _BM_VOCAB = new Set(['hantar','kepada','dolar','duit','saya','tidak','boleh','jumlah','akaun','bayar',
+  'sekarang','lima','lapan','sepuluh','ribu','seratus','buang','had','cucu','cepat',
+  'maaf','dan','atau','dari','ke','di','untuk','dengan','ini','itu','ada','nak',
+  'sudah','sila','tolong','nanti','satu','dua','tiga','empat','enam','tujuh',
+  'sembilan','puluh','ringgit','semua','lagi','juga','tapi','kalau','sebab','macam',
+  'mana','apa','siapa','bil','bayaran','pindah','pindahkan','awak','kami','dia',
+  'mereka','bahasa','wang','selamat','jangan','tanya','tak','cakap','buat','kita']);
+
+/* The language the customer used MOST, for a turn that mixes several. EN wins a tie.
+   A deliberate mirror of the backend's dominant_language()/language_word_counts() in
+   parsing.py — the processing card is drawn BEFORE the reply arrives, so this is what makes
+   the card and the answer that follows land in the same tongue. guessLang() above cannot do
+   this job: it returns ZH the moment it sees ANY Chinese character, so
+   "帮我 bayar bil Starhub from my current account, 然后 transfer…" got a Chinese processing
+   card followed by an English answer. (guessLang is still right for picking a TTS VOICE,
+   where "contains any Chinese → speak it in Mandarin" is the safer rule.) */
+function dominantLang(text){
+  const counts = { EN:0, ZH:0, BM:0 };
+  const s = String(text || '');
+  // A RUN of Chinese counts as ONE point, not one per character: otherwise a single
+  // four-character phrase outweighs four English words and "mostly Chinese" would be
+  // decided by stroke count rather than by what the customer actually said.
+  counts.ZH = (s.match(/[一-鿿]+/g) || []).length;
+  for (const word of (s.toLowerCase().match(/[A-Za-z]+/g) || [])) {
+    counts[_BM_VOCAB.has(word) ? 'BM' : 'EN']++;
+  }
+  let best = Math.max(counts.EN, counts.ZH, counts.BM);
+  if (best === 0) return 'EN';
+  // EN first, so it takes a tie as the neutral tongue — exactly like the backend.
+  for (const lang of ['EN','ZH','BM']) if (counts[lang] === best) return lang;
+  return 'EN';
+}
+
 // Every backend call is bounded. Without this a stalled upstream froze the customer view
 // indefinitely: the request sat open, the input stayed disabled and Auntie never answered,
 // with nothing on screen to say why. A timeout is not a decision, it is a refusal to wait
@@ -170,7 +206,28 @@ async function liveFieldReview(lang, d){
 // per queued draft. Without the loop the customer is left with no card to act on for
 // instruction 2, and the "yes" they type instead travels to /turn as a fresh turn, which the
 // backend answers by restarting the review, so the same read-back is heard twice.
-async function liveConfirmFlow(session, lang, my){
+// The IDENTITY step-up. Stage 1 could not verify the speaker, so the backend HELD the request and
+// suppressed the read-back: Joy has spoken only the hold line and the payment has NOT been shown.
+// This card is the control that decides whether it ever is, so it deliberately carries NO amount
+// and NO payee - an unverified person must not be shown the payment they are asking about.
+async function stepUpFaceId(lang, my){
+  const c = tt(lang).chrome.stepup || tt(lang).chrome.faceid;
+  stage(12,'run');
+  audit('FACEID_STEP_UP · identity check, payment not yet presented · language '+lang,'ok');
+  const a = await popup({
+    kicker:c.kicker, title:c.title, body:c.body, fields:'',
+    acts:[{id:'ok',label:icon('faceid')+' '+c.confirm,kind:'yes'}],
+    icon:'faceid', note:c.note
+  });
+  if(my!==RUN) return false;
+  if(a!=='ok'){ stage(12,''); audit('FACEID_STEP_UP_DECLINED · request stays held','stop'); return false; }
+  audit('FACEID_STEP_UP_PASSED · identity verified, releasing the hold','ok');
+  return true;
+}
+
+// `skipFaceId` means identity was already established by the step-up above, so this flow must not
+// ask for the same thing a second time (the /confirm call still carries biometric:true).
+async function liveConfirmFlow(session, lang, my, skipFaceId){
   const offered = new Set();
   let cur = session;
   while(my===RUN && cur && cur.draft){
@@ -186,7 +243,7 @@ async function liveConfirmFlow(session, lang, my){
     const id = cur.draft.draft_id;
     if(id && offered.has(id)) return;
     if(id) offered.add(id);
-    const next = await liveConfirmOnce(cur, lang, my);
+    const next = await liveConfirmOnce(cur, lang, my, skipFaceId);
     if(my!==RUN || !next) return;
     if(!(next.state==='CONFIRMATION_READY' && next.draft)) return;
     cur = next;
@@ -196,7 +253,7 @@ async function liveConfirmFlow(session, lang, my){
 // ONE draft's approval walkthrough. Returns the session snapshot to carry on with when the
 // backend queued another instruction behind this one, or null when the flow should stop here
 // (cancelled, a rejected field, an unreachable backend, or a newer run superseding this one).
-async function liveConfirmOnce(session, lang, my){
+async function liveConfirmOnce(session, lang, my, skipFaceId){
   const d = session.draft;
   const c = tt(lang).chrome;
   // Present the recognised draft in the transcript first. The approval walkthrough begins
@@ -211,25 +268,29 @@ async function liveConfirmOnce(session, lang, my){
   if(r.edit) return null;
   // This lead-in belongs to the simulated FaceID popup below, which is frontend chrome (like
   // the field-review popups), not a conversation line the backend decides.
-  iface(tt(lang).ready); await sleep(500);
-  if(my!==RUN) return null;
-  stage(12,'run');
-  // Which language this chrome renders in is decided by the backend's settled session language,
-  // not by a local guess, so it is recorded here. If a card ever appears in the wrong tongue this
-  // line says whether the wrong language arrived or the catalogue lookup missed.
-  audit('FACEID_PROMPT · interface language '+lang+(c.faceid ? '' : ' · CHROME MISSING'),'ok');
-  const a = await popup({
-    kicker:c.faceid.kicker, title:c.faceid.title,
-    body:c.faceid.body,
-    fields:`<div class="fr"><span class="k">${c.faceid.draftLabel}</span><span class="v">${d.draft_id} · v${d.version}</span></div>
+  if(!skipFaceId){
+    iface(tt(lang).ready); await sleep(500);
+    if(my!==RUN) return null;
+    stage(12,'run');
+    // Which language this chrome renders in is decided by the backend's settled session language,
+    // not by a local guess, so it is recorded here. If a card ever appears in the wrong tongue this
+    // line says whether the wrong language arrived or the catalogue lookup missed.
+    audit('FACEID_PROMPT · interface language '+lang+(c.faceid ? '' : ' · CHROME MISSING'),'ok');
+    const a = await popup({
+      kicker:c.faceid.kicker, title:c.faceid.title,
+      body:c.faceid.body,
+      fields:`<div class="fr"><span class="k">${c.faceid.draftLabel}</span><span class="v">${d.draft_id} · v${d.version}</span></div>
             <div class="fr big"><span class="k">${c.faceid.amountLabel}</span><span class="v">${money(d.amount_minor, d.currency)}</span></div>`,
-    acts:[{id:'ok',label:icon('faceid')+' '+c.faceid.confirm,kind:'yes'}],
-    icon:'faceid',
-    note:c.faceid.note
-  });
-  if(my!==RUN) return null;
-  if(a==='cancelled'){ stage(12,''); return null; }
-  audit('MOCK_FACEID_SUCCESS (local) · calling /confirm…','ok');
+      acts:[{id:'ok',label:icon('faceid')+' '+c.faceid.confirm,kind:'yes'}],
+      icon:'faceid',
+      note:c.faceid.note
+    });
+    if(my!==RUN) return null;
+    if(a==='cancelled'){ stage(12,''); return null; }
+    audit('MOCK_FACEID_SUCCESS (local) · calling /confirm…','ok');
+  } else {
+    audit('FACEID_ALREADY_VERIFIED · step-up passed, skipping the repeat prompt','ok');
+  }
   let resp;
   try{
     resp = await postJSON('/confirm', {
@@ -298,13 +359,25 @@ async function liveConfirmOnce(session, lang, my){
 // guardrail live; previously every voice turn was sent as a hardcoded 0.93, so a badly
 // misheard amount could never trigger a "please repeat that" challenge.
 // asrSource travels with it so the backend can always tell a measurement from a stand-in.
+
+/* Take the working card down — but ONLY if it is still the working card on screen. If the
+   customer already hid it, or the review card has taken over, it must not be torn down from
+   under them. Used on the paths that raise no card of their own; a path that DOES raise one
+   simply lets popup() overwrite #mcard, which is an instant swap with no blank in between. */
+function dismissWorking(workPopup){
+  if(!workPopup) return;
+  const media = popMedia();
+  const stillWorking = media && (media.getAttribute('src')||'').indexOf('Working')!==-1;
+  if($('modal').classList.contains('show') && stillWorking) closePopup('auto');
+}
+
 async function liveFreeTurn(text, viaVoice, asrConfidence, asrSource){
   stopSpeaking();   // barge-in: a fresh customer turn cuts Auntie off mid-sentence
   const my=++RUN;
   BUSY=true;
   if(!FREE_SESSION_ID){
     FREE_SESSION_ID = 'sess_free_' + Math.random().toString(36).slice(2,10);
-    // Panels only. The transcript is deliberately NOT cleared: AuntieJoy's intro card
+    // Panels only. The transcript is deliberately NOT cleared: Joy's intro card
     // (and anything already said) must stay on screen, or starting a conversation would
     // look identical to the page reloading.
     resetPanels();
@@ -315,7 +388,9 @@ async function liveFreeTurn(text, viaVoice, asrConfidence, asrSource){
     if(my!==RUN) return;
     audit('LIVE BACKEND · '+API_BASE,'ok');
   }
-  let lang = guessLang(text);
+  // Mirrors the backend's dominant_language() so the processing card is in the same language
+  // as the reply that is about to arrive (see dominantLang above).
+  let lang = dominantLang(text);
   // Clear only the STALE, transient mic status markers ("Listening…" / "Hearing…" /
   // "Stopped listening…") left over from a PREVIOUS mic press. The "Heard you · clarity N%"
   // marker is KEPT: it is the only place the engine's clarity reading survives, and it proves
@@ -335,6 +410,28 @@ async function liveFreeTurn(text, viaVoice, asrConfidence, asrSource){
     if(_pendingYouBubble){ try{ _pendingYouBubble.remove(); }catch(_){} _pendingYouBubble = null; }
     customer(text);
   }
+  // A turn is in flight and there is nothing to look at yet: put the working card up. It closes
+  // itself on a timer AND is dismissable, so a slow request can never become a dead end, and the
+  // turn resolves it either way. Only raised when no other card is already up — a field review or
+  // a Face ID prompt must never be covered by it. Nothing has been sent at this point; the note
+  // on the card says so, because a thinking pause otherwise looks like a silent transaction.
+  let workPopup = null;
+  {
+    const media = popMedia();
+    const already = media && (media.getAttribute('src')||'').indexOf('Working')!==-1;
+    if(!already && !(popupResolve && $('modal').classList.contains('show'))){
+      // tt() falls back to EN for an unrecognised language, so `working` is always present.
+      const w = tt(lang).chrome.working;
+      workPopup = popup({
+        gif: STAGE_GIF.working, gifAlt:'Joy is working on it', kicker:w.kicker,
+        title:w.title, body:w.body,
+        acts:[{id:'hide',label:w.hide,kind:'no'}],
+        auto: 9000, autoResult:'auto',
+        note:w.note
+      });
+    }
+  }
+
   let resp;
   try{
     // A number alone is not evidence. Where it came from travels with it, so the audit trail
@@ -347,7 +444,10 @@ async function liveFreeTurn(text, viaVoice, asrConfidence, asrSource){
     // When OFF neither field is sent, so the backend behaves exactly as it always did.
     const vMode = (typeof voiceModeOn === 'function') && voiceModeOn();
     resp = await postJSON('/turn', {
-      session_id: FREE_SESSION_ID, text, via_voice: !!viaVoice,
+      // Voice Mode is a GLOBAL demo switch: when ON, every input (mic, typed, or chip) is
+      // declared as a voice turn so the backend's Stage 1 audio-risk gate fires and holds the
+      // send behind FaceID. When OFF, via_voice stays honest (typed = false → no gate).
+      session_id: FREE_SESSION_ID, text, via_voice: vMode ? true : !!viaVoice,
       asr_confidence: vMode
         ? 0.41                              // unverified speaker: far below the 0.60 floor
         : (hasConf ? asrConfidence          // real engine confidence, when the browser gives one
@@ -366,6 +466,9 @@ async function liveFreeTurn(text, viaVoice, asrConfidence, asrSource){
     // is the honest thing to show a judge instead of a generic "unreachable".
     if(err && err.timedOut) audit('TURN_TIMEOUT · '+err.message,'stop');
     else audit('TURN_CALL_FAILED · '+err.message,'stop');
+    // A failed call must not leave the working card up. Nothing is in flight any more, and a
+    // card that says "preparing the payment" would be claiming work that was never started.
+    if(workPopup) closePopup('cancelled');
     // The backend never answered, so there is no catalogue line to quote and no settled session
     // language: the local reading of this turn's words is the best available, and the fallback
     // sentence is chrome, so it follows that.
@@ -373,6 +476,12 @@ async function liveFreeTurn(text, viaVoice, asrConfidence, asrSource){
     BUSY=false; return;
   }
   if(my!==RUN) return;
+  // The answer is in, but the working card is DELIBERATELY STILL UP. What comes next — play()
+  // animating the control chain, then the field review / Face ID card — takes a couple of
+  // seconds, and taking the card down first left the customer staring at a finished transcript
+  // with nothing happening: the dead gap. So the card now stays until either the next popup
+  // takes it over (popup() overwrites #mcard, so that swap is instant, with no close-then-
+  // reopen blank) or, on a path that raises no card, dismissWorking() below takes it down.
   // The backend has now settled which language this conversation is spoken in (it counts the
   // customer's words and holds the winner for the whole session). Adopt it for everything the
   // customer sees next (the field review, the Face ID prompt, the receipt) instead of the
@@ -386,17 +495,39 @@ async function liveFreeTurn(text, viaVoice, asrConfidence, asrSource){
   const st = resp.session.state;
   syncPersonalization(resp.session);   // the backend's Personalization Agent already decided this turn
   showUnderstood(resp, asrConfidence, viaVoice);   // diagnostic: intent + clarity, hidden in the customer view
+  // IDENTITY STEP-UP (Voice Mode / unverified speaker). Stage 1 could not verify the speaker, so
+  // the backend HELD the request and suppressed the read-back: Joy has spoken only the hold line,
+  // and the payment has NOT been presented. FaceID decides whether it ever is, and it runs HERE,
+  // before the review card, so an unverified person never sees the amount or the payee. Declining
+  // leaves the request held: no draft card, no /confirm, no payment.
+  let faceidDone = false;
+  if(resp.session.step_up_required && resp.session.step_up_reason === 'SPEAKER_MISMATCH'){
+    faceidDone = await stepUpFaceId(lang, my);
+    if(my!==RUN || !faceidDone){
+      dismissWorking(workPopup);
+      BUSY=false; return;
+    }
+    // Verified on this device: release the hold so the normal review can present the payment.
+    // faceidDone tells liveConfirmFlow not to ask for FaceID a second time.
+    resp.session.step_up_required = false;
+  }
   // The read-back may have just ASKED the customer something, to confirm a slang amount
   // ("a grand"), or which account a payment should come from. Showing the "Confirm & Slide to
   // Pay" card at that moment puts two competing actions on screen (the card and the question
   // above it) and the customer cannot tell which to do first, so the card is held back until
   // they have answered. Nothing is skipped: the very next turn releases it.
   if(st==='CONFIRMATION_READY' && resp.session.draft && !resp.session.awaiting_multi_go_ahead){
-    await liveConfirmFlow(resp.session, lang, my);
+    // liveConfirmFlow raises the review card, which overwrites #mcard and therefore REPLACES
+    // the working card with no gap. dismissWorking() afterwards is a no-op unless that flow
+    // raised no card at all, in which case the working card would otherwise sit there.
+    await liveConfirmFlow(resp.session, lang, my, faceidDone);
+    dismissWorking(workPopup);
   } else if(st==='CONFIRMATION_READY' && resp.session.awaiting_multi_go_ahead){
     audit('CONFIRM_CARD_DEFERRED · the read-back above is still asking a question; '
           + 'the review card appears once the customer answers.','ok');
+    dismissWorking(workPopup);   // no card is coming, so the transcript must be visible
   } else {
+    dismissWorking(workPopup);   // ditto: the customer should be looking at the transcript
     if(TERMINAL_STATES.has(st)) FREE_SESSION_ID = null;   // conversation ended, next turn starts fresh
     if(st==='CLARIFICATION_REQUIRED'){
       // The backend already spoke this turn's clarification line, and play() rendered it as
@@ -593,7 +724,7 @@ async function micCapture(){
     if(haveStt){
       let r = null;
       try{ r = await sttTurn(setYou); }
-      catch(err){ console.warn('[auntiejoy] falling back to the browser recogniser:', err.message); }
+      catch(err){ console.warn('[joy] falling back to the browser recogniser:', err.message); }
       if(r && r.text){
         setYou(r.text);   // settle the customer's bubble on the FINAL text, not the last partial
         const c = (typeof r.confidence==='number') ? r.confidence : null;

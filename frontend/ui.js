@@ -151,7 +151,7 @@ function renderVerdict(name, p){
       <div class="vbar">
         <div class="vbar-t"><span>Confidence</span><b>${pct}%</b></div>
         <div class="vtrack"><i style="width:${pct}%"></i><u style="left:${Math.round(thr*100)}%"></u></div>
-        <div class="vthr">threshold ${thr}: below this, AuntieJoy asks you to say it again</div>
+        <div class="vthr">threshold ${thr}: below this, Joy asks you to say it again</div>
       </div>
       ${row('Detected language', esc(p.detected_language))}
       ${p.reason?`<div class="vwhy">“${esc(p.reason)}”</div>`:''}`;
@@ -222,7 +222,7 @@ function receiptCard(o, lang){
 
 /* ==========================================================================
    INLINE DRAFT CARD: "Voice Command Recognized"
-   What AuntieJoy THINKS it heard, shown in the transcript before any approval
+   What Joy THINKS it heard, shown in the transcript before any approval
    starts. Deliberately not a modal: the customer should be able to read it
    against the conversation that produced it, and it stays on screen as the
    record of what was recognised.
@@ -399,13 +399,38 @@ function closePopup(v){
   $('modal').classList.remove('show'); $('mcard').innerHTML='';
   if(r) r(v||'cancelled');
 }
+/* The moving Auntie shown on a card that is waiting on the backend, or null when the card
+   on screen has none. Read from the DOM rather than cached, so a caller can always tell
+   WHICH popup is currently up before it closes one. */
+function popMedia(){ return $('mcard').querySelector('.mmedia'); }
+
+/* Which state Auntie is in for this card. An explicit cfg.gif always wins; otherwise read the
+   card itself, so most call sites never have to think about it:
+     - the faceid icon       → the biometric prompt
+     - a field table         → the field-by-field review
+     - an act that says "no" → a refusal or a correction, so she must not be smiling at them
+   Returns null when nothing matches, and the stage then falls back to the still portrait. */
+function popupGif(cfg){
+  if(cfg.gif) return cfg.gif;
+  const acts = cfg.acts || [];
+  if(cfg.icon === 'faceid')          return STAGE_GIF.faceid;
+  if(cfg.fields)                     return STAGE_GIF.confirm;
+  if(acts.some(a => a.kind==='dan')) return STAGE_GIF.notallow;
+  if(acts.some(a => a.kind==='no'))  return STAGE_GIF.notallow;
+  return null;
+}
+
 function popup(cfg){
   return new Promise(res=>{
     popupResolve=res;
     const steps=cfg.steps;
     $('mcard').innerHTML=
-      `<div class="mtop"><span class="kicker">${cfg.kicker}</span>`+
-        `<div class="micon">${icon(cfg.icon||'shieldCheck')}</div></div>`+
+      `<div class="mtop${cfg.splash?' splash':''}"><span class="kicker">${cfg.kicker}</span>`+
+        `<div class="popStage" id="popStage">`+
+          `<img class="mmedia" id="mmedia" alt="">`+
+          `<img class="mstill" src="${MASCOT_STILL}" alt="Joy">`+
+        `</div>`+
+      `</div>`+
       `<div class="mbody">
         <h3>${fill(cfg.title)}</h3>
         <p>${fill(cfg.body)}</p>
@@ -416,9 +441,26 @@ function popup(cfg){
         ${cfg.note?`<div class="mnote">${fill(cfg.note)}</div>`:''}
       </div>`;
     $('modal').classList.add('show');
+    // Paint the state clip, if this card has one. It fades in only once it has actually
+    // decoded, and onerror leaves it hidden, so a missing or slow asset always degrades to
+    // the still portrait underneath rather than to an empty box or a broken-image icon.
+    const src = popupGif(cfg);
+    if(src){
+      const media = $('mcard').querySelector('.mmedia');
+      media.classList.remove('on');
+      media.onload  = () => media.classList.add('on');
+      media.onerror = () => media.classList.remove('on');
+      media.src = src;
+      media.alt = cfg.gifAlt || '';
+      $('mcard').querySelector('.popStage').classList.add('on');
+    }
     const close=v=>{ popupResolve=null; $('modal').classList.remove('show'); $('mcard').innerHTML=''; res(v); };
     $('mcard').querySelectorAll('.macts button').forEach(b=>b.onclick=()=>close(b.dataset.a));
-    if(cfg.auto) setTimeout(()=>close(cfg.autoResult||'auto'), cfg.auto);
+    // An auto-closing popup must not take down whatever replaced it. The working card closes
+    // itself on a timer, and by the time that timer fires a field review or a Face ID prompt
+    // can easily be the card on screen. Without this check the late timer would blank the
+    // card the customer is actually reading, and resolve the wrong promise.
+    if(cfg.auto) setTimeout(()=>{ if(popupResolve===res) close(cfg.autoResult||'auto'); }, cfg.auto);
   });
 }
 
