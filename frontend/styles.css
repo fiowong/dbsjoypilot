@@ -962,7 +962,10 @@ body.tech-hidden .ins{display:none}
 .popStage{position:relative;aspect-ratio:4 / 3;max-height:190px;width:78%;
   margin:10px auto 0;overflow:hidden;border-radius:15px;align-self:center}
 .popStage .mstill{position:absolute;left:50%;bottom:-13%;transform:translateX(-50%);
-  height:118%;width:auto;opacity:1;transition:opacity .35s ease;
+  /* height:100% (was 118%): with bottom:-13%, a 118% tall box put the image's top ~5% ABOVE
+     the stage, and overflow:hidden on .popStage clipped Auntie's head off the top. 100% keeps
+     the bottom peek but anchors the head safely inside the frame. */
+  height:100%;width:auto;opacity:1;transition:opacity .35s ease;
   filter:drop-shadow(0 8px 16px rgba(196,30,30,.22))}
 /* `cover` so the clip fills the rounded stage with no sharp inner rectangle, plus
    `object-position:center top` so that whenever `max-height` makes the stage wider than the

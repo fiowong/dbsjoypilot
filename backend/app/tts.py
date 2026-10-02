@@ -92,6 +92,11 @@ async def _cartesia_pcm_chunks(text: str, ui_lang: str) -> AsyncIterator[bytes]:
 
     lang = language_for(ui_lang)
     model = Settings.TTS_MODEL or "sonic-latest"
+    # Log the voice + model + language on every synthesis so the operator can confirm which
+    # Cartesia voice is actually speaking (e.g. after a credit refill, or a per-lang swap).
+    # /health only exposes the model and a bool per language, never the voice id itself.
+    log.info("tts cart: lang=%s voice_id=%s model=%s text_len=%d",
+             ui_lang, voice_id, model, len(text))
     params = {"cartesia_version": CARTESIA_VERSION, "apiKey": Settings.TTS_API_KEY}
     url = f"{CARTESIA_WS}?{urlencode(params)}"
     headers = {"X-API-Key": Settings.TTS_API_KEY}
