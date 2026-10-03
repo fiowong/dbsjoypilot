@@ -57,7 +57,16 @@ def budget_remaining() -> Optional[float]:
     return None if deadline is None else max(0.0, deadline - time.monotonic())
 
 
-async def llm_complete(system_prompt: str, user_payload: dict) -> str:
+async def llm_complete(system_prompt: str, user_payload: dict,
+                       attempt_timeout_s: Optional[float] = None) -> str:
+    """One live model call for one agent.
+
+    ``attempt_timeout_s`` is that agent's own ceiling for a single attempt, taken from
+    Settings.AGENT_TIMEOUTS. The agents do very different amounts of work (the Validation agent's
+    five field checks take ~8s against the Guardrails agent's ~2s), so one shared ceiling would
+    either kill the slow agent mid-answer or let the fast one hang far too long. Falls back to
+    Settings.AGENT_TIMEOUT_S when the caller does not name one.
+    """
     if not Settings.LIVE_LLM:
         raise AgentUnavailable("live LLM not configured")
     if turn_budget_spent():
@@ -84,9 +93,9 @@ async def llm_complete(system_prompt: str, user_payload: dict) -> str:
                 "turn live-model budget spent, using the deterministic mock for this agent")
         await asyncio.sleep(_CALL_PACE_S)
         # A single attempt may not outlive the budget either, so the ceiling is whichever
-        # comes first: the per-attempt timeout, or what this turn has left to spend.
+        # comes first: this agent's per-attempt timeout, or what this turn has left to spend.
         remaining = budget_remaining()
-        attempt_timeout = Settings.AGENT_TIMEOUT_S
+        attempt_timeout = attempt_timeout_s or Settings.AGENT_TIMEOUT_S
         if remaining is not None:
             attempt_timeout = max(1.0, min(attempt_timeout, remaining))
         try:

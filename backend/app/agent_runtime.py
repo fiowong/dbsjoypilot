@@ -53,7 +53,64 @@ _ENUM_ALIASES = {
     "currency": {
         "sgd": "SGD", "s$": "SGD", "s$": "SGD", "sg": "SGD", "sing": "SGD", "singapore": "SGD",
     },
+    # The model names the FIELD it wants clarified, and it names it the way the JSON schema
+    # does ("amount_minor"), not the way the control contract does ("AMOUNT"). Same object,
+    # two vocabularies, so both are accepted. This is a label, never a decision: the amount
+    # itself and the freeze/clarify route stay strictly validated.
+    "clarification_field": {
+        "amount": "AMOUNT", "amount_minor": "AMOUNT", "amt": "AMOUNT", "value": "AMOUNT",
+        "sum": "AMOUNT", "money": "AMOUNT", "total": "AMOUNT",
+        "recipient": "RECIPIENT", "recipient_phrase": "RECIPIENT", "payee": "RECIPIENT",
+        "payee_phrase": "RECIPIENT", "beneficiary": "RECIPIENT", "who": "RECIPIENT",
+        "source_account": "SOURCE_ACCOUNT", "source_account_phrase": "SOURCE_ACCOUNT",
+        "source": "SOURCE_ACCOUNT", "account": "SOURCE_ACCOUNT", "from_account": "SOURCE_ACCOUNT",
+        "from": "SOURCE_ACCOUNT",
+    },
 }
+
+# A live model explains its own label instead of just emitting it:
+#   "zh (Mandarin, with code-mixed English 'transfer')"   -> ZH
+#   "Malay (colloquial Singapore Malay/Singlish)"          -> BM
+#   "en (with Malay phrase 'satu-satu')"                   -> EN
+# The aside is commentary, and it is dangerous to search: "code-mixed" contains MIXED, so a
+# naive substring match would call a plain Mandarin turn MIXED. Strip the aside first, then
+# match on what is actually left.
+_PAREN_ASIDE_RE = re.compile(r"\([^)]*\)|\[[^\]]*\]")
+# Too ordinary as English words to scan for inside a sentence ("it may be English").
+_LANG_WORD_STOP = {"may", "sing", "sg"}
+
+
+def _canonical_language(value: str) -> Optional[str]:
+    """Map a loosely-worded language label onto EN / ZH / BM / MIXED.
+
+    Returns None when nothing recognisable is left, so the caller keeps the original value and
+    the strict schema still rejects it: an unrecognised language stays a failure, never a guess.
+    """
+    cleaned = _PAREN_ASIDE_RE.sub(" ", value)
+    cleaned = re.sub(r"['\"]", " ", cleaned).strip().lower()
+    if not cleaned:
+        return None
+    # 1. The whole remaining string IS a code or a name: "zh", "ms-my", "malay", "mixed".
+    for canon, aliases in _LANG_ALIASES.items():
+        if cleaned == canon.lower() or cleaned in aliases:
+            return canon
+    # 2. Otherwise it is a sentence ("english and malay"). Count the DISTINCT languages named
+    #    as whole words; more than one language is exactly what MIXED means.
+    named = []
+    for canon, aliases in _LANG_ALIASES.items():
+        if canon == "MIXED":
+            continue
+        for word in {canon.lower()} | set(aliases):
+            if word in _LANG_WORD_STOP:
+                continue
+            if re.search(rf"(?<![a-z0-9]){re.escape(word)}(?![a-z0-9])", cleaned):
+                named.append(canon)
+                break
+    if len(named) > 1:
+        return "MIXED"
+    if len(named) == 1:
+        return named[0]
+    return None
 
 
 def _literal_tokens(ann) -> list:
@@ -162,13 +219,11 @@ def _normalize_obj(obj: dict, model_cls: type[BaseModel]) -> dict:
         if not isinstance(val, str):
             continue
         s = val.strip()
-        # detected_language: full-name / code synonyms
+        # detected_language: full-name / code synonyms / a label with an explanatory aside
         if name == "detected_language":
-            low = s.lower()
-            for canon, aliases in _LANG_ALIASES.items():
-                if low == canon.lower() or low in aliases:
-                    obj[name] = canon
-                    break
+            canonical = _canonical_language(s)
+            if canonical is not None:
+                obj[name] = canonical
             continue
         # status / currency: explicit synonym tables
         alias = _ENUM_ALIASES.get(name, {}).get(s.lower())

@@ -639,6 +639,28 @@ async def _run_turn(req: TurnRequest) -> TurnResponse:
                                   "note": "live UNCLEAR relaxed to PAYMENT for card/own-account "
                                           "by deterministic safeguard"})
 
+    # Deterministic safeguard (the open-recipient answer, IN-06): when the only thing outstanding
+    # is WHICH person, and the customer names exactly one saved payee, that sentence IS the answer.
+    # The live classifier has no way to know the answer is already determined, so it can return a
+    # low-confidence UNCLEAR for a perfectly good reply ("John Doe lah."), which would discard a
+    # payment the customer is in the middle of making. Deterministic code can settle it: one match
+    # is unambiguous, two matches is still ambiguous and falls through untouched. Like every other
+    # relaxer here this can only complete an under-trigger, it never weakens a control.
+    if (intent.intent == "UNCLEAR" and session.open_clarification_field == "RECIPIENT"):
+        matches = _payees_named_in(req.text, session.customer_id)
+        if len(matches) == 1:
+            intent = IntentResult(intent="PAYMENT_CLARIFICATION", confidence=0.97,
+                                  detected_language=detect_language(req.text),
+                                  reason="A recipient clarification was open and the turn names "
+                                         "exactly one saved payee, so it is the answer to that "
+                                         "question (deterministic safeguard).")
+            engine = "deterministic-safeguard"
+            emit("INTENT_RESULT", 4, {"engine": engine, **intent.model_dump(),
+                                      "threshold": Settings.INTENT_CONFIDENCE_THRESHOLD,
+                                      "matched_payee": matches[0].display_name,
+                                      "note": "live UNCLEAR completed to PAYMENT_CLARIFICATION, the "
+                                              "turn names the one payee the question asked for"})
+
     # ---------- The nickname question, once it is open ----------
     # Two turns, both handled here rather than by the agents, because neither turn is a payment:
     #   1. the customer answers WHO the name means  -> bind it, then ask to remember it;
@@ -783,6 +805,38 @@ async def _run_turn(req: TurnRequest) -> TurnResponse:
             "note": "A customer who asks for scam help is never charged a fee for asking."})
         say_line("SAFETY_HELP", 4)
         return await finish()
+    # Deterministic safeguard (restatement): the live classifier has nothing to work with when the
+    # customer merely RESTATES a value that is already on the approval card - "Aiyoh, lima puluh
+    # saja lah." ("just fifty") arrives with the S$50 draft already prepared - so it returns a
+    # low-confidence UNCLEAR and the turn collapses into "I don't understand you". Nothing here
+    # decides anything: the amount spoken is compared with the draft's own amount using the
+    # deterministic parser, and an EQUAL value cannot be a new instruction, so the draft is simply
+    # read back again. A DIFFERENT amount still falls through to the normal route, where it is an
+    # edit and invalidates every downstream result as usual.
+    if (intent.intent == "UNCLEAR" and session.draft is not None
+            and session.confirmation is not None
+            and session.open_clarification_field is None
+            and session.outcome == "ALLOW"          # the review is what is outstanding, nothing else
+            and not session.frozen and not session.cancelled
+            and not _multi_in_progress(session)):
+        spoken_amount, _ambiguous = parse_amount(req.text)
+        if spoken_amount is not None and spoken_amount == session.draft.amount_minor:
+            # Stage 0 resets the state to CAPTURED at the top of every turn, so a turn that ends
+            # without a decision has to say where it left off. Re-presenting a prepared draft is
+            # CONFIRMATION_READY: the draft is validated and is waiting for the customer, which is
+            # exactly the state the previous turn ended in.
+            session.state, session.outcome = SessionState.CONFIRMATION_READY, "ALLOW"
+            emit("RESTATEMENT_ACKNOWLEDGED", 4, {
+                "engine": "deterministic-safeguard",
+                "confidence_received": intent.confidence,
+                "spoken_amount_minor": spoken_amount,
+                "draft_amount_minor": session.draft.amount_minor,
+                "note": "The customer restated the amount already on the draft. The draft is read "
+                        "back unchanged; no field is changed and nothing is authorised."})
+            _emit_draft_readback(session.draft, parse_reference(req.text) or None, None,
+                                 lang, session.customer_id, emit, say_line)
+            return await finish()
+
     if intent.intent == "UNCLEAR":
         # IN-10 continuation: a mumble or a stray "yes" while a multi-instruction queue is under
         # review. Route it to the merge handler, which treats a turn with no new instruction as a
@@ -846,7 +900,55 @@ async def _run_turn(req: TurnRequest) -> TurnResponse:
                 "review_restarted": True,
                 "note": "The amount was not re-interpreted. Only the presentation language changed."})
 
+    # ---------- Deterministic routing, decided BEFORE the Payment Agent is consulted ----------
+    # Two kinds of turn are settled by plain code, from the sentence alone, and both then
+    # re-derive every payment themselves:
+    #   - several recipients named in one request        -> ask which one
+    #   - several independent instructions in one breath -> split, review them one at a time
+    # Neither of them EVER reads the Payment Agent's proposal, so consulting the model first
+    # spent a live call on an answer that was thrown away. On a two-instruction breath that call
+    # measured 5-18s, which is most of the turn. The Payment Agent call therefore sits after
+    # both branches, and both branches return before it is reached.
+    # A single-payment turn is unaffected: it falls through both branches and emits exactly the
+    # same events, in exactly the same order, as it did before this reordering.
+    #
+    # §MVP, one saved-payee transfer at a time. A request that names 2+ payees is clarified down
+    # to a single recipient before any draft is built. This is a deterministic policy that does
+    # not depend on the model's proposal at all.
+    multi = detect_multiple_recipients(req.text, session.customer_id)
+    if multi:
+        session.state, session.outcome = SessionState.CLARIFICATION_REQUIRED, "CLARIFY"
+        session.open_clarification_field = "RECIPIENT"
+        session.note_clarification("MULTIPLE_RECIPIENTS")
+        emit("CLARIFICATION_OPENED", 5, {
+            "clarification_field": "RECIPIENT",
+            "clarification_key": "MULTIPLE_RECIPIENTS",
+            "candidates": [{"displayName": n} for n in multi],
+            "canonical_draft": "NOT_CREATED"})
+        say_line("MULTIPLE_RECIPIENTS", 5, recipients=join_options(multi, lang))
+        return await finish()
+
+    # ---------- IN-10: multiple independent instructions in one breath ----------
+    # "Pay StarHub S$86.40, send Ah Girl S$50, and move S$1,000 to joint" names three distinct
+    # payment targets. split_instructions only returns >=2 when that is genuinely the case, so
+    # ordinary single payments (and two-saved-payee turns, handled above) are untouched.
+    instructions = split_instructions(req.text, session.customer_id)
+    # IN-10 continuation, a breath that arrives WHILE a multi-instruction queue is already
+    # being reviewed. The customer may add a new instruction or amend one already queued
+    # ("yes, and send Ah Girl from my Current Account"). Either way we MERGE into the existing
+    # queue: we never rebuild it from scratch (that would discard the instruction under review)
+    # and we never let a spoken "yes" execute anything, FaceID still stands between the
+    # customer and the money (§A.8 E1). The leading acknowledgement is stripped by
+    # instruction_text so the new instruction is resolved on its own.
+    if _multi_in_progress(session):
+        return await run_multi_merge(req, session, lang, emit, say_line, finish)
+    if len(instructions) >= 2:
+        return await run_multi_turn(req, session, lang, instructions, emit, say_line, finish)
+
     # ---------- Stage 5: Payment Agent ----------
+    # Reached only by a single-payment turn. Everything above returned early, so the model is
+    # never asked for a proposal that the deterministic splitter or the recipient policy would
+    # discard anyway.
     ctx = {
         "open_clarification_field": session.open_clarification_field,
         "customer_id": session.customer_id,
@@ -889,40 +991,6 @@ async def _run_turn(req: TurnRequest) -> TurnResponse:
     emit("PAYMENT_PROPOSAL", 5, {"engine": engine, **proposal.model_dump(),
                                  "trusted": False,
                                  "note": "Untrusted proposal. No beneficiary id, token or approval."})
-
-    # §MVP, one saved-payee transfer at a time. A request that names 2+ payees is clarified down
-    # to a single recipient before any draft is built. This is a deterministic policy, so it fires
-    # regardless of what the (untrusted) Payment Agent returned, even a PROPOSAL_READY that carried
-    # two names would be caught here instead of silently binding the first match.
-    multi = detect_multiple_recipients(req.text, session.customer_id)
-    if multi:
-        session.state, session.outcome = SessionState.CLARIFICATION_REQUIRED, "CLARIFY"
-        session.open_clarification_field = "RECIPIENT"
-        session.note_clarification("MULTIPLE_RECIPIENTS")
-        emit("CLARIFICATION_OPENED", 5, {
-            "clarification_field": "RECIPIENT",
-            "clarification_key": "MULTIPLE_RECIPIENTS",
-            "candidates": [{"displayName": n} for n in multi],
-            "canonical_draft": "NOT_CREATED"})
-        say_line("MULTIPLE_RECIPIENTS", 5, recipients=join_options(multi, lang))
-        return await finish()
-
-    # ---------- IN-10: multiple independent instructions in one breath ----------
-    # "Pay StarHub S$86.40, send Ah Girl S$50, and move S$1,000 to joint" names three distinct
-    # payment targets. split_instructions only returns >=2 when that is genuinely the case, so
-    # ordinary single payments (and two-saved-payee turns, handled above) are untouched.
-    instructions = split_instructions(req.text, session.customer_id)
-    # IN-10 continuation, a breath that arrives WHILE a multi-instruction queue is already
-    # being reviewed. The customer may add a new instruction or amend one already queued
-    # ("yes, and send Ah Girl from my Current Account"). Either way we MERGE into the existing
-    # queue: we never rebuild it from scratch (that would discard the instruction under review)
-    # and we never let a spoken "yes" execute anything, FaceID still stands between the
-    # customer and the money (§A.8 E1). The leading acknowledgement is stripped by
-    # instruction_text so the new instruction is resolved on its own.
-    if _multi_in_progress(session):
-        return await run_multi_merge(req, session, lang, emit, say_line, finish)
-    if len(instructions) >= 2:
-        return await run_multi_turn(req, session, lang, instructions, emit, say_line, finish)
 
     if proposal.status != "PROPOSAL_READY":
         # ---------- A name the customer used that we hold nobody for ----------
@@ -1514,7 +1582,14 @@ async def run_multi_turn(req: TurnRequest, session, lang: str, instructions: Lis
         emit("CANONICAL_DRAFT_CREATED", 7, {
             "draft": d.model_dump(), "schema_validation": "PASS", "version": d.version,
             "previous_versions_superseded": False})
-        emit("VALIDATION_RESULT", 8, {"engine": "mock", **v.model_dump(),
+        # NOT "mock". This validation never attempted a model call, so it is not a fallback:
+        # ValidationAgent.mock IS the reference policy on this path, and the comment above
+        # explains why the live call was rejected (its RECIPIENT check re-reads the payee from
+        # the evidence and froze the payment on a taught nickname). Three labels, three meanings:
+        #   "live"                            the model answered
+        #   "deterministic (reference policy)" by design, no model needed
+        #   "mock"                            the model was tried and failed
+        emit("VALIDATION_RESULT", 8, {"engine": "deterministic (reference policy)", **v.model_dump(),
                                       "scope": "independent, no Payment Agent reasoning supplied"})
     # One bubble, line-separated: the customer asked for it one at a time, but they want to
     # *read* it as one card, not four separate ones. Joining with "\n" and letting the CSS

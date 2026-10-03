@@ -60,10 +60,12 @@ function dominantLang(text){
 // indefinitely: the request sat open, the input stayed disabled and Auntie never answered,
 // with nothing on screen to say why. A timeout is not a decision, it is a refusal to wait
 // forever, so it is reported as such (err.timedOut) and the caller decides what to say.
-// 25s, deliberately ABOVE the backend's own 15s turn budget, so the server gives up first
+// 45s, deliberately ABOVE the backend's own 30s turn budget, so the server gives up first
 // (and still answers, having fallen back to its deterministic mocks). The browser timeout
 // is a backstop for a backend that is not answering at all, not the thing that decides.
-const REQUEST_TIMEOUT_MS = 25000;
+// Raised together with TURN_DEADLINE_S: a live turn makes up to five model calls, and the
+// old 25s ceiling cut the turn off mid-way, which is what made the last agent show "mock".
+const REQUEST_TIMEOUT_MS = 45000;
 
 async function postJSON(path, body){
   const ctrl = new AbortController();
@@ -426,7 +428,7 @@ async function liveFreeTurn(text, viaVoice, asrConfidence, asrSource){
         gif: STAGE_GIF.working, gifAlt:'Joy is working on it', kicker:w.kicker,
         title:w.title, body:w.body,
         acts:[{id:'hide',label:w.hide,kind:'no'}],
-        auto: 9000, autoResult:'auto',
+        auto: 30000, autoResult:'auto',
         note:w.note
       });
     }
@@ -487,6 +489,7 @@ async function liveFreeTurn(text, viaVoice, asrConfidence, asrSource){
   // customer sees next (the field review, the Face ID prompt, the receipt) instead of the
   // local guess above, which only looked at this one sentence and disagreed with the backend.
   if(resp.session && resp.session.interface_language) lang = resp.session.interface_language;
+  dismissWorking(workPopup); // the answer is in, so stop saying "working on it"
   const seenStages=new Set();
   const steps = eventsToSteps(resp.events, seenStages).concat(finalStateSteps(resp.session));
   await play(steps, my);
@@ -721,17 +724,29 @@ async function micCapture(){
   try{
     // Prefer the real engine. Any failure (no config, no server, no key) falls through to
     // the browser's recogniser rather than leaving Auntie with a dead button.
+    // The swap USED to be silent, so nobody could tell which engine the words came from -
+    // and their confidence numbers are not the same measurement (Tencent reports word
+    // stability, the browser reports its own score), so "clarity %" isn't comparable
+    // between them. Both the audit trail and the customer's own status line now name the
+    // engine that actually ran, so a demo never claims Tencent ASR it didn't use.
     if(haveStt){
       let r = null;
       try{ r = await sttTurn(setYou); }
-      catch(err){ console.warn('[joy] falling back to the browser recogniser:', err.message); }
+      catch(err){
+        console.warn('[joy] falling back to the browser recogniser:', err.message);
+        audit('ASR_UNAVAILABLE · ' + err.message + ' · falling back to the browser recogniser','warn');
+      }
       if(r && r.text){
         setYou(r.text);   // settle the customer's bubble on the FINAL text, not the last partial
         const c = (typeof r.confidence==='number') ? r.confidence : null;
         const clarity = c!=null ? ` · clarity ${Math.round(c*100)}%` : ' · clarity not reported';
+        // sttTurn is the Tencent path, so any text it returns came from Tencent - even the
+        // interim-only fallback, where the final result never arrived.
+        const eng = 'Tencent ASR' + (r.engine ? ' (' + r.engine + ')' : '');
+        audit('ASR_ENGINE · ' + eng + ' · confidence source ' + (r.confidenceSource || 'unknown'),'ok');
         // The words now live in the customer's own bubble, so this left-hand marker carries
-        // only the reading that has no home there: how clearly the engine heard them.
-        setLive(`Heard you${clarity}`);
+        // only the readings that have no home there: clarity, and which engine produced it.
+        setLive(`Heard you${clarity} · ${eng}`);
         // Feed the REAL engine confidence through, so a garbled utterance can be challenged
         // instead of sailing past the ASR ambiguity guardrail.
         liveFreeTurn(r.text, true, c, r.confidenceSource);
@@ -743,7 +758,8 @@ async function micCapture(){
     if(spoken && spoken.text){
       setYou(spoken.text);
       const c = (typeof spoken.confidence==='number') ? spoken.confidence : null;
-      setLive(`Heard you${c!=null ? ` · clarity ${Math.round(c*100)}%` : ''}`);
+      audit('ASR_ENGINE · browser fallback · Tencent ASR produced no transcript for this turn','warn');
+      setLive(`Heard you${c!=null ? ` · clarity ${Math.round(c*100)}%` : ''} · browser fallback`);
       liveFreeTurn(spoken.text, true, c);
       return;
     }

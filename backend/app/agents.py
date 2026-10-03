@@ -396,7 +396,8 @@ class GuardrailsAgent:
     async def run(turn: str, ctx: dict) -> Tuple[GuardrailResult, str]:
         if Settings.LIVE_LLM:
             try:
-                raw = await llm_complete(GuardrailsAgent.prompt, {"latest_committed_turn": turn})
+                raw = await llm_complete(GuardrailsAgent.prompt, {"latest_committed_turn": turn},
+                                         Settings.AGENT_TIMEOUTS["guardrails"])
                 return typed_call(raw, GuardrailResult), "live"
             except AgentUnavailable:
                 pass                                   # fail closed to the deterministic control
@@ -455,7 +456,8 @@ class IntentClassifierAgent:
             try:
                 raw = await llm_complete(IntentClassifierAgent.prompt,
                                          {"latest_committed_turn": turn,
-                                          "open_clarification_field": ctx.get("open_clarification_field")})
+                                          "open_clarification_field": ctx.get("open_clarification_field")},
+                                         Settings.AGENT_TIMEOUTS["intent"])
                 return typed_call(raw, IntentResult), "live"
             except AgentUnavailable:
                 pass
@@ -626,7 +628,7 @@ class PaymentAgent:
                     "open_clarification_field": ctx.get("open_clarification_field"),
                     "active_draft": ctx.get("draft"),
                     "verified_session_facts": {"source_account_masked": "ending 1234"},
-                })
+                }, Settings.AGENT_TIMEOUTS["payment"])
                 return typed_call(raw, PaymentProposal), "live"
             except AgentUnavailable:
                 pass
@@ -743,7 +745,7 @@ class ValidationAgent:
                     "canonical_current_draft": draft.model_dump(),
                     "masked_verified_display_facts": verified,
                     "supported_transaction_type": "SAVED_PAYEE_TRANSFER",
-                })
+                }, Settings.AGENT_TIMEOUTS["validation"])
                 return typed_call(raw, ValidationResult), "live"
             except AgentUnavailable:
                 pass
@@ -782,7 +784,8 @@ class PersonalizationAgent:
     async def run(signals: PersonalizationSignals) -> Tuple[PersonalizationDecision, str]:
         if Settings.LIVE_LLM:
             try:
-                raw = await llm_complete(PersonalizationAgent.prompt, signals.model_dump())
+                raw = await llm_complete(PersonalizationAgent.prompt, signals.model_dump(),
+                                         Settings.AGENT_TIMEOUTS["personalization"])
                 return typed_call(raw, PersonalizationDecision), "live"
             except AgentUnavailable:
                 pass

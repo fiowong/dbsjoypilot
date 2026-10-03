@@ -11,6 +11,21 @@ try:
 except ImportError:
     pass
 
+def _clamped_float(raw, low, high, default):
+    """Parse `raw` as a float and keep it inside [low, high], else return `default`.
+
+    Used for provider knobs that are tuned by ear (speaking rate). A typo in .env must
+    degrade to the safe default, not raise at import time and take the whole API down.
+    """
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return default
+    if value != value:                       # NaN
+        return default
+    return max(low, min(high, value))
+
+
 # =====================================================================
 # 0. Configuration, every threshold is configuration, never prompt text (§8.6.4)
 # =====================================================================
@@ -20,18 +35,42 @@ class Settings:
 
     INTENT_CONFIDENCE_THRESHOLD = 0.75      # §8.6.4
     AGENT_TEMPERATURE = 0.0                 # §8.1
-    # 8s, not 30s. This is the ceiling for ONE upstream attempt, so a stalled provider now
-    # costs 8s before that agent fails closed to its deterministic mock instead of 30s. On
-    # stage the old 30s ceiling froze the customer view for over two minutes on one hung call.
+    # Ceiling for ONE upstream attempt, so a stalled provider costs this much before that agent
+    # fails closed to its deterministic mock. On stage the old 30s ceiling froze the customer view
+    # for over two minutes on one hung call, which is why it is a ceiling and not "just wait".
+    #
+    # It is NOT one number for all five agents. Measured against deepseek-v4-flash-202605 the
+    # agents differ by an order of magnitude, and the single 8s ceiling sat BELOW the Validation
+    # agent's own normal latency, so that agent was killed mid-answer, retried, and fell back to
+    # its mock while the retries ate the rest of the turn. Per-agent ceilings, each measured:
+    #   guardrails      2.0-2.5s    intent  1.9-3.0s    payment  5.0-7.3s
+    #   personalization 1.6-1.8s    validation 7.8-17.0s  <- five field checks, heaviest reply
+    # AGENT_TIMEOUT_S remains the fallback for any agent not named here.
     AGENT_TIMEOUT_S = 8.0
+    # payment and validation get real headroom because their replies are the largest. A
+    # multi-instruction breath ("move a grand to my joint account, then send fifty to Ah Girl")
+    # measured 16-18s on the Payment agent alone, so a 12s ceiling killed it, retried, and left
+    # the rest of the turn with no budget. Both ceilings still sit under TURN_DEADLINE_S, so a
+    # genuinely hung call is bounded by the turn and the remaining agents fail closed as before.
+    AGENT_TIMEOUTS = {
+        "guardrails": 10.0,
+        "intent": 10.0,
+        "payment": 20.0,
+        "validation": 20.0,
+        "personalization": 8.0,
+    }
     AGENT_MAX_RETRIES = 3                    # §8.1, 4 attempts total with exponential backoff + 429 Retry-After (upstream is flaky)
     # The whole turn's live-model budget. Once it is spent, every REMAINING agent in this
     # turn skips the upstream entirely and uses its deterministic mock, so a slow provider
     # can never stack five slow calls into a frozen demo. The customer still gets an answer,
     # just a deterministic one, and the audit records that the budget ran out.
-    # 15s, deliberately WELL UNDER the frontend's 25s request timeout, so the backend is the
-    # thing that gives up first and the browser is only ever a backstop, never the decider.
-    TURN_DEADLINE_S = 15.0
+    # Measured, not guessed. deepseek-v4-flash-202605 answers an agent prompt in ~3-4s, and a
+    # full happy-path turn makes FIVE calls (personalization, guardrails, intent, payment,
+    # validation). 15s fit the first three and then starved validation, which showed up in the
+    # demo as "the last agent says mock". 22s covers all five with headroom; it stays under the
+    # frontend's REQUEST_TIMEOUT_MS so the backend is still the thing that gives up first and
+    # the browser is only ever a backstop, never the decider.
+    TURN_DEADLINE_S = 30.0
     ASR_AMBIGUITY_THRESHOLD = 0.85
 
     # Personalization Agent (§ observed-friction, not speech-pattern inference).
@@ -92,6 +131,13 @@ class Settings:
     TTS_VOICE_ID_EN = os.getenv("CARTESIA_VOICE_ID_EN", "")
     TTS_VOICE_ID_ZH = os.getenv("CARTESIA_VOICE_ID_ZH", "")
     TTS_VOICE_ID_BM = os.getenv("CARTESIA_VOICE_ID_BM", "")
+    # Speaking rate. Cartesia's `generation_config.speed`: a number from 0.6 (slowest) to
+    # 1.5 (fastest), 1.0 = the voice's natural pace. It is GUIDANCE, not a multiplier -
+    # Sonic keeps the delivery natural, so small nudges are inaudible on short lines and a
+    # real change needs a bigger step. Ignored entirely by Professional Voice Clones (their
+    # pacing comes from the source recordings); Instant Voice Clones honour it.
+    # An out-of-range or non-numeric value falls back to 1.0 rather than breaking speech.
+    TTS_SPEED = _clamped_float(os.getenv("CARTESIA_SPEED", "1.0"), 0.6, 1.5, 1.0)
     LIVE_TTS = bool(TTS_API_KEY)
 
     @classmethod

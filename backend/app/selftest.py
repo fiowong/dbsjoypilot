@@ -183,6 +183,20 @@ EXPECTED = {
     # statement alone, so the ledger is never invoked. See orchestrator.py's
     # INSUFFICIENT_FUNDS_RE branch (sets state=CLARIFICATION_REQUIRED, outcome=INSUFFICIENT_FUNDS).
     "H1":    {"state": "CLARIFICATION_REQUIRED", "outcome": "INSUFFICIENT_FUNDS", "ledger": "NOT_INVOKED"},
+
+    # ---- the demo script, not part of the A-H map (see scenarios.py) -------------
+    # DEMO1/DEMO2: one breath, two payments. Multi-instruction resolution is deterministic
+    # by design, and a multi-instruction read-back must never prepare a payment without a
+    # fresh confirmation, so the ledger stays untouched until the customer reviews one.
+    "DEMO1": {"state": "CONFIRMATION_READY", "outcome": "MULTI_INSTRUCTION", "ledger": "NOT_INVOKED"},
+    "DEMO2": {"state": "CONFIRMATION_READY", "outcome": "MULTI_INSTRUCTION", "ledger": "NOT_INVOKED"},
+    # DEMO3: "one fifty" is materially ambiguous, so it is asked, never guessed.
+    "DEMO3": {"state": "CLARIFICATION_REQUIRED", "outcome": "CLARIFY", "ledger": "NOT_INVOKED"},
+    "DEMO4": {"state": "FROZEN", "outcome": "SAFETY_INTERVENTION", "ledger": "NOT_INVOKED"},
+    "DEMO5": {"state": "FROZEN", "outcome": "BLOCK", "ledger": "NOT_INVOKED"},
+    # DEMO6: step-up raised by the voice mismatch, then FaceID FAILS. Same consequence as
+    # A1 - the ledger is never invoked - reached from the demo's own sentence.
+    "DEMO6": {"state": "FROZEN", "outcome": "REJECTED", "ledger": "NOT_INVOKED"},
 }
 
 

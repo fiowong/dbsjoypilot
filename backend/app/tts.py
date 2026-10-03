@@ -95,8 +95,8 @@ async def _cartesia_pcm_chunks(text: str, ui_lang: str) -> AsyncIterator[bytes]:
     # Log the voice + model + language on every synthesis so the operator can confirm which
     # Cartesia voice is actually speaking (e.g. after a credit refill, or a per-lang swap).
     # /health only exposes the model and a bool per language, never the voice id itself.
-    log.info("tts cart: lang=%s voice_id=%s model=%s text_len=%d",
-             ui_lang, voice_id, model, len(text))
+    log.info("tts cart: lang=%s voice_id=%s model=%s speed=%s text_len=%d",
+             ui_lang, voice_id, model, Settings.TTS_SPEED, len(text))
     params = {"cartesia_version": CARTESIA_VERSION, "apiKey": Settings.TTS_API_KEY}
     url = f"{CARTESIA_WS}?{urlencode(params)}"
     headers = {"X-API-Key": Settings.TTS_API_KEY}
@@ -122,6 +122,10 @@ async def _cartesia_pcm_chunks(text: str, ui_lang: str) -> AsyncIterator[bytes]:
                 "sample_rate": SAMPLE_RATE,
             },
             "context_id": uuid.uuid4().hex,
+            # Speaking rate. Only sent when it is not the natural 1.0, so a default
+            # install sends byte-identical requests to before this existed.
+            **({"generation_config": {"speed": Settings.TTS_SPEED}}
+               if Settings.TTS_SPEED != 1.0 else {}),
         }))
 
         async for raw in ws:
