@@ -1,3 +1,4 @@
+import difflib
 import hashlib
 from enum import Enum
 import hmac
@@ -91,6 +92,44 @@ def _eligible_accounts(customer_id: str) -> List[SourceAccount]:
     """
     record = get_repository().get_customer(customer_id) or {}
     return [a for a in record.get("accounts", []) if a.eligible]
+
+
+def _name_similarity(a: str, b: str) -> float:
+    """How close two names are, 0..1. Blends whole-string similarity with token overlap so
+    BOTH a one-letter miss ("me tan" vs "mei tan") and a surname alone ("Tan" vs "Mei Tan")
+    score high. Pure difflib, no dependency and no model, so the result is reproducible."""
+    a, b = (a or "").lower().strip(), (b or "").lower().strip()
+    if not a or not b:
+        return 0.0
+    whole = difflib.SequenceMatcher(None, a, b).ratio()
+    at, bt = set(a.split()), set(b.split())
+    overlap = len(at & bt) / max(1, len(at))
+    best_tok = max((difflib.SequenceMatcher(None, x, y).ratio() for x in at for y in bt),
+                   default=0.0)
+    return max(whole, overlap, best_tok)
+
+
+def closest_saved_payee(customer_id: str, spoken: str,
+                        threshold: float = 0.72, margin: float = 0.15):
+    """The ONE saved payee a spoken name is closest to, when it is close enough AND clearly
+    ahead of the runner-up. Returns None when nothing is close, or when two payees are equally
+    close (that is the PAYEE_AMBIGUOUS question, not a guess).
+
+    A fuzzy hit is a SUGGESTION only. This never binds anything: the caller must ask the customer
+    to confirm, and the destination still comes from the trusted saved-payee repository, so a
+    near-miss can offer a payee the customer already holds but can never invent one."""
+    if not spoken or not spoken.strip():
+        return None
+    scored = sorted(((_name_similarity(spoken, p.display_name), p)
+                     for p in get_repository().get_saved_payees(customer_id)),
+                    key=lambda t: t[0], reverse=True)
+    if not scored:
+        return None
+    best_score, best = scored[0]
+    second = scored[1][0] if len(scored) > 1 else 0.0
+    if best_score < threshold or (best_score - second) < margin:
+        return None
+    return best
 
 
 def resolve_payee_and_account(customer_id: str, proposal: PaymentProposal,
@@ -207,6 +246,18 @@ def resolve_payee_and_account(customer_id: str, proposal: PaymentProposal,
             matches, matched_via = [by_nickname], "nickname"
 
     if not matches:
+        # No exact/substring match. Before giving up with a bare "who would you like to pay?", ask
+        # whether the spoken name is clearly closest to ONE saved payee ("me tan" -> "Mei Tan",
+        # "Tan" -> "Mei Tan"). If so, offer it as a question ("did you mean Mei Tan?"). Still a
+        # question: nothing binds until the customer confirms.
+        near = closest_saved_payee(customer_id, payee_phrase or proposal.recipient_phrase or "")
+        if near is not None:
+            return DeterministicResolution(
+                outcome="NEEDS_CLARIFICATION", clarification_field="RECIPIENT",
+                clarification_key="PAYEE_DID_YOU_MEAN",
+                candidates=[{"beneficiary_id": near.beneficiary_id,
+                             "displayName": near.display_name,
+                             "maskedDestination": near.masked}])
         return DeterministicResolution(outcome="NEEDS_CLARIFICATION",
                                        clarification_field="RECIPIENT",
                                        clarification_key="PAYEE_NOT_FOUND")

@@ -69,6 +69,11 @@ class Session:
         # (the confirm) is what actually writes it to the store. Cleared the moment it is resolved,
         # so a stale binding can never leak into a later, unrelated payment.
         self.pending_nickname: Optional[dict] = None
+        # The open "did you mean X?" suggestion. Set when a spoken payee name matches no saved
+        # payee exactly but is clearly closest to ONE of them: `{"beneficiary_id", "display_name",
+        # "spoken"}`. A fuzzy hit is only ever a SUGGESTION, nothing is bound until the customer
+        # answers, and the destination still comes from the trusted saved-payee repository.
+        self.pending_payee_suggestion: Optional[dict] = None
         # The nickname this draft was reached through ("ah girl"), carried to the read-back so Joy
         # can say "I found Ah Girl as Mei Tan", and carried in the audit so the claim is checkable.
         self.nickname_used: Optional[str] = None

@@ -661,6 +661,9 @@ class ValidationAgent:
         # The "recipient" phrase comes from the right source for the transaction shape: a saved
         # payee's name, a biller's name, a card's name, or an own-account's name. The draft is
         # supported when it starts with what the customer actually said.
+        # How the recipient was established, recorded on the check itself so the audit can always
+        # tell a name read out of the transcript from a name the customer confirmed.
+        recipient_source = "TRANSCRIPT"
         if is_bill:
             evidence_phrase = None
             for turn in evidence:
@@ -687,11 +690,19 @@ class ValidationAgent:
             evidence_phrase = None
             for turn in evidence:
                 evidence_phrase = evidence_phrase or parse_payee_phrase(turn, customer_id)
+            # The customer CONFIRMED this recipient on this turn ("did you mean Mei Tan?" -> "yes"),
+            # so the field is settled by their own answer, and the evidence will never name it: the
+            # phrase ASR misheard is exactly the phrase no parser can resolve. Without this the
+            # check came back MISMATCH on every confirmed suggestion and the comparator froze the
+            # very payment the customer had just approved. The confirmation travels as a VERIFIED
+            # SESSION FACT, it is never inferred from the transcript.
+            if not evidence_phrase and verified.get("recipient_confirmed"):
+                evidence_phrase, recipient_source = draft.payee_display, "VERIFIED_SESSION_FACT"
             recipient_ok = bool(evidence_phrase) and draft.payee_display.lower().startswith(
                 evidence_phrase.split()[0].lower())
         checks.append(FieldCheck(
             field_name="RECIPIENT", result="MATCH" if recipient_ok else "MISMATCH",
-            evidence_source="TRANSCRIPT", evidence_value=evidence_phrase,
+            evidence_source=recipient_source, evidence_value=evidence_phrase,
             draft_value=draft.payee_display))
 
         # For a bill or credit-card payment the draft amount IS the authoritative outstanding

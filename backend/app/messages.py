@@ -227,6 +227,15 @@ MESSAGES: Dict[str, Dict[str, str]] = {
         "ZH": "{name}，我找不到名叫「{phrase}」的收款人。请问您想汇给谁？",
         "BM": "{name}, saya tidak jumpa penerima bernama {phrase}. {name} nak hantar kepada siapa?",
     },
+    # A spoken name that matches no saved payee exactly but is clearly closest to ONE of them
+    # ("me tan" -> "Mei Tan"). Joy NAMES that one payee and asks, rather than listing everybody.
+    # The customer answers "yes" (or says the name); nothing binds until they do, and the payee
+    # is always one they already hold.
+    "PAYEE_DID_YOU_MEAN": {
+        "EN": "{name}, I don't have a payee called {phrase}. Did you mean {payee}?",
+        "ZH": "{name}，我没有名叫「{phrase}」的收款人。您是指 {payee} 吗？",
+        "BM": "{name}, saya tak ada penerima bernama {phrase}. Maksudkan {payee}?",
+    },
 
     # ---------- Stage 5: multiple recipients named in one request (MVP: one transfer at a time) ----------
     "MULTIPLE_RECIPIENTS": {

@@ -32,7 +32,8 @@ from .llm_client import arm_turn_deadline, disarm_turn_deadline
 # sees it, so only the store can say "the customer said a nickname, and it was this one". `teach`
 # is the single write path, and it refuses any beneficiary that is not already a saved payee.
 from .nicknames import match_in_text as nickname_match, teach as teach_nickname
-from .controls import (resolve_payee_and_account, compare_validation_result, evaluate_risk,
+from .controls import (resolve_payee_and_account, closest_saved_payee,
+                        compare_validation_result, evaluate_risk,
                         evaluate_safety_policy, canonical_payload, payload_hash, sign_payload,
                         Ledger, gateway_verify, GatewayDecision, GatewayResult, ComparatorResult,
                         RiskDecision, RiskOutcome, _not_expired, freeze_message_key,
@@ -661,6 +662,11 @@ async def _run_turn(req: TurnRequest) -> TurnResponse:
                                       "note": "live UNCLEAR completed to PAYMENT_CLARIFICATION, the "
                                               "turn names the one payee the question asked for"})
 
+    # Set when the customer CONFIRMS a suggested payee ("did you mean Mei Tan?" -> "yes"). The
+    # committed evidence still holds the phrase the ASR misheard, so the Payment Agent's phrase
+    # extraction must not be allowed to re-adopt it downstream and undo the customer's answer.
+    payee_confirmed_this_turn = False
+
     # ---------- The nickname question, once it is open ----------
     # Two turns, both handled here rather than by the agents, because neither turn is a payment:
     #   1. the customer answers WHO the name means  -> bind it, then ask to remember it;
@@ -780,12 +786,126 @@ async def _run_turn(req: TurnRequest) -> TurnResponse:
                                   "threshold": Settings.INTENT_CONFIDENCE_THRESHOLD,
                                   "note": "routed back to PAYMENT after the nickname was resolved"})
 
+    # ---------- The "did you mean <payee>?" question, once it is open ----------
+    # The mirror of the nickname question above, and the reason it exists at all: this is a
+    # voice-first product, so the payee name arrives as a TRANSCRIPT. A one-letter miss
+    # ("Mei Tan" heard as "me tan") matched no saved payee, and the customer was answered with
+    # the whole payee list, which is not an answer an elderly customer can act on. Naming the ONE
+    # payee the spoken phrase is closest to turns that dead end into a single yes/no.
+    #
+    # Nothing binds on the question itself, and once the customer answers, the turn re-enters the
+    # ordinary pipeline exactly as the nickname flow does. That is what keeps this from becoming a
+    # second, divergent way to pay somebody: the settled name resolves, the amount is recovered
+    # from the committed evidence, and the destination still comes only from the saved-payee
+    # record. A near-match can offer a payee the customer already holds; it can never invent one.
+    #
+    # Guarded against a stop or a safety report for the same reason as the nickname block,
+    # "cancel" and "help me, this is a scam" must never be read as an answer to a payee question.
+    if (session.open_clarification_field == "RECIPIENT" and session.pending_payee_suggestion
+            and intent.intent not in ("CANCEL_OR_STOP", "SAFETY_HELP")):
+        suggestion = session.pending_payee_suggestion
+        spoken = suggestion.get("spoken") or session.payee_phrase or ""
+        payee = _payee_by_id(session.customer_id, suggestion.get("beneficiary_id"))
+        if payee is None:
+            # The suggested payee was removed while the question was open. A suggestion may only
+            # ever point at a payee that still exists, so it is dropped and the full question is
+            # asked, rather than asking about somebody who is no longer there.
+            session.pending_payee_suggestion = None
+            session.state, session.outcome = SessionState.CLARIFICATION_REQUIRED, "CLARIFY"
+            session.open_clarification_field = "PAYEE_NICKNAME"
+            session.pending_nickname = {"nickname": spoken}
+            session.note_clarification("NICKNAME_UNKNOWN")
+            emit("CLARIFICATION_OPENED", 4, {
+                "clarification_field": "PAYEE_NICKNAME",
+                "clarification_key": "NICKNAME_UNKNOWN",
+                "canonical_draft": "NOT_CREATED",
+                "note": "The suggested payee is no longer saved, so the suggestion was dropped."})
+            say_line("NICKNAME_UNKNOWN", 4, nickname=display_phrase(spoken),
+                     options=candidate_options(_saved_payee_options(session.customer_id), lang))
+            return await finish()
+
+        text_l = req.text.strip().lower()
+        named = _payees_named_in(req.text, session.customer_id)
+        if len(named) == 1:
+            # The customer answered by NAMING somebody. That is a complete answer whether or not it
+            # is the payee Joy suggested, "yes, Mei Tan" and "no, John Doe" both settle the
+            # question. Exactly one name is unambiguous; two names stay ambiguous and fall to the
+            # re-ask below rather than being guessed at.
+            chosen = named[0]
+        elif AFFIRMATION_RE.match(text_l):
+            chosen = payee
+        elif NEGATION_RE.match(text_l):
+            # "No, not her." Rather than guess again, the suggestion is dropped and the customer is
+            # asked who they did mean, with the payees we hold named, which is exactly the question
+            # they would have been asked had the near-match never been offered.
+            session.pending_payee_suggestion = None
+            session.state, session.outcome = SessionState.CLARIFICATION_REQUIRED, "CLARIFY"
+            session.open_clarification_field = "PAYEE_NICKNAME"
+            session.pending_nickname = {"nickname": spoken}
+            session.note_clarification("NICKNAME_UNKNOWN")
+            emit("PAYEE_SUGGESTION_DECLINED", 4, {
+                "spoken": spoken, "suggested_payee": payee.display_name, "bound": False,
+                "note": "The customer said the suggested payee is not the one they meant. Nothing "
+                        "was bound and no destination was invented."})
+            say_line("NICKNAME_UNKNOWN", 4, nickname=display_phrase(spoken),
+                     options=candidate_options(_saved_payee_options(session.customer_id), lang))
+            return await finish()
+        else:
+            # Neither a name nor a yes/no. An unclear answer must not silently discard the payment
+            # the customer is in the middle of making, so the same question is asked again.
+            session.state, session.outcome = SessionState.CLARIFICATION_REQUIRED, "CLARIFY"
+            session.note_clarification("PAYEE_DID_YOU_MEAN")
+            emit("CLARIFICATION_OPENED", 4, {
+                "clarification_field": "RECIPIENT",
+                "clarification_key": "PAYEE_DID_YOU_MEAN",
+                "spoken": spoken, "suggested_payee": payee.display_name,
+                "canonical_draft": "NOT_CREATED"})
+            say_line("PAYEE_DID_YOU_MEAN", 4, phrase=display_phrase(spoken),
+                     payee=payee.display_name)
+            return await finish()
+
+        # Settled. The question is closed, the name is the customer's own confirmed choice, and
+        # `payee_confirmed_this_turn` stops the misheard evidence phrase being adopted over it.
+        session.pending_payee_suggestion = None
+        session.open_clarification_field = None
+        session.payee_phrase = chosen.display_name
+        payee_confirmed_this_turn = True
+        emit("PAYEE_SUGGESTION_ACCEPTED", 4, {
+            "spoken": spoken, "display_name": chosen.display_name,
+            "beneficiary_id": chosen.beneficiary_id, "suggested_payee": payee.display_name,
+            "matched_via": "deterministic near-match confirmed by the customer",
+            "destination_from": "trusted saved-payee repository",
+            "note": "The customer confirmed the payee, so the name is settled and the turn "
+                    "re-enters the ordinary payment pipeline. The destination still comes only "
+                    "from the saved-payee record."})
+        intent = IntentResult(intent="PAYMENT", confidence=0.95,
+                              detected_language=detect_language(req.text),
+                              reason="deterministic payee-suggestion safeguard (the customer "
+                                     "confirmed the payee, so the original instruction resolves)")
+        engine = "deterministic-safeguard"
+        emit("INTENT_RESULT", 4, {"engine": engine, **intent.model_dump(),
+                                  "threshold": Settings.INTENT_CONFIDENCE_THRESHOLD,
+                                  "note": "routed back to PAYMENT after the payee suggestion "
+                                          "was accepted"})
+
     if intent.intent == "CANCEL_OR_STOP":
         session.state, session.cancelled, session.outcome = SessionState.CANCELLED, True, "CANCEL"
+        # A stop closes any question that was still open. Without this the question outlives the
+        # cancel, and a later stray "yes" is read as its answer: the customer would be walked
+        # straight back into a payment they had already stopped (BRD A.3, a replayed confirmation
+        # must never mint a signature). Clearing the open field is also what lets the replayed-yes
+        # safeguard above recognise the next bare "yes" for what it is.
+        abandoned_question = session.open_clarification_field
+        session.open_clarification_field = None
+        session.pending_payee_suggestion = None
+        session.pending_nickname = None
         emit("PAYMENT_CANCELLED", 4, {"draft_discarded": bool(session.draft),
                                       "confirmation_invalidated": True,
                                       "signature_invalidated": bool(session._signature),
-                                      "ledger_invoked": False})
+                                      "ledger_invoked": False,
+                                      "abandoned_clarification_field": abandoned_question,
+                                      "note": "Any open question is closed with the payment, so a "
+                                              "later confirmation cannot be read as its answer."})
         session.confirmation = None
         session._signature, session._payload, session._nonce = None, None, None
         say_line("CANCELLED", 4)
@@ -976,8 +1096,11 @@ async def _run_turn(req: TurnRequest) -> TurnResponse:
         proposal, engine = await PaymentAgent.run(req.text, ctx)
 
     # A recipient phrase extracted from committed evidence survives a clarification turn,
-    # so the answer only has to supply the missing field.
-    if proposal.recipient_phrase:
+    # so the answer only has to supply the missing field. It must NOT be adopted when the customer
+    # has just CONFIRMED a payee in a "did you mean X?" turn: there the evidence still holds the
+    # phrase the ASR misheard, and re-adopting it would silently undo the answer they just gave and
+    # send them round the same question again.
+    if proposal.recipient_phrase and not payee_confirmed_this_turn:
         session.payee_phrase = proposal.recipient_phrase
 
     if req.inject == "PAYMENT_AGENT_AMOUNT_OVERRIDE" and proposal.status == "PROPOSAL_READY":
@@ -992,6 +1115,36 @@ async def _run_turn(req: TurnRequest) -> TurnResponse:
                                  "trusted": False,
                                  "note": "Untrusted proposal. No beneficiary id, token or approval."})
 
+    # The customer has just CONFIRMED a payee ("did you mean Mei Tan?" -> "yes"), so the recipient
+    # field is already settled. The Payment Agent cannot know that: it re-reads the turn, and the
+    # turn is a bare "yes" whose committed evidence still holds the phrase the ASR misheard, so it
+    # honestly reports "no recipient". Left alone, that report sends the turn into the unknown-name
+    # machinery and Joy asks who "yes" is, silently discarding the answer the customer just gave.
+    # Deterministic code owns the field here, exactly as it does for a date-only correction, so the
+    # settled payee is written into the proposal and the ordinary stages resolve it from the
+    # saved-payee record as they do for any payment.
+    #
+    # The proposal above is emitted FIRST and unchanged, so the audit still records exactly what
+    # the model proposed; this override is a separate, visible event.
+    #
+    # Only the RECIPIENT is filled in, and only when the amount was recovered from the evidence: a
+    # missing amount is a genuine question and is still asked.
+    if (payee_confirmed_this_turn and session.payee_phrase
+            and proposal.status != "PROPOSAL_READY"
+            and proposal.clarification_field == "RECIPIENT"
+            and proposal.amount_minor is not None):
+        emit("RECIPIENT_SETTLED", 5, {
+            "recipient_phrase": session.payee_phrase,
+            "source": "payee suggestion confirmed by the customer on this turn",
+            "llm_proposal_overridden": True,
+            "amount_minor": proposal.amount_minor,
+            "note": "The model proposed no recipient. The recipient was already settled by the "
+                    "customer's own confirmation, so deterministic code supplied that field. The "
+                    "destination still comes only from the saved-payee record."})
+        proposal = proposal.model_copy(update={
+            "status": "PROPOSAL_READY", "recipient_phrase": session.payee_phrase,
+            "clarification_field": None, "clarification_question": None})
+
     if proposal.status != "PROPOSAL_READY":
         # ---------- A name the customer used that we hold nobody for ----------
         # "Send Ah Girl S$100" arrives here as a payment with no recipient, because nothing in the
@@ -1005,6 +1158,29 @@ async def _run_turn(req: TurnRequest) -> TurnResponse:
         unknown_name = (unknown_payee_phrase(req.text, session.customer_id)
                         if proposal.clarification_field == "RECIPIENT" else None)
         if unknown_name:
+            # Before asking "which of your saved payees is <name>?" and listing everybody, check
+            # whether the name is clearly closest to ONE saved payee ("Tan" -> "Mei Tan", a
+            # one-letter ASR miss "me tan" -> "Mei Tan"). If so, name that one payee and ask
+            # "did you mean Mei Tan?". Deterministic, and still only a question: nothing binds.
+            near = closest_saved_payee(session.customer_id, unknown_name)
+            if near is not None:
+                session.state, session.outcome = SessionState.CLARIFICATION_REQUIRED, "CLARIFY"
+                session.open_clarification_field = "RECIPIENT"
+                session.pending_payee_suggestion = {"beneficiary_id": near.beneficiary_id,
+                                                    "display_name": near.display_name,
+                                                    "spoken": unknown_name}
+                session.note_clarification("PAYEE_DID_YOU_MEAN")
+                emit("CLARIFICATION_OPENED", 5, {
+                    "clarification_field": "RECIPIENT",
+                    "clarification_key": "PAYEE_DID_YOU_MEAN",
+                    "spoken": unknown_name, "suggested_payee": near.display_name,
+                    "canonical_draft": "NOT_CREATED",
+                    "note": "The spoken name matches no saved payee exactly but is closest to one "
+                            "of them. It is offered as a question; nothing binds until the "
+                            "customer confirms."})
+                say_line("PAYEE_DID_YOU_MEAN", 5, phrase=display_phrase(unknown_name),
+                         payee=near.display_name)
+                return await finish()
             options = _saved_payee_options(session.customer_id)
             session.state, session.outcome = SessionState.CLARIFICATION_REQUIRED, "CLARIFY"
             session.open_clarification_field = "PAYEE_NICKNAME"
@@ -1150,6 +1326,16 @@ async def _run_turn(req: TurnRequest) -> TurnResponse:
                      count=len(resolution.candidates),
                      phrase=display_phrase(session.payee_phrase),
                      options=candidate_options(resolution.candidates, lang))
+        elif resolution.clarification_key == "PAYEE_DID_YOU_MEAN":
+            # The spoken name matched no saved payee exactly but is clearly closest to one of
+            # them. Name it and ask. The suggestion is stored so a plain "yes" next turn accepts
+            # it; a name is handled by the open-recipient safeguard.
+            cand = (resolution.candidates or [{}])[0]
+            session.pending_payee_suggestion = {"beneficiary_id": cand.get("beneficiary_id"),
+                                                "display_name": cand.get("displayName"),
+                                                "spoken": session.payee_phrase}
+            say_line("PAYEE_DID_YOU_MEAN", 6, phrase=display_phrase(session.payee_phrase),
+                     payee=cand.get("displayName") or "")
         else:
             say_line("PAYEE_NOT_FOUND", 6, phrase=display_phrase(session.payee_phrase))
         return await finish()
@@ -1179,6 +1365,13 @@ async def _run_turn(req: TurnRequest) -> TurnResponse:
                 "payee_masked": draft.payee_masked,
                 "payee_display": draft.payee_display,
                 "transaction_type": draft.transaction_type}
+    if payee_confirmed_this_turn:
+        # The customer answered "did you mean Mei Tan?" with a yes on THIS turn. That is a trusted
+        # session fact, and it is the only way the validator can know the recipient is settled: the
+        # evidence still holds the phrase ASR misheard, which no parser can resolve. Passed as a
+        # verified fact rather than folded into the transcript, so the audit stays honest about
+        # where the name came from.
+        verified["recipient_confirmed"] = True
     validation, engine = await ValidationAgent.run(draft, session.evidence, verified,
                                                    session.customer_id)
     session.validation = validation

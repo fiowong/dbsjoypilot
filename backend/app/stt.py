@@ -59,6 +59,41 @@ SAMPLE_RATE = 16000          # Tencent accepts 8k or 16k; 16k is what we capture
 VOICE_FORMAT_PCM = 1         # voice_format=1 -> raw PCM
 CHUNK_MS = 200               # doc recommends ~200ms of audio per frame, sent 1:1 realtime
 
+# Tencent realtime ASR hotword_list: a comma-joined set of "Word|weight" entries. weight 1-11
+# (11 = the strongest bias toward that spelling); up to 128 entries. We bias toward the
+# customer's OWN payee names and the nicknames they actually use out loud, so a misheard name
+# ("me tan") arrives correctly spelled ("Mei Tan") and never needs the downstream "did you mean?"
+# recovery. (Option A, this is the upstream-of-Option-B prevention layer.)
+HOTWORD_WEIGHT = 11
+HOTWORD_MAX_ENTRIES = 128
+
+
+def build_hotword_list(names, weight: int = HOTWORD_WEIGHT,
+                       max_entries: int = HOTWORD_MAX_ENTRIES) -> Optional[str]:
+    """Turn a list of candidate names into a Tencent hotword_list string, or None if empty.
+
+    De-duplicates case-insensitively, drops blank or unsafe names (a name containing a comma
+    or pipe would corrupt the "Word|weight" framing), and caps at ``max_entries`` so a customer
+    with many payees can never exceed the engine's 128-entry limit.
+    """
+    if not names:
+        return None
+    seen: set = set()
+    entries: list = []
+    for name in names:
+        clean = (name or "").strip()
+        # A comma or pipe would break the "Word|weight", comma-joined framing Tencent expects.
+        if not clean or "," in clean or "|" in clean:
+            continue
+        key = clean.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        entries.append(f"{clean}|{int(weight)}")
+        if len(entries) >= max_entries:
+            break
+    return ",".join(entries) if entries else None
+
 
 class ASRError(RuntimeError):
     """Raised when the engine cannot be used (bad config, auth failure, quota, ...)."""
@@ -81,14 +116,25 @@ def _signed_url(appid: str, secret_id: str, secret_key: str, params: dict) -> st
     """Build the wss URL with the HMAC-SHA1 signature Tencent expects.
 
     Signature original text = "<host>/asr/v2/<appid>?<sorted params as k=v, joined by &>",
-    signed with SecretKey, base64'd, then URL-encoded before being appended.
+    signed with SecretKey, base64'd, then appended as ``signature``.
+
+    Tencent signs over the RAW, un-encoded param values, but the request URL itself must carry
+    PERCENT-ENCODED values. The two differ as soon as a value contains a space, pipe or comma -
+    which ``hotword_list`` always does ("Mei Tan|11,John Doe|11"). So we build the signature over
+    the raw values and publish an encoded URL; a single string used for both would either be
+    rejected (4002) or transcribe the hotwords wrong.
     """
     original = f"{HOST}/asr/v2/{appid}?" + "&".join(
         f"{k}={params[k]}" for k in sorted(params)
     )
     digest = hmac.new(secret_key.encode(), original.encode(), hashlib.sha1).digest()
     signature = base64.b64encode(digest).decode()
-    return f"wss://{original}&signature={quote(signature, safe='')}"
+    # The published query string percent-encodes every value (so spaces/pipes/commas are safe in
+    # the WebSocket URL); the signature above stays over the raw values Tencent expects.
+    encoded = "&".join(
+        f"{k}={quote(str(params[k]), safe='')}" for k in sorted(params)
+    )
+    return f"wss://{HOST}/asr/v2/{appid}?{encoded}&signature={quote(signature, safe='')}"
 
 
 class TencentRealtimeASR:
@@ -100,11 +146,13 @@ class TencentRealtimeASR:
 
     def __init__(self, language: str = "en",
                  on_interim: Optional[Callable[[str], None]] = None,
-                 on_final: Optional[Callable[[ASRResult], None]] = None):
+                 on_final: Optional[Callable[[ASRResult], None]] = None,
+                 hotwords: Optional[str] = None):
         self.language = (language or "en").lower()
         self.engine = engine_for(self.language)
         self.on_interim = on_interim
         self.on_final = on_final
+        self.hotwords = hotwords
         self._ws = None
         self._reader: Optional[asyncio.Task] = None
         self._last_result: Optional[ASRResult] = None
@@ -142,6 +190,12 @@ class TencentRealtimeASR:
         if self.engine in WORD_INFO_ENGINES:
             params["word_info"] = "1"
 
+        # Bias the engine toward the customer's own payee names / nicknames (see build_hotword_list),
+        # so a misheard name arrives correctly spelled. The value is percent-encoded in the URL by
+        # _signed_url; the signature is computed over the raw value. Optional: absent -> no bias.
+        if self.hotwords:
+            params["hotword_list"] = self.hotwords
+
         url = _signed_url(Settings.ASR_APPID, Settings.ASR_SECRET_ID,
                           Settings.ASR_SECRET_KEY, params)
         try:
@@ -160,7 +214,8 @@ class TencentRealtimeASR:
 
         self._finished.clear()
         self._reader = asyncio.create_task(self._read_loop())
-        log.info("ASR connected: engine=%s language=%s", self.engine, self.language)
+        log.info("ASR connected: engine=%s language=%s hotwords=%s",
+                 self.engine, self.language, self.hotwords)
 
     async def send_audio(self, pcm: bytes) -> None:
         if self._ws is None:

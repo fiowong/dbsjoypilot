@@ -7,8 +7,10 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel
 
 from .config import Settings
-from .stt import ASRError, TencentRealtimeASR
+from .stt import ASRError, TencentRealtimeASR, build_hotword_list
 from .tts import TTSError, SAMPLE_RATE, synthesize_stream
+from .repository import get_repository
+from . import nicknames as customer_nicknames
 from .llm_client import check_llm_health
 from .session import STAGES, get_session
 from .data import POLICY
@@ -153,6 +155,28 @@ async def session_detail(session_id: str) -> dict:
 #   {"type":"final","text":...,"confidence":..|null,"confidence_source":...}
 #   {"type":"error","message":...}     the browser should fall back to the Web Speech API
 # =====================================================================
+# The demo customer. Mirrors session.Session's default: the prototype has a single customer and
+# no real auth, so the STT socket resolves hotwords against this id unless the client passes one.
+DEMO_CUSTOMER_ID = "cust_auntie_001"
+
+
+def _hotwords_for(customer_id: str):
+    """The hotword_list for one customer: their saved payee display names plus the nicknames
+    they actually use out loud. Returns None when there is nothing useful to bias toward. A
+    failure here must never stop the ears, so it degrades to None and logs instead of raising.
+    """
+    names = []
+    try:
+        names += [p.display_name for p in get_repository().get_saved_payees(customer_id)]
+    except Exception as exc:  # pragma: no cover - defensive; repository is trusted + local
+        _auntiejoy_log.warning("hotwords: could not read saved payees: %s", exc)
+    try:
+        names += list(customer_nicknames.index(customer_id).keys())
+    except Exception as exc:  # pragma: no cover - defensive
+        _auntiejoy_log.warning("hotwords: could not read nicknames: %s", exc)
+    return build_hotword_list(names)
+
+
 @app.websocket("/ws/stt")
 async def ws_stt(ws: WebSocket) -> None:
     await ws.accept()
@@ -188,6 +212,10 @@ async def ws_stt(ws: WebSocket) -> None:
             kind = data.get("type")
             if kind == "start":
                 language = data.get("language") or Settings.ASR_LANGUAGE
+                # The client may name the customer (so hotwords match their own payees); the
+                # demo has one customer, so fall back to the known id rather than dropping the bias.
+                customer_id = data.get("customer_id") or DEMO_CUSTOMER_ID
+                hotwords = _hotwords_for(customer_id)
 
                 def _send(payload: dict) -> None:
                     # fire-and-forget: results must not block audio upload
@@ -203,7 +231,8 @@ async def ws_stt(ws: WebSocket) -> None:
                            "engine": result.engine})
 
                 asr = TencentRealtimeASR(language=language,
-                                         on_interim=on_interim, on_final=on_final)
+                                         on_interim=on_interim, on_final=on_final,
+                                         hotwords=hotwords)
                 try:
                     await asr.connect()
                 except ASRError as exc:
@@ -211,7 +240,7 @@ async def ws_stt(ws: WebSocket) -> None:
                     asr = None
                     continue
                 await ws.send_json({"type": "started", "engine": asr.engine,
-                                    "language": language})
+                                    "language": language, "hotwords": hotwords})
             elif kind == "end":
                 if asr is not None:
                     result = await asr.finish()

@@ -691,6 +691,11 @@ function sttLanguage(){
   return 'en';
 }
 
+// The demo has a single customer; we forward this id to the STT socket so Tencent ASR can bias
+// toward her own payee names. Mirrors the backend's DEMO_CUSTOMER_ID (session.Session default);
+// a real build would take this from the authenticated session instead of a constant.
+const CUSTOMER_ID = 'cust_auntie_001';
+
 /* The real ears: stream the mic to the backend, which asks Tencent Cloud ASR.
    Resolves with {text, confidence, confidenceSource}; throws if the engine is unusable. */
 async function sttTurn(setYou){
@@ -714,7 +719,7 @@ async function sttTurn(setYou){
       onError:   m => { failure = m; },
       onFinal:   r => done(r)
     });
-    client.start(sttLanguage()).then(() => {
+    client.start(sttLanguage(), CUSTOMER_ID).then(() => {
       if(failure){ client.cancel(); reject(new Error(failure)); return; }
       // Safety net so the mic can never hang forever if the engine never finalises.
       setTimeout(() => done(null), 30000);

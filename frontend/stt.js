@@ -61,14 +61,18 @@ class SttClient {
               && (window.AudioContext || window.webkitAudioContext));
   }
 
-  /* Open the ASR session and begin streaming the mic. Resolves once the engine is ready. */
-  async start(language) {
+  /* Open the ASR session and begin streaming the mic. Resolves once the engine is ready.
+     `customerId` is forwarded to the backend so it can bias the engine toward this customer's
+     own payee names (hotwords); pass null/undefined and the server uses the demo customer. */
+  async start(language, customerId) {
     if (this.running) return;
     this.onState('connecting');
     await this._openSocket();
     await this._startMic();
 
-    this.ws.send(JSON.stringify({ type: 'start', language: language || 'en' }));
+    this.ws.send(JSON.stringify({ type: 'start',
+                                  language: language || 'en',
+                                  customer_id: customerId || null }));
     await this._waitFor('started');
     this.running = true;
     this.onState('listening');
