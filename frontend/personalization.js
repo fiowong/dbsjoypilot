@@ -54,6 +54,13 @@ function syncPersonalization(session){
     iface('I\'ll take a little more time from here, and check each detail with you twice, just to be safe.');
   }
   updatePersonalizeBadge();
+  // Feature 3: surface Joy adapting to Mei Ling in the inspector — the preferred name plus the
+  // wording mode — so the assistant is visibly "learning" across turns, not just obeying.
+  const pe = $('stPers');
+  if(pe){
+    const nm = CUSTOMER_NAME_KNOWN ? CUSTOMER_NAME : 'Mei Ling';
+    pe.textContent = personalizeActive() ? (nm + ' · Adapted') : (nm + ' · Standard');
+  }
 }
 // Reports a field-review answer to the backend the instant it happens, so a
 // second "no" on the same field is a fact the Personalization Agent can see,

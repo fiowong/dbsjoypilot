@@ -34,6 +34,7 @@ async function play(steps, my){
    exactly like the page reloading, and would throw away her intro card. */
 function resetPanels(){
   agentsEl.innerHTML='<div class="placeholder">Awaiting the first committed turn…</div>';
+  agentCards = {};   // drop any "thinking" placeholders from a previous run
   auditEl.innerHTML='<div class="placeholder">No events yet.</div>';
   agentCalls=0; $('acnt').textContent='0 calls';
   STAGES.forEach((_,i)=>stage(i,''));
@@ -41,6 +42,7 @@ function resetPanels(){
   state('IDLE'); draft('-'); ledger('NOT_INVOKED'); sig('NONE'); outcome('-');
   closePopup('cancelled');   // never leave a script blocked on a stale popup
   closeDraftCard('cancelled');   // ...or on a draft card the customer never acted on
+  closeFaceIdCard('cancelled');  // ...or on a Face ID card the customer never acted on
 }
 function resetRun(){
   chatEl.innerHTML='';

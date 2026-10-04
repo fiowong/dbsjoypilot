@@ -196,6 +196,7 @@
             <button class="lt on" data-lang="en-SG" data-l="EN">EN</button>
             <button class="lt" data-lang="zh-CN" data-l="ZH">中文</button>
             <button class="lt" data-lang="ms-MY" data-l="BM">BM</button>
+            <button class="lt" data-lang="" data-l="AUTO" title="Listen in English + Malay — no need to pick one">Auto</button>
           </div>
           <div class="cinput">
             <input class="fld" id="fld" placeholder="Speak or type payment command…" autocomplete="off">
@@ -255,6 +256,16 @@
              output on the phone. It is a diagnostic, so it belongs with the other evidence here. -->
         <div class="sbox" style="margin-bottom:11px"><div class="k">LAST HEARD</div>
           <div class="v" id="stHeard">-</div>
+        </div>
+        <!-- LANGUAGE: Joy's multilingual mixing, narrated. Detected = what the customer actually
+             spoke (server-side); Interface = the language Joy answers in. A switch is a trust signal. -->
+        <div class="sbox" style="margin-bottom:11px"><div class="k">LANGUAGE</div>
+          <div class="v" id="stLang">-</div>
+        </div>
+        <!-- PERSONALISATION: Joy adapting to Mei Ling across turns (preferred name + simpler
+             wording), surfaced so the inspector shows the assistant "learning", not just obeying. -->
+        <div class="sbox" style="margin-bottom:11px"><div class="k">PERSONALISATION</div>
+          <div class="v" id="stPers">Standard</div>
         </div>
         <h3 style="margin-top:14px">APPEND-ONLY AUDIT TIMELINE</h3>
         <div class="audit" id="audit"><div class="placeholder">No events yet.</div></div>

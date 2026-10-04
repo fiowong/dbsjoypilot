@@ -642,13 +642,14 @@ button{font-family:inherit}
   margin:18px 0 10px}
 .chips{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .chip{background:var(--brand-tint);border:1px solid var(--brand-line);color:var(--brand-ink);
-  border-radius:999px;padding:8px 12px;font-size:12px;font-weight:700;font-family:inherit;
+  border-radius:800px;padding:8px 12px;font-size:12px;font-weight:700;font-family:inherit;
   cursor:pointer;transition:.14s;text-align:center;min-width:0}
 .chip:hover{background:var(--dbs-red);border-color:var(--dbs-red);color:#fff}
 
 /* ==========================================================================
-   INLINE DRAFT CARD: "Voice Command Recognized"
+   INLINE DRAFT CARD / FACE ID CARD — "Ready to confirm"
    The light-red hairline is the whole signal: this is a PROPOSAL, not a payment.
+   The Face ID variant uses the brand red so it reads as the biometric gate it is.
    ========================================================================== */
 .dcard{background:#fff;border:1.5px solid var(--brand-line);border-radius:14px;padding:14px;
   box-shadow:var(--sh-1)}
@@ -668,6 +669,14 @@ button{font-family:inherit}
 .dcard .dbtn:hover{background:var(--brand-dk)}
 /* once acted on, the button reports what happened instead of inviting a second tap */
 .dcard .dbtn:disabled{cursor:default;background:var(--ok-bg);color:#047857}
+/* Face ID variant: brand-red hairline + tick so the biometric gate is visually distinct.
+   Class is "fid-ready" (not "faceid") to avoid colliding with the popup scan-frame class
+   `.faceid{width:92px;height:92px;animation:fpulse…}` which is defined in this file but
+   currently rendered by no element — using "faceid" here would force the card into a
+   92×92 halo box. */
+.dcard.fid-ready{border-color:var(--brand)}
+.dcard.fid-ready .dtick{color:var(--brand)}
+.dcard.fid-ready .dtag{color:var(--brand)}
 
 /* ==========================================================================
    inline clarification card
@@ -710,6 +719,14 @@ button{font-family:inherit}
 .rcpt .rr .v{font-weight:700;color:var(--ink);text-align:right;word-break:break-word}
 .rcpt .rfoot{margin:12px 14px 14px;background:var(--dbs-gray);border-radius:11px;padding:10px 12px;
   font-size:10px;color:var(--muted);line-height:1.5}
+/* Banking-grade trust signal: the receipt proves itself against the append-only audit log.
+   pending (grey) → ok (green, hash chain intact) → bad (red, broken) → warn (amber, unverified). */
+.rcpt .rverify{margin:0 14px 10px;display:flex;align-items:center;gap:8px;border-radius:11px;
+  padding:9px 12px;font-size:10.5px;font-weight:700;line-height:1.4;
+  background:#EAF7F0;border:1px solid #B7E4CC;color:#0F7A4F}
+.rcpt .rverify[data-state="pending"]{background:#EEF0F3;border-color:#DDE0E5;color:#6B7280;font-weight:600}
+.rcpt .rverify[data-state="bad"]{background:#FDECEC;border-color:#F5C2C2;color:#B42318}
+.rcpt .rverify[data-state="warn"]{background:#FFF7E6;border-color:#F3D99B;color:#92600A}
 /* "Save receipt", keeps the card, not just the moment. Full width so it is an obvious
    target on a phone, and it never looks like a second payment action: grey, not red. */
 .rcpt .rsave{margin:0 14px 14px}
@@ -765,6 +782,16 @@ button{font-family:inherit}
    These two agents exist to reach a yes/no, so the panel leads with the verdict
    and the numbers behind it, and tucks the raw payload behind a disclosure. */
 .acard.verdict{background:#17171B;border-color:#3D3D48}
+/* "Thinking out loud": the five specialists show as reviewing… the moment a turn is sent,
+   then each card locks in (settled) when its verdict lands. Idle = consulted but not needed. */
+.acard.thinking{border-color:#2F6F4F;background:#10140F}
+.acard.thinking .athink{display:flex;align-items:center;gap:7px;font-size:10.5px;color:#8FE0B0;font-style:italic}
+.acard.thinking .pulse{width:8px;height:8px;border-radius:50%;background:#34D399;box-shadow:0 0 0 0 rgba(52,211,153,.6);animation:pulse 1.1s infinite}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(52,211,153,.55)}70%{box-shadow:0 0 0 7px rgba(52,211,153,0)}100%{box-shadow:0 0 0 0 rgba(52,211,153,0)}}
+.acard.settled{animation:lockin .45s ease}
+@keyframes lockin{0%{transform:translateY(4px);opacity:.4;border-color:#2F6F4F}100%{transform:none;opacity:1}}
+.acard.idle{border-color:#2A2A31;opacity:.62}
+.acard.idle .athink{font-size:10px;color:#6F6F7C;font-style:italic}
 .vhead{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:10px}
 .vbadge{font-size:10px;font-weight:900;letter-spacing:.7px;padding:4px 10px;border-radius:6px;border:1px solid}
 .vbadge.ok{background:#12301F;color:#7FE0A8;border-color:#1F5C3A}

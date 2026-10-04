@@ -255,15 +255,78 @@ async function liveConfirmFlow(session, lang, my, skipFaceId){
   }
 }
 
+// Feature 2 helper: prove the just-shown receipt against the backend's append-only audit log.
+// The backend hashes every audit event and chains it to the previous one, so any tampering with
+// a past event would break the chain. We surface that verdict on the receipt itself.
+async function verifyReceiptChain(sid){
+  const el = chatEl.querySelector('.rcpt:last-of-type .rverify');
+  if(!el || !sid) return;
+  try{
+    const r = await fetch(API_BASE + '/audit/' + encodeURIComponent(sid), { method:'GET' });
+    if(!r.ok) throw new Error('audit ' + r.status);
+    const data = await r.json();
+    const ch = (data && data.chain) || {};
+    if(ch.intact){
+      el.dataset.state = 'ok';
+      el.textContent = '✓ Verified against append-only audit log · hash chain intact ('
+        + (ch.events || 0) + ' events) · head ' + String(ch.head || '').slice(0, 14) + '…';
+    } else {
+      el.dataset.state = 'bad';
+      el.textContent = '⚠ Hash chain broken at event ' + (ch.broken_at_seq != null ? ch.broken_at_seq : '?')
+        + ' — do not trust this receipt';
+    }
+  } catch (e) {
+    el.dataset.state = 'warn';
+    el.textContent = 'Audit log unavailable — receipt could not be verified on-chain';
+  }
+}
+
+// Feature 1: narrate Joy's multilingual mixing in the panel. Detected = what the customer
+// actually spoke (server-side, honest); Interface = the language Joy answers in. A switch is a
+// trust signal. The code-mix count is a real word count of the customer's own words, so the
+// panel can show "EN × N BM × M" even when the single-label detector collapses a mixed turn.
+const BM_WORDS = new Set(['saya','kamu','dia','kita','mereka','dan','atau','dari','ke','di','untuk',
+  'dengan','ini','itu','ada','nak','sudah','sila','tolong','nanti','satu','dua','tiga','empat','lima',
+  'enam','tujuh','lapan','sembilan','sepuluh','ribu','seratus','juta','ringgit','dolar','duit','hantar',
+  'kepada','bayar','jumlah','akaun','boleh','tidak','tak','maaf','cepat','sekarang','lagi','juga','tapi',
+  'kalau','sebab','macam','mana','apa','siapa','bil','pindah','awak','kami','bahasa','wang','selamat',
+  'jangan','tanya','cakap','buat','buah']);
+let lastInterfaceLang = null;
+function showLanguage(resp, text){
+  const el = $('stLang'); if(!el) return;
+  let detected = null;
+  for(const ev of (resp.events || [])){
+    if(ev.event_type === 'INTENT_RESULT' && ev.payload && ev.payload.detected_language) detected = ev.payload.detected_language;
+    else if(!detected && ev.event_type === 'GUARDRAILS_RESULT' && ev.payload && ev.payload.detected_language) detected = ev.payload.detected_language;
+  }
+  const iface = resp.session && resp.session.interface_language;
+  let mix = '';
+  if(text){
+    const w = String(text).toLowerCase().split(/[^a-zà-ÿ]+/i).filter(Boolean);
+    let en = 0, bm = 0;
+    for(const x of w){ if(BM_WORDS.has(x)) bm++; else if(/[a-z]/.test(x)) en++; }
+    if(en && bm) mix = ' · code-mix EN×' + en + ' BM×' + bm;
+  }
+  el.textContent = (detected || '-')
+    + (iface && iface !== detected ? ' → ' + iface : (iface ? ' (→ ' + iface + ')' : ''))
+    + mix;
+  // Narrate the switch the moment the interface moves to a different language than before.
+  if(iface && lastInterfaceLang && iface !== lastInterfaceLang){
+    audit('LANGUAGE_SWITCH · interface now ' + iface + ' (was ' + lastInterfaceLang + ')', 'ok');
+    capline('Joy detected ' + (detected || iface) + ' and is answering in ' + iface + ', to match how you spoke.');
+  }
+  if(iface) lastInterfaceLang = iface;
+}
+
 // ONE draft's approval walkthrough. Returns the session snapshot to carry on with when the
 // backend queued another instruction behind this one, or null when the flow should stop here
 // (cancelled, a rejected field, an unreachable backend, or a newer run superseding this one).
 async function liveConfirmOnce(session, lang, my, skipFaceId){
   const d = session.draft;
   const c = tt(lang).chrome;
-  // Present the recognised draft in the transcript first. The approval walkthrough begins
-  // only when the customer acts on that card, so the card is a real control rather than
-  // decoration. A new run resolves it as 'cancelled' and this flow unwinds.
+  // Inline "Ready to confirm" card in the chat: the customer's choice to begin the approval
+  // walkthrough. Each review popup below is itself the approval gate (yes to proceed, no to
+  // correct), so clicking this card reveals the recognised details read back field-by-field.
   const go = await draftCard(d, lang);
   if(my!==RUN || go!=='confirm') return null;
   const r = await liveFieldReview(lang, d);
@@ -276,6 +339,11 @@ async function liveConfirmOnce(session, lang, my, skipFaceId){
   if(!skipFaceId){
     iface(tt(lang).ready); await sleep(500);
     if(my!==RUN) return null;
+    // Inline "Ready to confirm" Face ID card in the chat: the customer's choice to verify with
+    // FaceID. Clicking it opens the biometric prompt below — a real, clickable gate, not an
+    // auto-advancing step.
+    const fgo = await faceIdCard(d, lang);
+    if(my!==RUN || fgo!=='confirm') return null;
     stage(12,'run');
     // Which language this chrome renders in is decided by the backend's settled session language,
     // not by a local guess, so it is recorded here. If a card ever appears in the wrong tongue this
@@ -356,6 +424,10 @@ async function liveConfirmOnce(session, lang, my, skipFaceId){
   if(pendingReceipt) steps.push(pendingReceipt);
   steps.push(...finalStateSteps(resp.session));
   await play(steps, my);
+  // Feature 2: the receipt proves itself against the backend's append-only, hash-chained audit
+  // log. GET /audit/{session_id} -> {chain:{intact, head, events, broken_at_seq}}. We fill the
+  // receipt's verify line with the REAL result — a banking-grade trust signal, not a claim.
+  if(typeof verifyReceiptChain === 'function') verifyReceiptChain(FREE_SESSION_ID);
   if(my!==RUN) return null;
   // The money has moved, but the transcript alone cannot tell the customer whether this
   // conversation is over or whether they are allowed to pay someone else. Say it out loud.
@@ -457,6 +529,12 @@ async function liveFreeTurn(text, viaVoice, asrConfidence, asrSource){
     }
   }
 
+  // Paint the five specialists as "reviewing…" in the agent panel the moment the turn is
+  // sent, so the 7-27s the backend spends screening/classifying/drafting/validating is shown
+  // as Joy "thinking out loud" rather than an idle gap. Each card locks in when its verdict
+  // lands; specialists the backend did not consult this turn are marked, not hidden.
+  if(typeof agentThinking === 'function') agentThinking();
+
   let resp;
   try{
     // A number alone is not evidence. Where it came from travels with it, so the audit trail
@@ -516,12 +594,14 @@ async function liveFreeTurn(text, viaVoice, asrConfidence, asrSource){
   const seenStages=new Set();
   const steps = eventsToSteps(resp.events, seenStages).concat(finalStateSteps(resp.session));
   await play(steps, my);
+  if(typeof agentThinkingDone === 'function') agentThinkingDone();   // mark any specialist not consulted this turn
   if(my!==RUN) return;
 
   const st = resp.session.state;
   syncPersonalization(resp.session);   // the backend's Personalization Agent already decided this turn
   capline(captionFor(resp));           // the per-turn headline under the control chain
   showUnderstood(resp, asrConfidence, viaVoice);   // diagnostic: intent + clarity, in the STATE panel
+  showLanguage(resp, text);             // diagnostic: multilingual mixing + interface switch, in the STATE panel
   // IDENTITY STEP-UP (Voice Mode / unverified speaker). Stage 1 could not verify the speaker, so
   // the backend HELD the request and suppressed the read-back: Joy has spoken only the hold line,
   // and the payment has NOT been presented. FaceID decides whether it ever is, and it runs HERE,
@@ -605,7 +685,10 @@ document.querySelectorAll('#langtog .lt').forEach(b=>{
    between them), while BM needs 16k_multi_lang. */
 function sttLanguage(){
   const l = document.querySelector('#langtog .lt.on')?.dataset.l || 'EN';
-  return l === 'BM' ? 'bm' : (l === 'ZH' ? 'zh' : 'en');
+  if(l === 'BM') return 'bm';
+  if(l === 'ZH') return 'zh';
+  if(l === 'AUTO') return 'multilingual';   // 16k_multi_lang: English + Malay, no need to pick one
+  return 'en';
 }
 
 /* The real ears: stream the mic to the backend, which asks Tencent Cloud ASR.

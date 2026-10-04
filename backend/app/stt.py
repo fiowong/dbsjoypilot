@@ -42,6 +42,10 @@ ENGINE_BY_LANGUAGE = {
     "zh": "16k_zh_en",
     "mixed": "16k_zh_en",
     "bm": "16k_multi_lang",
+    # "multilingual" / "auto" = the Auto mic option: one engine that covers English + Malay
+    # (and 13 others) so the customer never has to pick a language before speaking a mixed turn.
+    "multilingual": "16k_multi_lang",
+    "auto": "16k_multi_lang",
 }
 
 # ``word_info`` (which is what makes per-word stable_flag available) is only supported on

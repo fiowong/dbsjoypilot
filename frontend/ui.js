@@ -160,14 +160,63 @@ function renderVerdict(name, p){
   return null;   // every other agent keeps the plain payload card
 }
 
+// The five bounded agents are always on the table for a customer turn. While the backend
+// spends 7-27s screening, classifying, drafting and validating, the panel used to sit idle and
+// then dump every card at once when the response landed. agentThinking() paints the five
+// specialists as "reviewing…" the moment a turn is sent, so the panel thinks out loud DURING
+// the wait (the reframed-latency trust signal), and each card locks in — in place, never
+// stacked — when its verdict arrives. Any specialist the backend did not actually consult this
+// turn is left marked "not invoked this turn", so the panel never over-states the pipeline.
+let agentCards = {};
+const AGENT_THINK_ORDER = ['GUARDRAILS AGENT','INTENT CLASSIFIER','PAYMENT AGENT',
+                           'INDEPENDENT VALIDATION AGENT','PERSONALIZATION AGENT'];
+
+function agentThinking(){
+  agentCards = {};
+  agentsEl.innerHTML = '';
+  for(const name of AGENT_THINK_ORDER){
+    const c = document.createElement('div');
+    c.className = 'acard thinking';
+    c.innerHTML = `<div class="ah">${name}</div><div class="athink"><span class="pulse"></span>reviewing…</div>`;
+    agentsEl.appendChild(c);
+    agentCards[name] = c;
+  }
+  capline('Joy thinks out loud through 5 specialists so the payment is provably safe.');
+}
+
+function agentThinkingDone(){
+  for(const name in agentCards){
+    const c = agentCards[name];
+    c.classList.remove('thinking'); c.classList.add('idle');
+    const t = c.querySelector('.athink'); if(t) t.textContent = 'not invoked this turn';
+  }
+  agentCards = {};
+}
+
 function agent(name,obj){
   // Agent output is what DBS/engineers see, never what the customer sees (BRD: "the
   // customer only ever sees one warm conversation"), so this goes to the TYPED AGENT
   // CONTRACTS panel only, never into the chat bubble stream.
   agentCalls++; $('acnt').textContent = agentCalls+' call'+(agentCalls>1?'s':'');
+  const verdict = renderVerdict(name, obj || {});
+  // If a placeholder is waiting for this specialist, resolve it IN PLACE (the lock-in
+  // animation) instead of stacking a second card — the panel shows one card per agent.
+  const slot = agentCards[name];
+  if(slot){
+    delete agentCards[name];
+    slot.classList.remove('thinking'); slot.classList.add('settled');
+    if(verdict){
+      slot.classList.add('verdict');
+      slot.innerHTML = `<div class="ah">${name}</div>${verdict}`+
+        `<details class="raw"><summary>raw payload</summary><pre>${hl(obj)}</pre></details>`;
+    }else{
+      slot.innerHTML = `<div class="ah">${name}</div><pre>${hl(obj)}</pre>`;
+    }
+    agentsEl.scrollTop = agentsEl.scrollHeight;
+    return;
+  }
   const c=document.createElement('div');
   c.className='acard';
-  const verdict = renderVerdict(name, obj || {});
   if(verdict){
     // Verdict on top, the untouched payload one disclosure away underneath, so the
     // readable summary never becomes a substitute for the evidence it came from.
@@ -371,6 +420,7 @@ function receiptCard(o, lang){
          <div class="rr"><span class="k">${c.statusLabel}</span><span class="v">${c.statusDone}</span></div>
        </div>
        <div class="rfoot">${c.foot}</div>
+       <div class="rverify" data-state="pending">Verifying against the append-only audit log…</div>
        <div class="rsave"><button type="button" class="rsbtn">${icon('download')}<span>${c.save}</span></button></div>
      </div>`;
   chatEl.appendChild(d); scroll();
@@ -400,11 +450,12 @@ function receiptCard(o, lang){
 }
 
 /* ==========================================================================
-   INLINE DRAFT CARD: "Voice Command Recognized"
-   What Joy THINKS it heard, shown in the transcript before any approval
-   starts. Deliberately not a modal: the customer should be able to read it
-   against the conversation that produced it, and it stays on screen as the
-   record of what was recognised.
+   INLINE DRAFT CARD: "Ready to confirm"
+   What Joy prepared, shown in the transcript before any approval starts. It is
+   the customer's choice to begin the approval walkthrough: clicking it proceeds
+   to the 3x field-by-field review below. Deliberately not a modal: the customer
+   should be able to read it against the conversation that produced it, and it
+   stays on screen as the record of what was recognised.
    The card renders only what the canonical draft already says; it composes no
    figure of its own. It accepts both draft shapes: the live /turn payload uses
    payee_display / payee_masked / account_masked, while the offline scripted
@@ -418,6 +469,55 @@ let draftResolve = null;
 function closeDraftCard(v){
   const r = draftResolve; draftResolve = null;
   if(r) r(v || 'cancelled');
+}
+
+/* ==========================================================================
+   INLINE FACE ID CARD: "Ready to confirm"
+   The chat-level choice to verify with Face ID, shown AFTER the 3x field review
+   and BEFORE the biometric prompt. Deliberately not a modal: the customer clicks
+   it in the transcript, then the FaceID popup (the actual biometric) opens. The
+   two clicks are distinct — "I'm ready to verify" and "here is my Face ID" — so
+   the step reads as a real, customer-driven gate rather than an auto-advance.
+   It renders only what the draft already says; it composes no figure of its own.
+   ========================================================================== */
+let faceIdResolve = null;
+function closeFaceIdCard(v){
+  const r = faceIdResolve; faceIdResolve = null;
+  if(r) r(v || 'cancelled');
+}
+function faceIdCard(d, lang){
+  const c = tt(lang || 'EN').chrome.faceidCard;
+  const esc = s => String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;');
+  const amt = (typeof d.amount_minor === 'number')
+    ? money(d.amount_minor, d.currency) : '-';
+  const rows =
+      `<div class="dr"><span class="k">${c.amount}</span><span class="v amt">${esc(amt)}</span></div>
+       <div class="dr"><span class="k">${c.draft}</span><span class="v">${esc(d.draft_id)} · v${esc(d.version)}</span></div>`;
+  return new Promise(res=>{
+    faceIdResolve = res;
+    const el=document.createElement('div');
+    el.className='row them full';
+    el.innerHTML=
+      `<div class="dcard fid-ready" data-draft="${esc(d.draft_id)}">
+         <div class="dhead">
+           <span class="dtick">${icon('faceid')}</span>
+           <span class="dtitle">${c.title}</span>
+           <span class="dtag">${c.tag}</span>
+         </div>
+         <div class="drows">${rows}</div>
+         <button class="dbtn" type="button">${c.confirm}</button>
+       </div>`;
+    chatEl.appendChild(el); scroll();
+    // The button is the customer's decision, not decoration: the biometric prompt only
+    // opens here. A new run resolves it as 'cancelled' via closeFaceIdCard().
+    const b=el.querySelector('.dbtn');
+    if(b) b.addEventListener('click', ev=>{
+      ev.preventDefault(); ev.stopPropagation();
+      b.disabled = true;
+      b.textContent = c.started;
+      const r=faceIdResolve; faceIdResolve=null; if(r) r('confirm');
+    });
+  });
 }
 // The account string now passes through as the backend gave it ("ending 1234").
 // It used to be rewritten to "•••• 1234" here, which put two different renderings of the SAME
@@ -694,8 +794,9 @@ async function fieldReview(lang, d){
     ['AMOUNT',   c.fieldTitle.amount,    t.amount(amountWord[lang]||amountWord.EN),              2, 'receipt'],
     ['SOURCE_ACCOUNT',c.fieldTitle.source,t.source(ACCOUNT.masked),                              3, 'card']
   ];
-  // Show the recognised draft first; the field walkthrough starts when the customer acts
-  // on that card. Nothing has been signed at this point either way.
+  // Inline "Ready to confirm" card first: the customer's choice to begin the approval
+  // walkthrough. Clicking it proceeds to the field-by-field review popups below, where the
+  // recognised details are read back. Nothing has been signed at this point either way.
   const go = await draftCard(d, lang);
   if(go!=='confirm') return {cancelled:true};
   iface(t.intro); await sleep(600);
@@ -719,6 +820,10 @@ async function fieldReview(lang, d){
     audit(`FIELD_CONFIRMED_${f[0]}`,'ok');
   }
   stage(11,'pass');
+  // Inline "Ready to confirm" Face ID card: the customer's choice to verify with FaceID before
+  // the biometric prompt (the executeChain popup). Mirrors the live path's confirmation flow.
+  const fgo = await faceIdCard(d, lang);
+  if(fgo!=='confirm') return {cancelled:true};
   return {edit:false};
 }
 
