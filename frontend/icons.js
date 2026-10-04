@@ -21,6 +21,7 @@ const ICONS = {
   user:     '<path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0"/>',
   plus:     '<circle cx="12" cy="12" r="9"/><path d="M12 8v8"/><path d="M8 12h8"/>',
   receipt:  '<path d="M6 3h12v18l-3-2-3 2-3-2-3 2V3Z"/><path d="M9.5 8h5"/><path d="M9.5 12h5"/>',
+  download: '<path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M4 20h16"/>',
 
   /* ---- navigation ---- */
   chevronRight: '<path d="m9 6 6 6-6 6"/>',

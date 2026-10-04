@@ -194,6 +194,162 @@ function agent(name,obj){
    payment gets a Mandarin receipt. `lang` comes from session.interface_language,
    the language the backend settled on for this session.
    ========================================================================== */
+/* ==========================================================================
+   SAVING THE RECEIPT AS AN IMAGE
+   A canvas cannot photograph a DOM node without a rendering library, so the
+   same numbers are drawn a second time straight onto a canvas, from the very
+   same `o` this card was built from. No dependency, no server round trip, and
+   nothing leaves the device. It renders at 2x, because a receipt saved at 1x
+   comes back as a blurry upscale on a phone screen.
+   ========================================================================== */
+let _dbsLogoImg = null;
+function loadDbsLogo(){
+  if(_dbsLogoImg !== null) return Promise.resolve(_dbsLogoImg || null);
+  return new Promise(res=>{
+    const im = new Image();
+    im.onload  = ()=>{ _dbsLogoImg = im;   res(im); };
+    im.onerror = ()=>{ _dbsLogoImg = false; res(null); };   // degrade to the wordmark
+    im.src = 'assets/dbs-logo-white.png';
+  });
+}
+
+function roundRectPath(g, x, y, w, h, r){
+  g.beginPath();
+  if(typeof g.roundRect === 'function'){ g.roundRect(x, y, w, h, r); return; }
+  g.moveTo(x+r, y);
+  g.arcTo(x+w, y,   x+w, y+h, r); g.arcTo(x+w, y+h, x,   y+h, r);
+  g.arcTo(x,   y+h, x,   y,   r); g.arcTo(x,   y,   x+w, y,   r);
+  g.closePath();
+}
+
+function wrapText(g, text, maxW){
+  const out = [];
+  for(const word of String(text==null?'':text).split(' ')){
+    const last = out[out.length-1];
+    const trial = last ? last + ' ' + word : word;
+    if(last && g.measureText(trial).width > maxW) out.push(word);
+    else if(last) out[out.length-1] = trial;
+    else out.push(word);
+  }
+  return out.length ? out : [''];
+}
+
+async function receiptImageBlob(o, lang){
+  const c = tt(lang || 'EN').chrome.receipt;
+  const logo = await loadDbsLogo();
+  const W = 420, S = 2, pad = 10, cardW = W - pad*2, headH = 42, tickR = 25;
+  const F = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
+  const rows = [[c.to, o.to], [c.from, o.from], [c.reference, o.ref],
+                [c.statusLabel, c.statusDone]];
+
+  // The footnote is the only part whose height is not known up front, and it is measured
+  // BEFORE the canvas is sized, because its wrapping decides how tall the card has to be.
+  const probe = document.createElement('canvas').getContext('2d');
+  probe.font = '400 10px ' + F;
+  const footLines = wrapText(probe, c.foot, cardW - 48);
+  const footH = 20 + footLines.length * 15;
+
+  let y = pad + headH;
+  y += 17; const tickCY = y + tickR; y += tickR*2;
+  y += 10; const statusY = y;        y += 18;
+  y += 6;  const stampY  = y;        y += 14;
+  y += 13; const amtY    = y;        y += 36;
+  y += 13; const rowsY   = y;        y += rows.length * 36;
+  y += 12; const footY   = y;        y += footH + 14;
+  const H = y + pad;
+
+  const cv = document.createElement('canvas');
+  cv.width = W * S; cv.height = H * S;
+  const g = cv.getContext('2d');
+  if(!g) return null;
+  g.scale(S, S);
+
+  g.fillStyle = '#F4F5F7'; g.fillRect(0, 0, W, H);
+  g.fillStyle = '#FFFFFF'; roundRectPath(g, pad, pad, cardW, H - pad*2, 16); g.fill();
+  g.save(); roundRectPath(g, pad, pad, cardW, H - pad*2, 16); g.clip();
+
+  g.fillStyle = '#111111'; g.fillRect(pad, pad, cardW, headH);
+  g.fillStyle = '#EC1C24'; g.fillRect(pad, pad + headH - 2, cardW, 2);
+  if(logo){
+    const lh = 17, lw = lh * (logo.width / Math.max(1, logo.height));
+    g.drawImage(logo, pad + 14, pad + (headH - lh)/2, lw, lh);
+  } else {
+    g.fillStyle = '#FFFFFF'; g.font = '700 15px ' + F;
+    g.textAlign = 'left'; g.textBaseline = 'middle';
+    g.fillText('DBS', pad + 14, pad + headH/2);
+  }
+  g.fillStyle = '#FFFFFF'; g.font = '700 10.5px ' + F;
+  g.textAlign = 'right'; g.textBaseline = 'middle';
+  g.fillText(String(c.title || ''), pad + cardW - 14, pad + headH/2);
+
+  g.textAlign = 'center'; g.textBaseline = 'top';
+  g.beginPath(); g.arc(W/2, tickCY, tickR, 0, Math.PI*2);
+  g.fillStyle = '#0E9F6E'; g.fill();
+  g.strokeStyle = '#FFFFFF'; g.lineWidth = 3; g.lineCap = 'round'; g.lineJoin = 'round';
+  g.beginPath();
+  g.moveTo(W/2 - 10, tickCY); g.lineTo(W/2 - 3, tickCY + 7); g.lineTo(W/2 + 11, tickCY - 8);
+  g.stroke();
+
+  g.fillStyle = '#111111'; g.font = '800 15px ' + F;
+  g.fillText(String(c.status || ''), W/2, statusY);
+  g.fillStyle = '#71717A'; g.font = '400 11.5px ' + F;
+  g.fillText(String(o.stamp || ''), W/2, stampY);
+  g.fillStyle = '#111111'; g.font = '800 28px ' + F;
+  g.fillText(String(o.amount || ''), W/2, amtY);
+
+  g.font = '400 12.5px ' + F; g.strokeStyle = '#E5E7EB'; g.lineWidth = 1;
+  g.beginPath(); g.moveTo(pad + 14, rowsY); g.lineTo(pad + cardW - 14, rowsY); g.stroke();
+  rows.forEach((row, i) => {
+    const ry = rowsY + i * 36;
+    g.fillStyle = '#71717A'; g.textAlign = 'left';  g.textBaseline = 'top';
+    g.font = '400 12.5px ' + F;
+    g.fillText(String(row[0] || ''), pad + 14, ry + 10);
+    g.fillStyle = '#111111'; g.textAlign = 'right'; g.font = '700 12.5px ' + F;
+    g.fillText(String(row[1] || ''), pad + cardW - 14, ry + 10);
+    g.strokeStyle = '#E5E7EB';
+    g.beginPath(); g.moveTo(pad + 14, ry + 36); g.lineTo(pad + cardW - 14, ry + 36); g.stroke();
+  });
+
+  g.fillStyle = '#F4F5F7';
+  roundRectPath(g, pad + 14, footY, cardW - 28, footH, 11); g.fill();
+  g.fillStyle = '#71717A'; g.font = '400 10px ' + F;
+  g.textAlign = 'left'; g.textBaseline = 'top';
+  footLines.forEach((ln, i) => g.fillText(ln, pad + 24, footY + 10 + i * 15));
+
+  g.restore();
+  return new Promise(res => cv.toBlob(b => res(b), 'image/png'));
+}
+
+/* Hands the finished PNG to the device. On a phone the share sheet IS the save action -
+   it offers Save Image, WhatsApp, Mail and the rest - so it is tried first wherever the
+   browser can share files. Everywhere else (desktop, or no file sharing) it falls back to
+   a plain download, so the button always does something real. */
+async function saveReceiptImage(o, lang){
+  const c = tt(lang || 'EN').chrome.receipt;
+  const blob = await receiptImageBlob(o, lang);
+  if(!blob) return false;
+  const name = 'DBS-receipt-'
+    + String(o.ref || 'payment').replace(/[^A-Za-z0-9_-]/g, '') + '.png';
+  const file = (typeof File === 'function')
+    ? new File([blob], name, { type:'image/png' }) : null;
+  if(file && navigator.canShare && navigator.canShare({ files:[file] })){
+    try{
+      await navigator.share({ files:[file], title: c.title || 'Receipt' });
+      return true;
+    }catch(err){
+      // The customer backing out of the share sheet is not a failure worth reporting.
+      if(err && err.name === 'AbortError') return false;
+      /* anything else falls through to the download */
+    }
+  }
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url), 4000);
+  return true;
+}
+
 function receiptCard(o, lang){
   const c = tt(lang || 'EN').chrome.receipt;
   const esc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;');
@@ -215,8 +371,31 @@ function receiptCard(o, lang){
          <div class="rr"><span class="k">${c.statusLabel}</span><span class="v">${c.statusDone}</span></div>
        </div>
        <div class="rfoot">${c.foot}</div>
+       <div class="rsave"><button type="button" class="rsbtn">${icon('download')}<span>${c.save}</span></button></div>
      </div>`;
   chatEl.appendChild(d); scroll();
+  // A receipt a customer can keep is worth more than one they can only look at. The button
+  // renders the same figures already on this card - nothing is re-typed, nothing is uploaded.
+  const btn = d.querySelector('.rsbtn');
+  if(btn) btn.addEventListener('click', async ()=>{
+    if(btn.disabled) return;
+    const label = btn.querySelector('span');
+    const back  = label ? label.textContent : '';
+    btn.disabled = true;
+    if(label) label.textContent = c.saving || 'Preparing…';
+    try{
+      const saved = await saveReceiptImage(o, lang);
+      if(label){
+        label.textContent = saved ? (c.saved || 'Saved') : back;
+        btn.classList.toggle('done', !!saved);
+        if(saved) setTimeout(()=>{ label.textContent = back; btn.classList.remove('done'); }, 2500);
+      }
+    }catch(err){
+      if(label) label.textContent = back;
+    }finally{
+      btn.disabled = false;
+    }
+  });
   return d;
 }
 
@@ -377,6 +556,45 @@ const draft=v=>$('stDraft').textContent=v;
 const ledger=v=>{const e=$('stLedger');e.textContent=v;e.className='v '+(v==='NOT_INVOKED'?'':'ok');};
 const sig=v=>{const e=$('stSig');e.textContent=v;e.className='v '+(v==='NONE'?'':'ok');};
 function outcome(v,cls){const e=$('stOut');e.textContent=v;e.className='outbadge '+(cls||'brand');}
+
+/* The caption under the control chain. It is PER TURN and re-written from what that turn
+   actually did, because a sentence nobody can check is just marketing. It answers the three
+   things a judge is really deciding: did a model draft anything, who made the call, and did
+   money move (or who stopped it). */
+function captionFor(resp){
+  const s   = (resp && resp.session) || {};
+  const evs = (resp && resp.events) || [];
+  const eng = evs.map(e => (e && e.payload) ? e.payload.engine : null).filter(Boolean);
+  const live = eng.filter(e => e === 'live').length;
+  const mock = eng.filter(e => e === 'mock').length;
+  const det  = eng.filter(e => String(e).indexOf('deterministic') !== -1).length;
+
+  let first;
+  if(live)      first = `The model drafted${live > 1 ? ` across ${live} agents` : ''}.`;
+  else if(det)  first = 'No model was needed, this turn was deterministic by design.';
+  else if(mock) first = `The model was unreachable, so ${mock} agent${mock > 1 ? 's' : ''} fell back.`;
+  else          first = 'Nothing was drafted on this turn.';
+
+  const stopped = s.frozen || ['BLOCK','FREEZE','SAFETY_INTERVENTION','REJECTED']
+                    .indexOf(String(s.outcome || '')) !== -1;
+  const third = s.ledger === 'RECORDED' ? 'Nothing moved without your biometric.'
+              : stopped                 ? 'Nothing moved, DBS stopped it.'
+              :                           'Nothing moved.';
+  return `${first} Determinism decided. ${third}`;
+}
+const capline = v => { const e = $('capline'); if(e) e.textContent = v; };
+
+/* VOICE ENGINE row. Hidden until the real engine actually fails: an indicator that only ever
+   appears on a fallback cannot accidentally claim Tencent ASR was used, and stays silent
+   entirely when everything went to plan. Once revealed it is never hidden again, so the panel
+   cannot quietly un-say that a fallback happened. */
+function voiceEngine(text, reveal){
+  const row = $('vengRow'), val = $('vengVal');
+  if(!row || !val) return;
+  val.textContent = text;
+  if(reveal) row.hidden = false;
+}
+
 function hit(branch,node){
   const b=$('br'+branch); if(b)b.classList.add('hit');
   const n=$('nd'+node); if(n)n.classList.add('hit');

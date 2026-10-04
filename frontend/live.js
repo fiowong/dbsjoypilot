@@ -122,25 +122,28 @@ function lastInterfaceLine(events){
 // Shows what the intent classifier actually understood, so "is the LLM getting it?" is
 // answerable at a glance instead of guessed. Tagged `.ins` so it disappears along with
 // the technical panels and never pollutes the clean customer-only view.
+/* What Joy made of the last utterance, for the inspector only.
+   This used to be an "UNDERSTOOD" block appended to the chat, which put intent, confidence
+   and language on the phone itself - it read as debug output and made the conversation look
+   like a log. It is a diagnostic about the same turn the INTENT CLASSIFIER card already
+   covers, so it now sits with the rest of the evidence in the STATE panel instead. */
 function showUnderstood(resp, asrConfidence, viaVoice){
   const ev=(resp.events||[]).slice().reverse().find(e=>e.event_type==='INTENT_RESULT');
   if(!ev) return;
   const p=ev.payload||{};
-  const esc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;');
+  const el=$('stHeard');
+  if(!el) return;
   const conf=(p.confidence!=null)?Math.round(p.confidence*100)+'%':'-';
   // Voice provenance: the live "Heard…" line is overwritten as soon as a turn resolves,
   // so the clarity reading is repeated here where it survives.
-  const asr=(viaVoice && typeof asrConfidence==='number')
-    ? `<br><span class="why">heard via voice · clarity ${Math.round(asrConfidence*100)}%`+
-      (asrConfidence < 0.85 ? '. Below the 0.85 threshold, so a repeat may be requested' : '')+`</span>`
+  const heard=(viaVoice && typeof asrConfidence==='number')
+    ? ` · clarity ${Math.round(asrConfidence*100)}%`
+      + (asrConfidence < 0.85 ? ' (low)' : '')
     : '';
-  const d=document.createElement('div');
-  d.className='row them ins';
-  d.innerHTML=`<span class="lab UNDERSTOOD">UNDERSTOOD</span><div class="bub sys">`+
-    `intent <b>${esc(p.intent||'-')}</b> · confidence <b>${conf}</b>`+
-    (p.detected_language?` · language <b>${esc(p.detected_language)}</b>`:'')+
-    (p.reason?`<br><span class="why">${esc(p.reason)}</span>`:'')+asr+`</div>`;
-  chatEl.appendChild(d); scroll();
+  el.textContent = `${p.intent||'-'} · ${conf}${heard}`
+    + (p.detected_language ? ` · ${p.detected_language}` : '');
+  // The model's own one-line reasoning stays available without widening the row.
+  if(p.reason) el.title = p.reason;
 }
 
 // Local, presentation-only field-by-field walkthrough (BRD §8.11.2 / A.8) using
@@ -313,6 +316,7 @@ async function liveConfirmOnce(session, lang, my, skipFaceId){
   }
   if(my!==RUN) return null;
   syncPersonalization(resp.session);
+  capline(captionFor(resp));   // a confirmation is its own turn: re-state what actually moved
   const seenStages=new Set();
   // Walk events ourselves (not via eventsToSteps) so the receipt card lands at the exact
   // spot the backend intends: right AFTER its own payment's "All done..." line, not before
@@ -353,6 +357,25 @@ async function liveConfirmOnce(session, lang, my, skipFaceId){
   steps.push(...finalStateSteps(resp.session));
   await play(steps, my);
   if(my!==RUN) return null;
+  // The money has moved, but the transcript alone cannot tell the customer whether this
+  // conversation is over or whether they are allowed to pay someone else. Say it out loud.
+  // Only once the WHOLE batch is done: a multi-instruction breath is confirmed one payment at a
+  // time, and farewelling it half-way would read as "we are finished" while a payment is still
+  // owed. There is deliberately NO countdown - a fresh payment takes ~20-30s to PREPARE, but
+  // nothing makes anybody wait, and a timer would invent a rule the backend does not have
+  // (measured: backend/tools/second_payment_probe.py, 17s / 25s / 32s across three payments).
+  if(!resp.session.pending_remaining
+     && (resp.session.state === 'EXECUTED' || resp.session.state === 'SCHEDULED')){
+    const g = tt(lang).chrome.goodbye;
+    await popup({
+      gif: STAGE_GIF.goodbye, gifAlt:'Joy says goodbye', kicker:g.kicker,
+      title:g.title, body:g.body,
+      acts:[{id:'done',label:g.done,kind:'yes'}],
+      auto: 15000, autoResult:'done',
+      note:g.note
+    });
+    if(my!==RUN) return null;
+  }
   return resp.session;
 }
 
@@ -497,7 +520,8 @@ async function liveFreeTurn(text, viaVoice, asrConfidence, asrSource){
 
   const st = resp.session.state;
   syncPersonalization(resp.session);   // the backend's Personalization Agent already decided this turn
-  showUnderstood(resp, asrConfidence, viaVoice);   // diagnostic: intent + clarity, hidden in the customer view
+  capline(captionFor(resp));           // the per-turn headline under the control chain
+  showUnderstood(resp, asrConfidence, viaVoice);   // diagnostic: intent + clarity, in the STATE panel
   // IDENTITY STEP-UP (Voice Mode / unverified speaker). Stage 1 could not verify the speaker, so
   // the backend HELD the request and suppressed the read-back: Joy has spoken only the hold line,
   // and the payment has NOT been presented. FaceID decides whether it ever is, and it runs HERE,
@@ -523,8 +547,21 @@ async function liveFreeTurn(text, viaVoice, asrConfidence, asrSource){
     // liveConfirmFlow raises the review card, which overwrites #mcard and therefore REPLACES
     // the working card with no gap. dismissWorking() afterwards is a no-op unless that flow
     // raised no card at all, in which case the working card would otherwise sit there.
-    await liveConfirmFlow(resp.session, lang, my, faceidDone);
+    const afterConfirm = await liveConfirmFlow(resp.session, lang, my, faceidDone);
     dismissWorking(workPopup);
+    // A FINISHED payment ends its conversation, so the NEXT payment has to open a fresh
+    // session. The terminal check further down never catches this one: it tests `st`, which
+    // is the state from THIS turn's /turn response (CONFIRMATION_READY) and cannot see the
+    // state the /confirm call ended on. So without this line the second payment reuses a
+    // session that still carries the first payment's execution row, and /confirm lands on
+    // CONFIRMATION_COMPLETE / AWAITING_BIOMETRIC instead of EXECUTED - the money looks like
+    // it went through, but no receipt ever arrives and the customer is left hanging.
+    // Measured, not guessed: backend/tools/second_payment_probe.py (25s fresh -> EXECUTED,
+    // 32s reused -> stalled, 17s fresh again -> EXECUTED).
+    // pending_remaining guards the multi-instruction batch: instructions are reviewed ONE AT
+    // A TIME, so while more are still queued the session must stay alive for the next one.
+    if(afterConfirm && TERMINAL_STATES.has(afterConfirm.state)
+       && !afterConfirm.pending_remaining) FREE_SESSION_ID = null;
   } else if(st==='CONFIRMATION_READY' && resp.session.awaiting_multi_go_ahead){
     audit('CONFIRM_CARD_DEFERRED · the read-back above is still asking a question; '
           + 'the review card appears once the customer answers.','ok');
@@ -735,6 +772,8 @@ async function micCapture(){
       catch(err){
         console.warn('[joy] falling back to the browser recogniser:', err.message);
         audit('ASR_UNAVAILABLE · ' + err.message + ' · falling back to the browser recogniser','warn');
+        // Reveal the VOICE ENGINE row: the real engine failed, so the panel has to say so.
+        voiceEngine('Browser fallback · Tencent ASR not connected', true);
       }
       if(r && r.text){
         setYou(r.text);   // settle the customer's bubble on the FINAL text, not the last partial
@@ -744,6 +783,7 @@ async function micCapture(){
         // interim-only fallback, where the final result never arrived.
         const eng = 'Tencent ASR' + (r.engine ? ' (' + r.engine + ')' : '');
         audit('ASR_ENGINE · ' + eng + ' · confidence source ' + (r.confidenceSource || 'unknown'),'ok');
+        voiceEngine(eng, false);   // record which engine ran, but do not reveal the row on success
         // The words now live in the customer's own bubble, so this left-hand marker carries
         // only the readings that have no home there: clarity, and which engine produced it.
         setLive(`Heard you${clarity} · ${eng}`);
@@ -759,6 +799,7 @@ async function micCapture(){
       setYou(spoken.text);
       const c = (typeof spoken.confidence==='number') ? spoken.confidence : null;
       audit('ASR_ENGINE · browser fallback · Tencent ASR produced no transcript for this turn','warn');
+      voiceEngine('Browser fallback · Tencent ASR not connected', true);
       setLive(`Heard you${c!=null ? ` · clarity ${Math.round(c*100)}%` : ''} · browser fallback`);
       liveFreeTurn(spoken.text, true, c);
       return;

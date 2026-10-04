@@ -222,6 +222,9 @@
       <div class="panel">
         <h3>END-TO-END CONTROL CHAIN <span class="cnt">BRD §8.2 · STAGES 0-15</span></h3>
         <div class="chain" id="chain"></div>
+        <!-- The one line a judge remembers. It is PER TURN, not a static blurb: it names what
+             the model did, what deterministic code decided, and what moved as a result. -->
+        <div class="capline" id="capline">Determinism decides. Nothing moves without your biometric.</div>
       </div>
 
       <div class="panel">
@@ -242,12 +245,23 @@
         <div class="sbox" style="margin-bottom:11px"><div class="k">CONTROL OUTCOME</div>
           <div style="margin-top:5px"><span class="outbadge" id="stOut">-</span></div>
         </div>
+        <!-- Hidden until it is true. A voice engine indicator that is only ever shown when
+             the real one failed is honest by construction: it cannot claim Tencent ASR was
+             used when it was not, and it is simply absent when everything went to plan. -->
+        <div class="sbox vengine" id="vengRow" hidden><div class="k">VOICE ENGINE</div>
+          <div class="v" id="vengVal">-</div>
+        </div>
+        <!-- LAST HEARD used to be an "UNDERSTOOD" block inside the chat, where it read as debug
+             output on the phone. It is a diagnostic, so it belongs with the other evidence here. -->
+        <div class="sbox" style="margin-bottom:11px"><div class="k">LAST HEARD</div>
+          <div class="v" id="stHeard">-</div>
+        </div>
         <h3 style="margin-top:14px">APPEND-ONLY AUDIT TIMELINE</h3>
         <div class="audit" id="audit"><div class="placeholder">No events yet.</div></div>
       </div>
 
       <div class="panel">
-        <h3>MECE FAILURE MAP <span class="cnt">BRD §6 · 20 NODES</span></h3>
+        <h3>MECE FAILURE MAP <span class="cnt">BRD §6 · 21 NODES</span></h3>
         <div class="mece" id="mece"></div>
       </div>
 

@@ -77,13 +77,14 @@ class SttClient {
   /* Stop listening and let the engine finish the utterance. Resolves with the final result. */
   async stop() {
     if (!this.running) return null;
-    this.running = false;
     this.onState('finishing');
     this._stopMic();
-    if (!this.ws) return null;          // never connected, nothing to wait for
-    // Send the trailing partial chunk (<200 ms) so the engine hears the full utterance
-    // before we tell it the stream is over.
+    if (!this.ws) { this.running = false; return null; }   // never connected, nothing to wait for
+    // Flush the trailing partial chunk (<200 ms) while `running` is still true: flush() refuses
+    // to send once `running` is false, so flipping it first silently dropped the last snippet
+    // of the utterance and the engine never heard the end of what was said.
     if (typeof this._flushAudio === 'function') this._flushAudio();
+    this.running = false;
     try { this.ws.send(JSON.stringify({ type: 'end' })); } catch (e) { /* socket gone */ }
     const result = await this._waitFor('final');
     this._closeSocket();

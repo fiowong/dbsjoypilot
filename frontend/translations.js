@@ -73,7 +73,10 @@ const STAGES = [
 const BRANCHES = [
   ['A','Wrong person or untrusted input',['A1','A2','A3']],
   ['B','Auntie is misunderstood',        ['B1','B2','B3']],
-  ['C','Malicious instructions affect the workflow',['C1','C2','C3']],
+  // C4 is the system-message injection that changes the assistant's ROLE rather than asking to
+  // skip confirmation. It lives in the backend's EXPECTED map, so it has to be listed here too
+  // or the failure map silently under-reports the branch it belongs to.
+  ['C','Malicious instructions affect the workflow',['C1','C2','C3','C4']],
   ['D','Auntie is being manipulated',    ['D1','D2','D3']],
   ['E','Auntie does not understand the payment',['E1','E2','E3']],
   ['F','Wrong, forged or repeated payment is executed',['F1','F2','F3']],
@@ -147,12 +150,13 @@ const T = {
       receipt:{ title:'PAYMENT RECEIPT', status:'Payment completed',
         to:'To', from:'From', reference:'Reference',
         statusLabel:'Status', statusDone:'Completed',
-        foot:'Prepared by Joy · approved by you with a transaction-specific biometric · signed and recorded by DBS. Synthetic ledger entry, no real money moved.' },
+        save:'Save receipt', saving:'Preparing…', saved:'Saved to your device',
+        foot:'Prepared by Joy · approved by you with a transaction-specific biometric · signed and recorded by DBS.' },
       // Shown while a /turn is in flight. It is chrome, not an agent line: the backend has not
       // answered yet, so there is no catalogue sentence to quote. Per-language like every other
       // piece of chrome, or a Bahasa conversation would suddenly be answered in English.
       working:{ kicker:'JOY · WORKING', title:'Working on it…',
-        body:'Reading what you said, checking the payee against your saved list, and preparing the payment.',
+        body:'Taking in your words, checking the payee against your saved list, and preparing the payment.',
         hide:'Hide',
         note:'Nothing is being sent while this is on screen.' },
       // The Start gate. Joy is what is being demonstrated, so she is the first thing on
@@ -161,7 +165,16 @@ const T = {
       welcome:{ kicker:'JOY · DBS', title:'Hello! I’m Joy',
         body:'Tell me <b>who</b> you’d like to pay and <b>how much</b>, in English, 中文 or Bahasa Melayu.',
         start:'Start',
-        note:'Nothing is sent until you approve it, and DBS checks every payment first.' }
+        note:'Nothing is sent until you approve it, and DBS checks every payment first.' },
+      // Shown once a payment is finished and its receipt is on screen. It answers the one thing
+      // the transcript cannot: is this conversation over, or can I pay someone else? There is no
+      // cooldown to sit through (measured: a fresh payment runs ~20-30s end to end), so this
+      // invites the next payment and says how long it takes, rather than inventing a countdown
+      // that would tell a customer to wait for a delay that does not exist.
+      goodbye:{ kicker:'JOY · DONE', title:'Thank you!',
+        body:'Your payment is done. You can make another one whenever you like, just tell me who and how much. Each payment takes about 20–30 seconds to prepare.',
+        done:'Done',
+        note:'Nothing moves until you approve it, and DBS checks every payment first.' }
     },
     // Plainer, shorter wording used once a conversation has shown real difficulty
     // (see PERSONALIZATION below), same information, fewer words per sentence.
@@ -208,14 +221,22 @@ const T = {
       receipt:{ title:'付款收据', status:'付款完成',
         to:'收款人', from:'付款账户', reference:'交易编号',
         statusLabel:'状态', statusDone:'已完成',
-        foot:'由 Joy 生成 · 经您以与本次交易绑定的生物识别批准 · 由 DBS 签名并记录。模拟账本记录，没有真实资金流动。' },
+        save:'保存收据', saving:'正在准备…', saved:'已保存到您的设备',
+        foot:'由 Joy 生成 · 经您以与本次交易绑定的生物识别批准 · 由 DBS 签名并记录。' },
       working:{ kicker:'JOY · 处理中', title:'正在处理…',
-        body:'正在理解您说的话，对照您已保存的收款人名单核对，然后准备这笔转账。',
+        body:'正在理解您的话，对照您已保存的收款人名单核对，然后准备这笔转账。',
         hide:'隐藏',
         note:'画面显示期间，还没有汇出任何款项。' },
       welcome:{ kicker:'JOY · DBS', title:'你好，我是 Joy',
         body:'告诉我您要付给<b>谁</b>、付<b>多少</b>。可以用 English、中文或 Bahasa Melayu。',
         start:'开始',
+        note:'在您批准之前不会汇出任何款项——每一笔付款都会先由 DBS 检查。' },
+      // 付款完成、收据出现后显示。它回答文字记录无法回答的问题：这次对话结束了吗？我还能再付一笔吗？
+      // 并没有需要等待的冷却时间（实测：一笔新的付款全程约 20–30 秒），所以这里邀请下一笔付款并说明所需时间，
+      // 而不是编造一个倒计时，让顾客去等一个并不存在的延迟。
+      goodbye:{ kicker:'JOY · 完成', title:'谢谢！',
+        body:'这笔付款已经完成。您随时可以再付一笔——只要告诉我付给谁、付多少。每一笔付款大约需要 20–30 秒来准备。',
+        done:'完成',
         note:'在您批准之前不会汇出任何款项——每一笔付款都会先由 DBS 检查。' }
     },
     simple:{ intro:'好，我们慢慢来，一项一项看。',
@@ -262,7 +283,8 @@ const T = {
       receipt:{ title:'RESIT BAYARAN', status:'Bayaran selesai',
         to:'Kepada', from:'Daripada', reference:'Rujukan',
         statusLabel:'Status', statusDone:'Selesai',
-        foot:'Disediakan oleh Joy · diluluskan oleh anda dengan biometrik khusus transaksi · ditandatangani dan direkodkan oleh DBS. Catatan lejar sintetik, tiada wang sebenar dipindahkan.' },
+        save:'Simpan resit', saving:'Menyediakan…', saved:'Disimpan pada peranti anda',
+        foot:'Disediakan oleh Joy · diluluskan oleh anda dengan biometrik khusus transaksi · ditandatangani dan direkodkan oleh DBS.' },
       working:{ kicker:'JOY · SEDANG PROSES', title:'Sedang diproses…',
         body:'Sedang memahami apa yang anda katakan, menyemak penerima dengan senarai simpanan anda, dan menyediakan pembayaran ini.',
         hide:'Sembunyi',
@@ -270,6 +292,15 @@ const T = {
       welcome:{ kicker:'JOY · DBS', title:'Helo! Saya Joy',
         body:'Beritahu saya <b>kepada siapa</b> anda mahu bayar dan <b>berapa banyak</b>, dalam English, 中文 atau Bahasa Melayu.',
         start:'Mula',
+        note:'Tiada apa-apa dihantar sehingga anda meluluskannya, dan DBS menyemak setiap pembayaran dahulu.' },
+      // Ditunjukkan selepas bayaran selesai dan resitnya dipaparkan. Ia menjawab perkara yang tidak
+      // dapat dijawab oleh transkrip: adakah perbualan ini sudah tamat, atau bolehkah saya bayar
+      // orang lain? Tiada tempoh menunggu (diukur: satu bayaran baharu mengambil masa ~20-30 saat),
+      // jadi kad ini menjemput bayaran seterusnya dan menyatakan berapa lama ia mengambil masa,
+      // bukan mereka-reka undur yang menyuruh pelanggan menunggu kelewatan yang tidak wujud.
+      goodbye:{ kicker:'JOY · SELESAI', title:'Terima kasih!',
+        body:'Bayaran anda sudah selesai. Anda boleh buat satu lagi bila-bila masa, beritahu saya kepada siapa dan berapa. Setiap bayaran mengambil masa kira-kira 20–30 saat untuk disediakan.',
+        done:'Selesai',
         note:'Tiada apa-apa dihantar sehingga anda meluluskannya, dan DBS menyemak setiap pembayaran dahulu.' }
     },
     simple:{ intro:'Baik. Kita buat perlahan-lahan, satu demi satu.',

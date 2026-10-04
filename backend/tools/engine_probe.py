@@ -27,7 +27,7 @@ READING THE OUTPUT
 
     `deterministic by design` marks the IN-10 multi-instruction path: `_instruction_proposal`
     is parsing.py, and `run_multi_turn` validates with ValidationAgent.mock, emitting
-    engine="deterministic (reference policy)". That one is NOT a fallback — nothing was tried
+    engine="deterministic (reference policy)". That one is NOT a fallback, nothing was tried
     and nothing failed. Only `!! ... genuinely fell back to mock` is worth chasing.
 """
 import asyncio

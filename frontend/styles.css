@@ -710,6 +710,17 @@ button{font-family:inherit}
 .rcpt .rr .v{font-weight:700;color:var(--ink);text-align:right;word-break:break-word}
 .rcpt .rfoot{margin:12px 14px 14px;background:var(--dbs-gray);border-radius:11px;padding:10px 12px;
   font-size:10px;color:var(--muted);line-height:1.5}
+/* "Save receipt", keeps the card, not just the moment. Full width so it is an obvious
+   target on a phone, and it never looks like a second payment action: grey, not red. */
+.rcpt .rsave{margin:0 14px 14px}
+.rcpt .rsbtn{display:flex;align-items:center;justify-content:center;gap:7px;width:100%;
+  padding:9px 12px;border:1px solid var(--line);border-radius:11px;background:var(--dbs-gray);
+  color:var(--ink);font:inherit;font-size:12px;font-weight:700;cursor:pointer;
+  -webkit-tap-highlight-color:transparent}
+.rcpt .rsbtn .ic{width:16px;height:16px;flex-shrink:0}
+.rcpt .rsbtn:hover{background:#EAEBEE}
+.rcpt .rsbtn:disabled{opacity:.55;cursor:default}
+.rcpt .rsbtn.done{border-color:var(--ok);color:var(--ok);background:#fff}
 
 /* ==========================================================================
    inspector (the engine room)
@@ -799,6 +810,17 @@ button{font-family:inherit}
 .outbadge.stop{background:#3A1414;color:#FF9B9B;border-color:#6B2424}
 .outbadge.warn{background:#3A2A12;color:#FFCF87;border-color:#6B4A1C}
 .outbadge.brand{background:#3A1618;color:var(--brand);border-color:#6B2226}
+
+/* The per-turn caption under the control chain (rewritten by captionFor() in ui.js from what
+   that turn actually did, so it reads as a report rather than a slogan). */
+.capline{margin-top:10px;padding:9px 11px;border-radius:10px;background:#17171B;
+  border:1px solid #33333C;border-left:3px solid var(--brand);
+  font-size:11px;font-weight:700;color:#E8E8EE;line-height:1.45}
+
+/* VOICE ENGINE row. Hidden until Tencent ASR actually fails, then never hidden again, an
+   indicator that only appears on a fallback cannot accidentally claim the real engine ran. */
+.sbox.vengine{border-color:#6B4A1C;background:#2A1F0E}
+.sbox.vengine .v{color:#FFCF87;font-family:inherit;font-size:11px;font-weight:700;line-height:1.4}
 
 /* audit */
 .audit{display:flex;flex-direction:column;gap:2px;max-height:216px;overflow-y:auto;font-family:ui-monospace,Menlo,Consolas,monospace}

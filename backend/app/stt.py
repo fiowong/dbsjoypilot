@@ -128,7 +128,9 @@ class TencentRealtimeASR:
             "voice_id": uuid.uuid4().hex[:32],
             "voice_format": str(VOICE_FORMAT_PCM),
             "needvad": "1",
-            "vad_silence_time": "1000",
+            # No vad_silence_time: end-of-utterance is driven by the explicit {"type":"end"}
+            # the client sends (stt.js), so we don't send a per-engine silence timeout that
+            # some engines (e.g. 16k_multi_lang) ignore -- keeps Malay and others consistent.
             "filter_empty_result": "1",
         }
         # Only ask for per-word detail when the engine can actually give it; that detail
