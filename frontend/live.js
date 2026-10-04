@@ -489,9 +489,11 @@ async function liveFreeTurn(text, viaVoice, asrConfidence, asrSource){
   // as the reply that is about to arrive (see dominantLang above).
   let lang = dominantLang(text);
   // Clear only the STALE, transient mic status markers ("Listening…" / "Hearing…" /
-  // "Stopped listening…") left over from a PREVIOUS mic press. The "Heard you · clarity N%"
-  // marker is KEPT: it is the only place the engine's clarity reading survives, and it proves
-  // the ears worked. Clarification cards (.ccard) and every other bubble stay untouched.
+  // "Stopped listening…") left over from a PREVIOUS mic press. The live "Heard you" marker
+  // is dropped at the source (micCapture) the moment the transcript settles, so nothing of
+  // that shape should ever arrive here. Clarity still survives in the STATE panel row and
+  // the engine survives in the VOICE ENGINE panel row. Clarification cards (.ccard) and
+  // every other bubble stay untouched.
   chatEl.querySelectorAll('.row.them .bub.iface').forEach(b => {
     if(/^(Listening|Hearing|Stopped listening)/.test(b.textContent || '')) b.closest('.row').remove();
   });
@@ -832,7 +834,7 @@ async function micCapture(){
   // The INTERFACE bubble is only a status marker ("we are listening"). The customer's OWN
   // words stream into their own right-column YOU bubble, word by word, via setYou, so the
   // transcript reads like a real voice-first exchange instead of the system quoting them back.
-  const live = iface(icon('mic') + 'Listening…');
+  let live = iface(icon('mic') + 'Listening…');
   // Every status line carries the mic icon; the icon is re-emitted on each update because
   // setting innerHTML replaces the whole bubble content.
   const setLive = t => { const b = live && live.querySelector('.bub'); if(b) b.innerHTML = icon('mic') + fill(t); };
@@ -866,15 +868,15 @@ async function micCapture(){
       if(r && r.text){
         setYou(r.text);   // settle the customer's bubble on the FINAL text, not the last partial
         const c = (typeof r.confidence==='number') ? r.confidence : null;
-        const clarity = c!=null ? ` · clarity ${Math.round(c*100)}%` : ' · clarity not reported';
+        // The mic status bubble ("Listening…") has done its job: the YOU bubble is now the
+        // "I heard you" beat. Drop it so the chat reads cleanly: your words -> Joy's reply.
+        // Engine + clarity still survive in the panel (VOICE ENGINE row + STATE row).
+        if(live){ try{ live.remove(); }catch(_){} live = null; }
         // sttTurn is the Tencent path, so any text it returns came from Tencent - even the
         // interim-only fallback, where the final result never arrived.
         const eng = 'Tencent ASR' + (r.engine ? ' (' + r.engine + ')' : '');
         audit('ASR_ENGINE · ' + eng + ' · confidence source ' + (r.confidenceSource || 'unknown'),'ok');
         voiceEngine(eng, false);   // record which engine ran, but do not reveal the row on success
-        // The words now live in the customer's own bubble, so this left-hand marker carries
-        // only the readings that have no home there: clarity, and which engine produced it.
-        setLive(`Heard you${clarity} · ${eng}`);
         // Feed the REAL engine confidence through, so a garbled utterance can be challenged
         // instead of sailing past the ASR ambiguity guardrail.
         liveFreeTurn(r.text, true, c, r.confidenceSource);
@@ -886,9 +888,11 @@ async function micCapture(){
     if(spoken && spoken.text){
       setYou(spoken.text);
       const c = (typeof spoken.confidence==='number') ? spoken.confidence : null;
+      // Drop the mic status bubble: the YOU bubble is the "heard you" feedback now.
+      // Engine + clarity are recorded in the panel (VOICE ENGINE row + audit timeline).
+      if(live){ try{ live.remove(); }catch(_){} live = null; }
       audit('ASR_ENGINE · browser fallback · Tencent ASR produced no transcript for this turn','warn');
       voiceEngine('Browser fallback · Tencent ASR not connected', true);
-      setLive(`Heard you${c!=null ? ` · clarity ${Math.round(c*100)}%` : ''} · browser fallback`);
       liveFreeTurn(spoken.text, true, c);
       return;
     }
