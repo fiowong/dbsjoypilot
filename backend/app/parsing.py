@@ -24,6 +24,11 @@ NUMBER_WORDS = {
     "lapan": 8, "sembilan": 9, "sepuluh": 10, "lima belas": 15, "dua puluh": 20,
     "tiga puluh": 30, "empat puluh": 40, "lima puluh": 50, "enam puluh": 60,
     "tujuh puluh": 70, "lapan puluh": 80, "sembilan puluh": 90, "seratus": 100,
+    # "seribu" (a thousand) is ONE word in Malay, so the scale word "ribu" can never see it -
+    # \bribu\b has no boundary inside "seribu" - and it fell through to the plain number-word
+    # branch with no entry there, so "seribu dollar" parsed as no amount at all. Listed here as
+    # a number word; the compound form "dua ribu" still goes through SCALE_WORDS as before.
+    "seribu": 1000,
     # Mandarin
     "一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7,
     "八": 8, "九": 9, "十": 10, "十五": 15, "二十": 20, "三十": 30, "四十": 40,
@@ -81,9 +86,14 @@ PAYEE_ALIASES = {
 # the sentence, so MIXED now defaults to English (see messages.interface_language).
 CJK_MARKERS = re.compile(r"[\u4e00-\u9fff]")
 BM_MARKERS = re.compile(
-    r"\b(hantar|kepada|dolar|duit|saya|tidak|boleh|jumlah|akaun|bayar|sekarang|"
+    r"\b(hantar|kepada|dolar|dollar|duit|saya|tidak|boleh|jumlah|akaun|bayar|sekarang|"
     r"lima|lapan|sepuluh|ribu|seratus|buang|had|cucu|cepat|maaf)\b", re.I)
-EN_MARKERS = re.compile(r"\b(transfer|send|pay|dollars?|please|account|confirm)\b", re.I)
+# NOTE: "dollars?" was deliberately REMOVED from EN_MARKERS. "dollar" is an English loanword
+# spoken routinely inside Malay financial speech ("seribu dollar", "lima puluh dollar"), and it
+# must NOT, by itself, flip a BM turn into MIXED and thereby route the answer to English. It is
+# now a BM marker (above, next to "dolar") so a BM turn containing it stays BM. Pure-English
+# turns are unaffected: transfer/send/pay/account/confirm still set en_markers.
+EN_MARKERS = re.compile(r"\b(transfer|send|pay|please|account|confirm)\b", re.I)
 
 
 def detect_language(text: str) -> str:
@@ -105,7 +115,7 @@ def detect_language(text: str) -> str:
 # loud markers; a majority vote needs the small joining words too ("dan", "dari", "satu") or
 # every Malay sentence scores as mostly English because its nouns happen to be English.
 _BM_VOCAB = frozenset({
-    "hantar", "kepada", "dolar", "duit", "saya", "tidak", "boleh", "jumlah", "akaun", "bayar",
+    "hantar", "kepada", "dolar", "dollar", "duit", "saya", "tidak", "boleh", "jumlah", "akaun", "bayar",
     "sekarang", "lima", "lapan", "sepuluh", "ribu", "seratus", "buang", "had", "cucu", "cepat",
     "maaf", "dan", "atau", "dari", "ke", "di", "untuk", "dengan", "ini", "itu", "ada", "nak",
     "sudah", "sila", "tolong", "nanti", "satu", "dua", "tiga", "empat", "enam", "tujuh",
@@ -561,6 +571,12 @@ SOURCE_ACCOUNT_ALIASES = {
     "everyday": "current", "everyday account": "current",
     "multiplier": "multiplier", "multiplier account": "multiplier",
     "usd": "usd", "usd account": "usd", "us dollar": "usd", "us dollar account": "usd",
+    # Mandarin and Malay names for the same accounts, so "从我的存储账户" and "dari akun simpanan
+    # saya" resolve the source the customer actually named instead of silently defaulting it.
+    "存储账户": "savings", "储蓄账户": "savings", "储蓄户口": "savings",
+    "akun simpanan": "savings", "akaun simpanan": "savings",
+    "来往账户": "current", "支票账户": "current",
+    "akun semasa": "current", "akaun semasa": "current",
 }
 
 # A currency the customer explicitly named. Anything not USD reads as SGD, because the demo
@@ -584,11 +600,28 @@ def parse_currency(text: str) -> str:
     return "SGD"
 
 
+def _phrase_pattern(phrase: str) -> str:
+    """A word-boundary pattern that still works when the phrase is Mandarin.
+
+    \\b is only a boundary next to a NON-word character, and CJK characters ARE word characters
+    in Unicode mode. So "\\b存储账户\\b" can never match inside "从我的存储账户": the 的 in front
+    of it is a word character, so there is no boundary there, and the source the customer named
+    was silently defaulted instead.
+
+    The anchor is kept exactly where it still means something, on an ASCII edge, so an English
+    alias such as "savings" still cannot match inside a longer word.
+    """
+    body = re.escape(phrase)
+    left = r"\b" if phrase[:1].isascii() and phrase[:1].isalnum() else ""
+    right = r"\b" if phrase[-1:].isascii() and phrase[-1:].isalnum() else ""
+    return f"{left}{body}{right}"
+
+
 def parse_source_account_phrase(text: str) -> Optional[str]:
     """Which of the customer's own accounts they named as the source, or None."""
     lowered = text.lower()
     for alias in sorted(SOURCE_ACCOUNT_ALIASES, key=len, reverse=True):
-        if re.search(rf"\b{re.escape(alias)}\b", lowered):
+        if re.search(_phrase_pattern(alias), lowered):
             return SOURCE_ACCOUNT_ALIASES[alias]
     return None
 
@@ -696,6 +729,15 @@ def lookup_card(customer_id: Optional[str], name: str):
     return None
 
 
+# The customer's own account named in the other two supported languages. A joint account is
+# 联名账户 in Mandarin and "akun bersama" in Malay, and someone who switches language mid-sentence
+# still means the one account they hold. Matched as whole PHRASES, never as single characters, so
+# an unrelated word that merely shares a character can never bind a destination.
+_OWN_ACCOUNT_ALIASES = re.compile(
+    r"联名账户|联名户口|共同账户|共同户口"
+    r"|\b(?:akun|akaun)\s+(?:bersama|kongsi)\b", re.I)
+
+
 def parse_own_account_phrase(text: str, customer_id: Optional[str] = None) -> Optional[str]:
     """The canonical display name of a known own (internal) account in the turn, else None.
 
@@ -708,7 +750,8 @@ def parse_own_account_phrase(text: str, customer_id: Optional[str] = None) -> Op
             return oa.display_name
     # A bare "joint" counts too: "move S$1,000 to joint" is how the instruction is actually
     # spoken (IN-10). "joint" as a whole word never matches "join"/"jointly", so this stays tight.
-    if re.search(r"\bjoint\b", lowered):
+    # The ZH and BM names for the same account count for the same reason.
+    if re.search(r"\bjoint\b", lowered) or _OWN_ACCOUNT_ALIASES.search(lowered):
         oas = _own_accounts_for(customer_id)
         if oas:
             return oas[0].display_name
@@ -1253,7 +1296,15 @@ def is_schedule_correction(text: str) -> bool:
 # untouched. Two saved payees in one breath is handled upstream by detect_multiple_recipients
 # (one transfer at a time), so this only ever splits genuinely independent instructions.
 # ---------------------------------------------------------------------------
-_INSTRUCTION_SEP = re.compile(r",\s+|\s+and\s+|\s+then\s+|;", re.I)
+# The connectors that separate two independent instructions. Trilingual on purpose: the demo is
+# spoken in EN, ZH and BM, and a customer who says 然后 or kemudian means exactly what "then"
+# means - without them a two-payment breath stayed ONE clause and the second payment was never
+# separated. CJK is matched as a bare substring because \b is a no-op around CJK, which is safe
+# here: every one of these is a function word, never part of a name or an amount.
+_INSTRUCTION_SEP = re.compile(
+    r",\s+|，|；|;\s*|\s+and\s+|\s+then\s+"
+    r"|然后|之后|接着|还有|再"
+    r"|\bkemudian\b|\blepas\s+itu\b|\blalu\b|\bdan\b|\bserta\b", re.I)
 _LEADING_CONJ = re.compile(r"^(?:and|then|also|and then)\s+", re.I)
 
 
@@ -1284,16 +1335,38 @@ def split_instructions(text: str, customer_id: Optional[str] = None) -> List[str
     if len(_targets(text)) < 2:
         return [text]
 
+    def _has_target(t: str) -> bool:
+        return bool(parse_biller_phrase(t, customer_id)
+                    or parse_card_phrase(t, customer_id)
+                    or parse_own_account_phrase(t, customer_id)
+                    or parse_payee_phrase(t, customer_id))
+
     pieces = [p.strip() for p in _INSTRUCTION_SEP.split(text) if p and p.strip()]
-    resolved: List[str] = []
+    # A comma inside ONE instruction is not the boundary between two.
+    #
+    # "from my savings account to my joint account, move a grand, then send one fifty to Ah Girl"
+    # is two payments, but its first clause leads with the ACCOUNTS and puts the verb and the
+    # amount after the comma ("... to my joint account, move a grand"). Cutting on that comma
+    # left clause 1 holding the destination with no amount and clause 2 holding an amount with no
+    # destination, so neither resolved and the whole breath collapsed into "I didn't catch that".
+    #
+    # A fragment that names no target of its own is therefore not an instruction, it is the TAIL
+    # of the clause before it, and it is glued back on. The same breath then splits into the two
+    # payments the customer actually asked for.
+    #
+    # This can only ever MERGE pieces, never split them, so it cannot invent an instruction that
+    # was not spoken. A LEADING fragment with no clause in front of it stays a fragment and is
+    # dropped by the target filter below, exactly as it was before.
+    grouped: List[str] = []
     for p in pieces:
         p = _LEADING_CONJ.sub("", p).strip()
         if not p:
             continue
-        if (parse_biller_phrase(p, customer_id) or parse_card_phrase(p, customer_id)
-                or parse_own_account_phrase(p, customer_id)
-                or parse_payee_phrase(p, customer_id)):
-            resolved.append(p)
+        if grouped and not _has_target(p):
+            grouped[-1] = f"{grouped[-1]}, {p}"
+            continue
+        grouped.append(p)
+    resolved: List[str] = [p for p in grouped if _has_target(p)]
     return resolved if len(resolved) >= 2 else [text]
 
 
