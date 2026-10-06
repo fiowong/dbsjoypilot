@@ -98,8 +98,15 @@ def _test_repository() -> Tuple[int, int]:
                        bool(alice)
                        and "IGNORE PREVIOUS INSTRUCTIONS" in (alice[0].untrusted_note or "")))
         mei = [p for p in repo.get_saved_payees(first) if p.display_name == "Mei Tan"]
+        # Compared against the seed itself, not a copied literal: a hardcoded list silently
+        # broke the moment a fourth nickname ("ah girl") was seeded, and it would break again
+        # on every future one. The point of the check is that the list survives the JSON
+        # round trip intact, which comparing to data.py proves just as well.
+        mei_seed = next((p for p in data.SAVED_PAYEES.get(first, [])
+                         if p.display_name == "Mei Tan"), None)
         checks.append(("seeded nicknames survive as a list",
-                       bool(mei) and mei[0].nicknames == ["mother", "mum", "mom"]))
+                       bool(mei) and mei_seed is not None
+                       and mei[0].nicknames == list(mei_seed.nicknames)))
 
         # An unknown customer must degrade, never raise.
         checks.append(("unknown customer -> None", repo.get_customer("cust_nope") is None))

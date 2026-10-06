@@ -623,10 +623,22 @@ def parse_biller_phrase(text: str, customer_id: Optional[str] = None) -> Optiona
     "Pay my StarHub bill" -> "StarHub". The match is on the full biller display name, so a
     generic "pay my phone bill" with no named company is NOT picked up here, it correctly
     falls through to clarification rather than being silently bound to the wrong biller.
+
+    The match is SPACE-INSENSITIVE on purpose. Spoken ASR splits a compound brand into
+    ordinary words, so it hands us "pay my star hub bill" when the customer said "StarHub";
+    matching the literal "starhub" alone silently failed every spoken bill payment while the
+    very same sentence typed worked. Each name is therefore also tried with optional
+    whitespace between its characters: "star hub" and "starhub" both match, while
+    "starbucks" still does not.
     """
     lowered = text.lower()
     for b in _billers_for(customer_id):
-        if re.search(rf"\b{re.escape(b.display_name.lower())}\b", lowered):
+        name = b.display_name.lower()
+        if re.search(rf"\b{re.escape(name)}\b", lowered):
+            return b.display_name
+        # Space-insensitive form: the name's letters with optional whitespace between them.
+        flexible = r"\s*".join(re.escape(ch) for ch in name if not ch.isspace())
+        if flexible and re.search(rf"\b{flexible}\b", lowered):
             return b.display_name
     return None
 

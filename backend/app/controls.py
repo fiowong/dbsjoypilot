@@ -117,12 +117,22 @@ def closest_saved_payee(customer_id: str, spoken: str,
 
     A fuzzy hit is a SUGGESTION only. This never binds anything: the caller must ask the customer
     to confirm, and the destination still comes from the trusted saved-payee repository, so a
-    near-miss can offer a payee the customer already holds but can never invent one."""
+    near-miss can offer a payee the customer already holds but can never invent one.
+
+    Both the DISPLAY NAME and the customer's own NICKNAMES are scored. Spoken ASR routinely
+    returns the wrong spelling of a nickname - it heard "a girl" for "Ah Girl" - and scoring the
+    display name alone left that unmatched, so the turn ended in the unanswerable "who should I
+    pay?". Scoring the nickname too turns the very same mis-hearing into a confirmable
+    "did you mean Mei Tan?", which is the point of this suggestion."""
     if not spoken or not spoken.strip():
         return None
-    scored = sorted(((_name_similarity(spoken, p.display_name), p)
-                     for p in get_repository().get_saved_payees(customer_id)),
-                    key=lambda t: t[0], reverse=True)
+    index = nicknames.index(customer_id)
+    scored = []
+    for p in get_repository().get_saved_payees(customer_id):
+        aliases = [p.display_name] + [n for n, owner in index.items()
+                                      if owner.beneficiary_id == p.beneficiary_id]
+        scored.append((max(_name_similarity(spoken, a) for a in aliases), p))
+    scored.sort(key=lambda t: t[0], reverse=True)
     if not scored:
         return None
     best_score, best = scored[0]

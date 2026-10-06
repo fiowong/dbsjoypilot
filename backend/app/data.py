@@ -41,7 +41,10 @@ SAVED_PAYEES: Dict[str, List[Payee]] = {
     "cust_auntie_001": [
         Payee(beneficiary_id="payee_mei_001", display_name="Mei Tan",
               masked="ending 7788", destination_token="dst_mei_verified_7788",
-              nicknames=["mother", "mum", "mom"]),
+              # "ah girl" is SEEDED, not only taught, so a voice turn resolves it on a fresh
+              # session: seeding also puts it in the ASR hotword_list, which is what makes the
+              # engine hear "Ah Girl" instead of transcribing it as the English words "a girl".
+              nicknames=["mother", "mum", "mom", "ah girl"]),
         Payee(beneficiary_id="payee_john_doe_001", display_name="John Doe",
               masked="ending 4521", destination_token="dst_john_doe_verified_4521"),
         Payee(beneficiary_id="payee_john_smith_001", display_name="John Smith",

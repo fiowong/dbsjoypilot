@@ -221,7 +221,33 @@ async def _run_turn(req: TurnRequest) -> TurnResponse:
         lang = turn_lang
     session.interface_language = lang
 
+    # ---------- The identity hold is a TURN-LEVEL speech gate ----------
+    # Stage 1 could not verify the speaker, so the request is held and Joy has spoken the step-up
+    # line. The pipeline still runs below, because the draft has to exist for the payment to be
+    # presented once FaceID passes, but the customer must hear NOTHING else about it. Without this
+    # gate, any path that ends before Stage 10 spoke straight past the hold: a clarification
+    # ("who should I pay?"), a suggestion ("did you mean Mei Tan?") or the duplicate-payee question
+    # were all spoken to an unverified person, seconds after Joy said she could not verify them.
+    #
+    # Enforced HERE, at the single funnel every customer-facing sentence passes through, rather
+    # than at each emission site, so the mute is a property of the turn itself and a line added to
+    # the pipeline later cannot reopen the leak. (Deliberately NOT applied in run_confirmation,
+    # whose own say_line is at line 2085: there the hold is released at Stage 12 and the
+    # FaceID-failure line must still be spoken.)
+    #
+    # The withheld sentence still enters the audit trail, as its own event carrying the message key,
+    # so the record shows what this turn decided. Nothing is hidden from the auditor, only from the
+    # speaker who has not been verified.
     def say_line(key: str, stage: Optional[int], **params) -> None:
+        if key != "VOICE_STEP_UP" and _identity_hold(session):
+            emit("LINE_WITHHELD_IDENTITY_HOLD", stage, {
+                "message_key": key,
+                "hold_reason": session.step_up_reason or "SPEAKER_MISMATCH",
+                "spoken_instead": "VOICE_STEP_UP",
+                "note": "The speaker is unverified, so this line was not spoken. It is recorded "
+                        "here so the audit trail still shows what the turn decided; the customer "
+                        "heard only the identity step-up."})
+            return
         say(emit, key, stage, session, lang, **params)
 
     # ---------- Stage 0: authenticated session ----------
@@ -1144,6 +1170,61 @@ async def _run_turn(req: TurnRequest) -> TurnResponse:
         proposal = proposal.model_copy(update={
             "status": "PROPOSAL_READY", "recipient_phrase": session.payee_phrase,
             "clarification_field": None, "clarification_question": None})
+
+    # Deterministic safeguard (live RECIPIENT over-trigger). The Payment Agent is never told who
+    # the customer's saved payees are, so the recipient is the one field it can only ever COPY out
+    # of the turn - and a live model sometimes fails to copy it. "Send John Smith 50 dollars from
+    # my savings account" came back NEEDS_CLARIFICATION / RECIPIENT, so the turn ended at stage 5
+    # and Joy asked who to pay, about a person the customer had just named. In Voice Mode that also
+    # left no draft for FaceID to release.
+    #
+    # Deterministic code owns the field here, exactly as it does above for a confirmed payee and for
+    # a date-only correction: if the resolver can already read a saved payee out of this turn, the
+    # proposal is brought up to PROPOSAL_READY and the ordinary stage 6 binds the destination.
+    #
+    # This can only ever UNDO an over-trigger, it can never create a binding:
+    #   * parse_payee_phrase matches ONLY against the customer's own saved-payee records and the
+    #     nicknames bound to them, so anything it returns is a payee the customer already holds;
+    #   * if it finds nothing, nothing changes and the question is asked exactly as before - the
+    #     unknown-name machinery below ("Ah Boy" -> "which of your payees is that?") still runs;
+    #   * the proposal the model actually produced was emitted above, unchanged, so the audit still
+    #     shows the over-trigger and this override as two separate visible events;
+    #   * the destination is still bound at stage 6 from the trusted repository, as for any payment.
+    #
+    # Recipient only. A biller, a card or the customer's own account is deliberately not recovered
+    # here, because those also have to set transaction_type, and guessing the type would be a worse
+    # error than asking.
+    if (proposal.status != "PROPOSAL_READY"
+            and proposal.clarification_field == "RECIPIENT"
+            and not payee_confirmed_this_turn):
+        recovered = parse_payee_phrase(req.text, session.customer_id)
+        if recovered:
+            if proposal.amount_minor is None:
+                # The recipient is settled, but a missing amount is still a genuine question and
+                # asking two at once is worse than asking one. Ask the one that is actually open.
+                emit("RECIPIENT_RECOVERED", 5, {
+                    "recipient_phrase": recovered,
+                    "source": "deterministic parse of the customer's own words",
+                    "llm_proposal_overridden": True,
+                    "asked_instead": "AMOUNT",
+                    "note": "The model proposed no recipient, but the turn names a saved payee. "
+                            "Deterministic code supplied the recipient and left the missing "
+                            "amount as the question actually being asked."})
+                proposal = proposal.model_copy(update={
+                    "recipient_phrase": recovered,
+                    "clarification_field": "AMOUNT", "clarification_question": None})
+            else:
+                emit("RECIPIENT_RECOVERED", 5, {
+                    "recipient_phrase": recovered,
+                    "source": "deterministic parse of the customer's own words",
+                    "llm_proposal_overridden": True,
+                    "amount_minor": proposal.amount_minor,
+                    "note": "The model proposed no recipient, but the turn names a saved payee, so "
+                            "deterministic code supplied that field instead of asking who to pay. "
+                            "The destination still comes only from the saved-payee record."})
+                proposal = proposal.model_copy(update={
+                    "status": "PROPOSAL_READY", "recipient_phrase": recovered,
+                    "clarification_field": None, "clarification_question": None})
 
     if proposal.status != "PROPOSAL_READY":
         # ---------- A name the customer used that we hold nobody for ----------
