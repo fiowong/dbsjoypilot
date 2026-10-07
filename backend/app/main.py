@@ -17,7 +17,7 @@ from .data import POLICY
 from .audit import AUDIT
 from .orchestrator import (TurnRequest, TurnResponse, ConfirmRequest, run_turn, run_confirmation,
                             FieldSignalRequest, run_field_signal)
-from .scenarios import SCENARIOS, ScenarioResponse, run_scenario
+from .scenarios import ALL_SCENARIOS, SCENARIOS, ScenarioResponse, run_scenario
 
 # ---- logging ----------------------------------------------------------------
 # Uvicorn only wires up its own `uvicorn*` loggers, so every `auntiejoy.*` logger
@@ -101,11 +101,15 @@ async def scenarios() -> dict:
         "G": "Multiple or out-of-shape request",
     }
     return {
+        # The runnable set: the BRD/demo scenarios AND the folded-in regression pins, both
+        # runnable through /scenario/{id}. `acceptance` below separates them for a caller that
+        # only wants the set the spec asks for.
         "scenarios": [{"id": k, "branch": v["branch"], "title": v["title"],
-                       "turns": len(v["turns"]), "confirmation": bool(v.get("confirm"))}
-                      for k, v in SCENARIOS.items()],
+                       "turns": len(v["turns"]), "confirmation": bool(v.get("confirm")),
+                       "kind": "acceptance" if k in SCENARIOS else "regression"}
+                      for k, v in ALL_SCENARIOS.items()],
         "branches": [{"branch": b, "label": label,
-                      "scenarios": [k for k, v in SCENARIOS.items() if v["branch"] == b]}
+                      "scenarios": [k for k, v in ALL_SCENARIOS.items() if v["branch"] == b]}
                      for b, label in branch_labels.items()],
     }
 

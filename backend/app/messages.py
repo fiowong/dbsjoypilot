@@ -565,7 +565,7 @@ READBACK_PARTS: Dict[str, Dict[str, str]] = {
     # its own INTERFACE_LINE.
     "MULTI_HEAD": {
         "EN": "Of course. I will explain one payment at a time. I heard {count} instructions.",
-        "ZH": "好的。我会一笔一笔说明。我听到 {count} 个指示。",
+        "ZH": "好的。我会一笔一笔说明。我听到{count}个指示。",
         "BM": "Baiklah. Saya akan terangkan satu-satu. Saya dengar {count} arahan.",
     },
     "MULTI_SEP_MID": {"EN": "; ", "ZH": "；", "BM": "; "},
