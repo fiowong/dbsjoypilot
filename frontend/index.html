@@ -9,7 +9,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap">
-<link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="styles.css?v=20261007c">
 </head>
 <body>
 <div class="wrap" id="studio">
@@ -190,18 +190,28 @@
             </div>
           </div>
           <div class="chat" id="chat"></div>
-          <!-- Language pills live ABOVE the composer as their own row (iggy layout), so the
-               composer below is just the rounded field + mic, one unit. -->
+          <!-- VOICE-FIRST COMPOSER.
+               The three language pills are CENTRED above the composer (the language is the
+               first choice a voice-first customer makes). The composer itself is one white
+               pill: a keyboard toggle on the LEFT, the MIC as the dominant control in the
+               CENTRE, and a matching spacer on the right so the mic stays optically centred.
+               The text field is hidden until the keyboard is tapped (see setComposerTyping),
+               so the default surface is speak-first, not type-first. -->
           <div class="langtog" id="langtog" title="Which language should the mic listen for?">
             <button class="lt on" data-lang="en-SG" data-l="EN">EN</button>
             <button class="lt" data-lang="zh-CN" data-l="ZH">中文</button>
             <button class="lt" data-lang="ms-MY" data-l="BM">BM</button>
           </div>
-          <div class="cinput">
+          <div class="cinput" id="cinput">
+            <button class="kbd" id="kbd" type="button" title="Type instead" aria-label="Type instead">
+              <svg class="ic ic-type" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="6" width="20" height="12" rx="2.4"/><path d="M6 10h.01M9.5 10h.01M13 10h.01M16.5 10h.01"/><path d="M6 13.5h.01M18 13.5h.01"/><path d="M9.5 13.5h5"/></svg>
+              <svg class="ic ic-dismiss" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="3" width="20" height="11" rx="2"/><path d="M6 6.5h.01M9.5 6.5h.01M13 6.5h.01M16.5 6.5h.01"/><path d="M6 9.5h.01M18 9.5h.01"/><path d="M9.5 9.5h5"/><path d="m8 17 4 4 4-4"/></svg>
+            </button>
             <input class="fld" id="fld" placeholder="Speak or type payment command…" autocomplete="off">
             <button class="mic" id="mic" title="Speak" aria-label="Speak">
               <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="2" width="6" height="13" rx="3"/><path d="M12 19v3"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/></svg>
             </button>
+            <span class="cspacer" aria-hidden="true"></span>
           </div>
         </section>
 
@@ -290,14 +300,14 @@
      cached copies of these files, so a fix that IS in the file never reaches the screen - a
      Bahasa "working on it" card kept coming up in English long after the code was corrected.
      Bump the stamp whenever one of these files changes. -->
-<script src="translations.js?v=20261006b"></script>
-<script src="icons.js?v=20261006b"></script>
-<script src="ui.js?v=20261006b"></script>
-<script src="personalization.js?v=20261006b"></script>
-<script src="scenarios.js?v=20261006b"></script>
-<script src="stt.js?v=20261006b"></script>
-<script src="live.js?v=20261006b"></script>
-<script src="tts.js?v=20261006b"></script>
-<script src="shell.js?v=20261006b"></script>
+<script src="translations.js?v=20261007b"></script>
+<script src="icons.js?v=20261007b"></script>
+<script src="ui.js?v=20261007b"></script>
+<script src="personalization.js?v=20261007b"></script>
+<script src="scenarios.js?v=20261007b"></script>
+<script src="stt.js?v=20261007b"></script>
+<script src="live.js?v=20261007b"></script>
+<script src="tts.js?v=20261007b"></script>
+<script src="shell.js?v=20261007b"></script>
 </body>
 </html>

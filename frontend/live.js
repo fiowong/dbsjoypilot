@@ -1,6 +1,10 @@
 /* 5/5 live.js, load 5th and LAST. Live free-form /turn + /confirm flow: postJSON, liveFieldReview/liveConfirmFlow/liveFreeTurn, mic/language wiring, and the boot call runScenario('HAPPY') at the very end, must be last since it depends on everything above. */
 /* ---------- live free-form input: real /turn + /confirm calls, no more scripting ---------- */
-const fld=$('fld'), mic=$('mic');
+const fld=$('fld'), mic=$('mic'), kbd=$('kbd'), cinput=$('cinput');
+// Voice-first composer: the keyboard toggle flips the composer between "speak" (field hidden,
+// mic dominant) and "type" (field shown). setComposerTyping() lives in ui.js so the clarification
+// card's retry button uses the very same switch.
+if(kbd) kbd.onclick = () => setComposerTyping(!(cinput && cinput.classList.contains('typing')));
 let FREE_SESSION_ID = null;
 // SCHEDULED is terminal too: a confirmed future-dated payment is finished for this draft, but it
 // is NOT executed; no ledger entry was written, so no LEDGER_RECORDED event and no receipt card.
@@ -929,7 +933,10 @@ async function micCapture(){
       if(live){ try{ live.remove(); }catch(_){} live = null; }
       audit('ASR_ENGINE · browser fallback · Tencent ASR produced no transcript for this turn','warn');
       voiceEngine('Browser fallback · Tencent ASR not connected', true);
-      liveFreeTurn(spoken.text, true, c);
+      // The browser's score is a TRANSCRIPTION-accuracy measure, not a liveness signal, so
+      // it is tagged browser_recognition: Stage 1 then admits the turn instead of misreading a
+      // low BM score as "synthetic/replayed" (see orchestrator Stage 1).
+      liveFreeTurn(spoken.text, true, c, 'browser_recognition');
       return;
     }
 

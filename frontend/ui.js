@@ -602,6 +602,23 @@ function draftCard(d, lang){
    (kicker, heading, button, note) is chrome, so it follows the conversation's
    language; `lang` defaults to EN for the test harness.
    ========================================================================== */
+/* The composer is VOICE-FIRST: the text field is hidden until the customer taps the keyboard
+   toggle. This is the ONE place that flips it, so the keyboard button and the retry button on a
+   clarification card stay in step — and the field is focused only AFTER it is visible, or the
+   browser silently ignores the focus (a hidden input cannot take focus). */
+function setComposerTyping(on){
+  const c=$('cinput'), f=$('fld'), k=$('kbd');
+  if(c) c.classList.toggle('typing', !!on);
+  // The left toggle's icon AND its tooltip swap with the mode, so a tap always means
+  // "go to the OTHER mode": in voice it offers the keyboard; in typing it hides the keyboard.
+  if(k){
+    const tip = on ? 'Hide keyboard, speak instead' : 'Type instead';
+    k.title = tip;
+    k.setAttribute('aria-label', tip);
+  }
+  if(f && on){ try{ f.focus(); }catch(_){} }
+}
+
 function clarifyCard(text, onRetry, lang){
   const c = tt(lang || 'EN').chrome.clarify;
   const esc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;');
@@ -628,8 +645,9 @@ function clarifyCard(text, onRetry, lang){
   if(b) b.addEventListener('click', ev=>{
     ev.preventDefault();
     ev.stopPropagation();
+    setComposerTyping(true);   // reveal the field BEFORE focusing it (it is hidden in voice mode)
     const f=$('fld');
-    if(f){ f.focus(); f.classList.add('flash'); setTimeout(()=>f.classList.remove('flash'), 1000); }
+    if(f){ f.classList.add('flash'); setTimeout(()=>f.classList.remove('flash'), 1000); }
     if(typeof onRetry==='function') onRetry();
     if(!d.dataset.retried){
       d.dataset.retried='1';

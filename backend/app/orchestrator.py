@@ -75,9 +75,13 @@ class TurnRequest(BaseModel):
     asr_confidence: float = 0.96
     # Where that number came from. "engine_reported" = the STT vendor gave a real score;
     # "engine_stability" = derived from the vendor's per-word stable_flag;
+    # "browser_recognition" = the browser's webkitSpeechRecognition fallback reported a
+    #   score; it is a TRANSCRIPTION-accuracy measure, NOT a liveness / anti-spoofing signal,
+    #   so Stage 1 must never read it as "synthetic/replayed" (§A.6, the demo has no
+    #   client-side liveness check);
     # "unreported" = nothing was available and the placeholder above is in force.
     asr_confidence_source: Literal["engine_reported", "engine_stability",
-                                   "unreported", "typed"] = "unreported"
+                                   "browser_recognition", "unreported", "typed"] = "unreported"
     # The mock audio-risk adapter's verdict (§6.2). Mocked evidence, never claimed as production.
     voice_risk: Optional[Literal["OK", "SPEAKER_MISMATCH", "SYNTHETIC"]] = None
     # demo-only fault injection so judges can watch independent validation catch a bad draft
@@ -265,7 +269,17 @@ async def _run_turn(req: TurnRequest) -> TurnResponse:
     if req.via_voice:
         verdict = req.voice_risk
         if verdict is None:
-            verdict = "SYNTHETIC" if req.asr_confidence < 0.60 else "OK"
+            # No explicit audio-risk verdict came from the adapter. The browser's
+            # webkitSpeechRecognition score is a measure of TRANSCRIPTION accuracy, not a
+            # liveness / anti-spoofing signal (Chrome routinely reports ~0 for Bahasa Melayu),
+            # so reading it as "synthetic/replayed" would hard-reject a perfectly genuine
+            # speaker. Only a real engine liveness report (engine_reported / engine_stability)
+            # may drive the SYNTHETIC inference; a browser recognition score is admitted
+            # because the demo has no client-side liveness check (production_capability=False).
+            if req.asr_confidence_source == "browser_recognition":
+                verdict = "OK"
+            else:
+                verdict = "SYNTHETIC" if req.asr_confidence < 0.60 else "OK"
         if verdict == "SYNTHETIC":
             mock_risk = {"result": "REJECTED", "reason_code": "SYNTHETIC_OR_REPLAY_SUSPECTED",
                          "liveness_score": round(req.asr_confidence, 2),

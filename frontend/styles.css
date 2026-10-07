@@ -547,37 +547,61 @@ button{font-family:inherit}
 .chat::-webkit-scrollbar{width:6px}.chat::-webkit-scrollbar-thumb{background:#D5D5DD;border-radius:3px}
 
 /* --------------------------------------------------------------------------
-   LANGUAGE PILLS + COMPOSER.
-   Pills sit on the page background as their own row (iggy layout). The composer
-   card below is just the rounded field + mic, one horizontal unit.
+   LANGUAGE PILLS + VOICE-FIRST COMPOSER.
+   The three language pills are CENTRED above the composer (the language is the first
+   choice a voice-first customer makes; the selected one is the only dark chip). The
+   composer is one white pill: keyboard toggle LEFT, the MIC dominant in the CENTRE,
+   a matching spacer RIGHT so the mic stays optically centred. The text field is hidden
+   until the customer taps the keyboard, so the default surface is speak-first.
    -------------------------------------------------------------------------- */
-.langtog{display:flex;gap:6px;padding:8px 12px 0;flex-shrink:0;background:transparent}
+.langtog{display:flex;gap:6px;padding:8px 12px 0;flex-shrink:0;background:transparent;
+  justify-content:center}
 .lt{background:#fff;border:1px solid var(--line);color:var(--ink2);border-radius:20px;
   padding:5px 13px;font-size:11.5px;font-weight:700;font-family:inherit;cursor:pointer;
   letter-spacing:.2px;transition:background .14s,color .14s,border-color .14s}
 .lt:hover{border-color:#c8c9cf}
 /* the selected language is the only dark chip on the page, an unambiguous "this one" */
 .lt.on{background:var(--ink);color:#fff;border-color:var(--ink)}
-.cinput{display:flex;gap:8px;align-items:center;flex-shrink:0;
-  margin:8px 12px 12px;background:#fff;border:1px solid var(--line);
-  border-radius:14px;padding:6px 7px 6px 9px}
-.cinput .fld{flex:1;min-width:0;background:var(--bg);border:0;border-radius:18px;
-  padding:11px 15px;font-size:13px;font-family:inherit;color:var(--ink);outline:0;transition:.14s}
-.cinput .fld::placeholder{color:var(--faint)}
-.cinput .fld:focus{background:#fff;box-shadow:0 0 0 2px var(--brand-tint)}
-/* Idle mic is the full DBS red, so "the mic is open" reads as the obvious call to action
+
+.cinput{display:flex;gap:8px;align-items:center;justify-content:space-between;flex-shrink:0;
+  margin:10px 12px 14px;background:#fff;border:1px solid var(--line);
+  border-radius:999px;padding:7px 10px;box-shadow:0 6px 18px rgba(17,17,17,.10)}
+/* the "type instead" affordance, quietly on the left */
+.cinput .kbd{width:42px;height:42px;border-radius:50%;border:0;flex-shrink:0;cursor:pointer;
+  background:transparent;color:var(--ink2);display:flex;align-items:center;justify-content:center;
+  transition:background .14s,color .14s}
+.cinput .kbd:hover{background:var(--bg);color:var(--ink)}
+.cinput .kbd .ic{width:21px;height:21px}
+/* The left toggle has TWO icons: a keyboard (voice) and a "hide keyboard" arrow (typing).
+   Showing only the one that matches the current mode keeps the button in the same spot. */
+.cinput:not(.typing) .ic-dismiss{display:none}
+.cinput.typing .ic-type{display:none}
+/* mirrors the keyboard toggle so the dominant mic sits dead-centre */
+.cinput .cspacer{width:42px;height:42px;flex-shrink:0}
+/* the dominant control: idle is the full DBS red, so "the mic is open" is the obvious CTA
    even before it is tapped; the listening ring confirms the state, not the colour. */
-.cinput .mic{width:40px;height:40px;border-radius:50%;border:0;flex-shrink:0;cursor:pointer;
+.cinput .mic{width:56px;height:56px;border-radius:50%;border:0;flex-shrink:0;cursor:pointer;
   background:var(--dbs-red);color:#fff;display:flex;align-items:center;justify-content:center;
-  transition:background .14s}
+  box-shadow:0 6px 16px rgba(236,28,36,.34);transition:background .14s,transform .1s}
 .cinput .mic:hover{background:var(--dbs-red-dk)}
-.cinput .mic .ic{width:19px;height:19px}
+.cinput .mic:active{transform:scale(.96)}
+.cinput .mic .ic{width:26px;height:26px}
 .cinput .mic.on{background:var(--dbs-red);animation:micring 1.4s ease-out infinite}
 @keyframes micring{
   0%{box-shadow:0 0 0 0 rgba(236,28,36,.35)}
-  70%{box-shadow:0 0 0 10px rgba(236,28,36,0)}
+  70%{box-shadow:0 0 0 12px rgba(236,28,36,0)}
   100%{box-shadow:0 0 0 0 rgba(236,28,36,0)}
 }
+/* voice mode hides the field; tapping the keyboard reveals it and the composer becomes an
+   ordinary field + mic (the keyboard toggle and its spacer stand down). */
+.cinput .fld{display:none;flex:1;min-width:0;background:var(--bg);border:0;border-radius:18px;
+  padding:11px 15px;font-size:13px;font-family:inherit;color:var(--ink);outline:0;transition:.14s}
+.cinput .fld::placeholder{color:var(--faint)}
+.cinput .fld:focus{background:#fff;box-shadow:0 0 0 2px var(--brand-tint)}
+.cinput.typing .cspacer{display:none}
+.cinput.typing .fld{display:block}
+.cinput.typing .mic{width:44px;height:44px;box-shadow:none}
+.cinput.typing .mic .ic{width:19px;height:19px}
 
 /* "Let me try again" pulls attention back to the input rather than reloading */
 .cinput .fld.flash{animation:fldflash .5s ease 2;background:var(--brand-tint)}
