@@ -72,16 +72,16 @@ const STAGES = [
 /* ---------- MECE branches (BRD §6) ---------- */
 const BRANCHES = [
   ['A','Wrong person or untrusted input',['A1','A2','A3']],
-  ['B','Auntie is misunderstood',        ['B1','B2','B3']],
+  ['B','Joy is misunderstood',        ['B1','B2','B3']],
   // C4 is the system-message injection that changes the assistant's ROLE rather than asking to
   // skip confirmation. It lives in the backend's EXPECTED map, so it has to be listed here too
   // or the failure map silently under-reports the branch it belongs to.
   ['C','Malicious instructions affect the workflow',['C1','C2','C3','C4']],
-  ['D','Auntie is being manipulated',    ['D1','D2','D3']],
-  ['E','Auntie does not understand the payment',['E1','E2','E3']],
+  ['D','Joy is being manipulated',    ['D1','D2','D3']],
+  ['E','Joy does not understand the payment',['E1','E2','E3']],
   ['F','Wrong, forged or repeated payment is executed',['F1','F2','F3']],
   ['G','Multiple or out-of-shape request',['G1']],
-  ['H','Auntie cannot cover the amount',['H1']]
+  ['H','You cannot cover the amount',['H1']]
 ];
 
 /* ---------- deterministic multilingual INTERFACE templates ----------

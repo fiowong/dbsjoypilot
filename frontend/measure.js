@@ -183,10 +183,10 @@ const SNAP = `(() => {
        'appbar h ' + s.appbar.h + ' vs statusbar h ' + s.statusbar.h);
     ok('enable button fits the device width', s.enableBtn.w <= s.screen.w, s.enableBtn.w + ' vs ' + s.screen.w);
 
-    // ---------- AUNTIEJOY ----------
+    // ---------- JOY ----------
     await click('.enable'); await sleep(400);
     s = await snap();
-    console.log('\n--- 3. AUNTIEJOY CHAT (in the device) ---');
+    console.log('\n--- 3. JOY CHAT (in the device) ---');
     ok('chat screen is active', s.activeScr.length === 1 && s.activeScr[0] === 'scrJoy', JSON.stringify(s.activeScr));
     ok('inspector is now shown alongside the device', s.insVisible === true);
     ok('device and inspector sit side by side (inspector has real width)', s.ins.w > 200, s.ins.w + 'px');

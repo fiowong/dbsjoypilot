@@ -9,7 +9,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap">
-<link rel="stylesheet" href="styles.css?v=20261007c">
+<link rel="stylesheet" href="styles.css?v=20261007e">
 </head>
 <body>
 <div class="wrap" id="studio">
@@ -19,7 +19,7 @@
       <img class="dbslogo" src="assets/dbs-logo-white.png" alt="DBS">
       <div>
         <h1>Joy</h1>
-        <div class="tag">Joy listens. DBS protects. Auntie approves.</div>
+        <div class="tag">Joy listens. DBS protects. You approve.</div>
       </div>
     </div>
     <div class="badges">
@@ -70,7 +70,7 @@
     </div>
     <div class="grp E"><span class="glab">E</span>
       <button class="sbtn" data-s="E1">E1 Field-by-field review</button>
-      <button class="sbtn" data-s="E2">E2 Auntie corrects the amount</button>
+      <button class="sbtn" data-s="E2">E2 You correct the amount</button>
       <button class="sbtn" data-s="E3">E3 Language mismatch</button>
     </div>
     <div class="grp F"><span class="glab">F</span>
@@ -172,7 +172,7 @@
           </nav>
         </section>
 
-        <!-- 3 · AUNTIEJOY CHAT -->
+        <!-- 3 · JOY CHAT -->
         <section class="scr" id="scrJoy">
           <!-- DARK app bar (near-black + 3px red underline): back control on the left, identity
                and trust state centred. Deliberately no avatar here, Joy introduces herself with
@@ -215,7 +215,7 @@
           </div>
         </section>
 
-        <!-- ================= POPUP (Auntie appears in every popup) =================
+        <!-- ================= POPUP (Joy appears in every popup) =================
              Deliberately INSIDE the phone screen rather than floating over the whole page:
              the customer is holding a phone, so the field-by-field confirmation and the
              FaceID prompt have to appear on that screen. It also stops the popup from
@@ -244,39 +244,28 @@
 
       <div class="panel">
         <h3>STATE · OUTCOME · EVIDENCE</h3>
-        <div class="statewrap">
+        <div class="statewrap statewrap3">
           <div class="sbox"><div class="k">SESSION STATE</div><div class="v" id="stState">IDLE</div></div>
           <div class="sbox"><div class="k">DRAFT</div><div class="v" id="stDraft">-</div></div>
+          <div class="sbox"><div class="k">CONTROL OUTCOME</div>
+            <div style="margin-top:3px"><span class="outbadge" id="stOut">-</span></div>
+          </div>
         </div>
-        <div class="statewrap">
+        <div class="statewrap statewrap3">
           <div class="sbox"><div class="k">MOCK LEDGER</div><div class="v" id="stLedger">NOT_INVOKED</div></div>
           <div class="sbox"><div class="k">SIGNATURE</div><div class="v" id="stSig">NONE</div></div>
+          <div class="sbox"><div class="k">LANGUAGE</div><div class="v" id="stLang">-</div></div>
         </div>
-        <div class="sbox" style="margin-bottom:11px"><div class="k">CONTROL OUTCOME</div>
-          <div style="margin-top:5px"><span class="outbadge" id="stOut">-</span></div>
+        <div class="statewrap">
+          <div class="sbox"><div class="k">LAST HEARD</div><div class="v" id="stHeard">-</div></div>
+          <div class="sbox"><div class="k">PERSONALISATION</div><div class="v" id="stPers">Standard</div></div>
         </div>
-        <!-- Hidden until it is true. A voice engine indicator that is only ever shown when
-             the real one failed is honest by construction: it cannot claim Tencent ASR was
-             used when it was not, and it is simply absent when everything went to plan. -->
+        <!-- Hidden until it is true: a voice engine indicator that only ever shows when the
+             real one failed is honest by construction. -->
         <div class="sbox vengine" id="vengRow" hidden><div class="k">VOICE ENGINE</div>
           <div class="v" id="vengVal">-</div>
         </div>
-        <!-- LAST HEARD used to be an "UNDERSTOOD" block inside the chat, where it read as debug
-             output on the phone. It is a diagnostic, so it belongs with the other evidence here. -->
-        <div class="sbox" style="margin-bottom:11px"><div class="k">LAST HEARD</div>
-          <div class="v" id="stHeard">-</div>
-        </div>
-        <!-- LANGUAGE: Joy's multilingual mixing, narrated. Detected = what the customer actually
-             spoke (server-side); Interface = the language Joy answers in. A switch is a trust signal. -->
-        <div class="sbox" style="margin-bottom:11px"><div class="k">LANGUAGE</div>
-          <div class="v" id="stLang">-</div>
-        </div>
-        <!-- PERSONALISATION: Joy adapting to Mei Ling across turns (preferred name + simpler
-             wording), surfaced so the inspector shows the assistant "learning", not just obeying. -->
-        <div class="sbox" style="margin-bottom:11px"><div class="k">PERSONALISATION</div>
-          <div class="v" id="stPers">Standard</div>
-        </div>
-        <h3 style="margin-top:14px">APPEND-ONLY AUDIT TIMELINE</h3>
+        <h3 style="margin-top:8px">APPEND-ONLY AUDIT TIMELINE</h3>
         <div class="audit" id="audit"><div class="placeholder">No events yet.</div></div>
       </div>
 
@@ -300,7 +289,7 @@
      cached copies of these files, so a fix that IS in the file never reaches the screen - a
      Bahasa "working on it" card kept coming up in English long after the code was corrected.
      Bump the stamp whenever one of these files changes. -->
-<script src="translations.js?v=20261007b"></script>
+<script src="translations.js?v=20261007c"></script>
 <script src="icons.js?v=20261007b"></script>
 <script src="ui.js?v=20261007b"></script>
 <script src="personalization.js?v=20261007b"></script>

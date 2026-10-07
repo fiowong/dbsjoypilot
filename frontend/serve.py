@@ -61,7 +61,7 @@ def main(argv: list[str]) -> int:
     directory = str(Path(__file__).resolve().parent)
     handler = functools.partial(NoStoreHandler, directory=directory)
     server = ThreadingHTTPServer(("127.0.0.1", port), handler)
-    print(f"AuntieJoy UI on http://127.0.0.1:{port}  (caching off, serving {directory})")
+    print(f"Joy UI on http://127.0.0.1:{port}  (caching off, serving {directory})")
     print("Ctrl-C to stop.")
     try:
         server.serve_forever()
