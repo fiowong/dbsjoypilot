@@ -196,7 +196,6 @@
             <button class="lt on" data-lang="en-SG" data-l="EN">EN</button>
             <button class="lt" data-lang="zh-CN" data-l="ZH">中文</button>
             <button class="lt" data-lang="ms-MY" data-l="BM">BM</button>
-            <button class="lt" data-lang="" data-l="AUTO" title="Listen in English + Malay — no need to pick one">Auto</button>
           </div>
           <div class="cinput">
             <input class="fld" id="fld" placeholder="Speak or type payment command…" autocomplete="off">
@@ -287,14 +286,18 @@
   </div>
 </div>
 
-<script src="translations.js"></script>
-<script src="icons.js"></script>
-<script src="ui.js"></script>
-<script src="personalization.js"></script>
-<script src="scenarios.js"></script>
-<script src="stt.js"></script>
-<script src="live.js"></script>
-<script src="tts.js"></script>
-<script src="shell.js"></script>
+<!-- The ?v= stamp is a cache-buster. Without it a browser that had the page open serves its
+     cached copies of these files, so a fix that IS in the file never reaches the screen - a
+     Bahasa "working on it" card kept coming up in English long after the code was corrected.
+     Bump the stamp whenever one of these files changes. -->
+<script src="translations.js?v=20261006b"></script>
+<script src="icons.js?v=20261006b"></script>
+<script src="ui.js?v=20261006b"></script>
+<script src="personalization.js?v=20261006b"></script>
+<script src="scenarios.js?v=20261006b"></script>
+<script src="stt.js?v=20261006b"></script>
+<script src="live.js?v=20261006b"></script>
+<script src="tts.js?v=20261006b"></script>
+<script src="shell.js?v=20261006b"></script>
 </body>
 </html>

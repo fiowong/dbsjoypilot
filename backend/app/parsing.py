@@ -115,7 +115,7 @@ def detect_language(text: str) -> str:
 # loud markers; a majority vote needs the small joining words too ("dan", "dari", "satu") or
 # every Malay sentence scores as mostly English because its nouns happen to be English.
 _BM_VOCAB = frozenset({
-    "hantar", "kepada", "dolar", "dollar", "duit", "saya", "tidak", "boleh", "jumlah", "akaun", "bayar",
+    "hantar", "kepada", "dolar", "dollar", "dollars", "duit", "saya", "tidak", "boleh", "jumlah", "akaun", "bayar",
     "sekarang", "lima", "lapan", "sepuluh", "ribu", "seratus", "buang", "had", "cucu", "cepat",
     "maaf", "dan", "atau", "dari", "ke", "di", "untuk", "dengan", "ini", "itu", "ada", "nak",
     "sudah", "sila", "tolong", "nanti", "satu", "dua", "tiga", "empat", "enam", "tujuh",
@@ -252,28 +252,57 @@ def _scale_word_in(lowered: str, raw: str) -> Optional[str]:
 # number must never be read as the new instruction's amount, that silently changes how much money
 # the new instruction moves, the one thing amount parsing must never do. instruction_text() returns
 # only the instruction-bearing tail so parse_amount sees just it.
+# \b is a no-op (and worse, a non-match) around CJK characters - a CJK word char is always a
+# word char, so \b对\b never matches "1000是对的" because 对 sits between 是 and 的. The Latin
+# tokens keep their boundaries; the CJK affirmations are matched as bare substrings so an
+# acknowledgement spoken in Mandarin ("对的", "是的", "对", "嗯") is still recognised.
 _AFFIRM_TOKENS = re.compile(
     r"\b(yes|yeah|yep|yah|ya|correct|right|ok|okay|sure|confirm|affirm|true|agreed|good|great|"
-    r"fine|sounds|perfect|alright|setuju|对的|是的|没错|正确|对|嗯|ok lah|ya lah)\b", re.I)
+    r"fine|sounds|perfect|alright|setuju|ok lah|ya lah)\b"
+    r"|对的|是的|没错|正确|对|嗯", re.I)
+# Same CJK boundary caveat: 汇/给/帮我/转 are matched bare so "转给阿美" / "汇一千到联名账户"
+# register as a payment verb even though they are flanked by other CJK characters.
 _PAYMENT_VERBS = re.compile(
-    r"\b(send|transfer|pay|hantar|bayar|buat|give|transferkan|汇|给|帮我)\b", re.I)
+    r"\b(send|transfer|pay|hantar|bayar|buat|give|transferkan)\b"
+    r"|汇|给|帮我|转", re.I)
+
+
+# The boundary between a leading acknowledgement and the real instruction that follows it.
+# A hard sentence boundary (. ! ? ;) AND the spoken connectors a customer actually uses to
+# chain a confirmation onto a new instruction ("1000是对的，然后…", "yes, then send…", "betul,
+# dan hantar…"). A bare ASCII comma is deliberately NOT here - "S$1,000" must never be cut.
+_INSTRUCTION_BOUNDARY = re.compile(
+    r"[.!?;]+(\s+|$)"
+    r"|，|；"
+    r"|然后|之后|接着|还有|再"
+    r"|\s+and\s+|\s+then\s+"
+    r"|\bkemudian\b|\blepas\s+itu\b|\blalu\b|\bdan\b|\bserta\b", re.I)
 
 
 def instruction_text(turn: str) -> str:
     """The portion of a turn that carries a NEW payment instruction.
 
-    A leading clause cut at a SENTENCE boundary (".", "!", "?", ";") that is a pure
-    acknowledgement (an affirmation/correctness token and no payment verb) is dropped, provided
-    the remainder still names a payment. Everything else, comma-joined phrases, verb-less
-    instructions, and instructions whose amount legitimately precedes the verb, is returned
-    unchanged, so existing behaviour is preserved.
+    A leading clause that is a pure acknowledgement of the payment already on screen
+    ("yes 1000 is correct" / "1000是对的") and THEN names a fresh instruction
+    ("send $50 to ah girl" / "然后从我的经常账户转给阿美") is trimmed to just the instruction
+    tail. The acknowledgement's number must never be read as the new instruction's amount - that
+    silently changes how much money the new instruction moves, the one thing amount parsing must
+    never do.
+
+    The leading acknowledgement is dropped only at a hard sentence boundary (. ! ? ;) or a spoken
+    connector (， / 然后 / then / dan / …). It is dropped only when the prefix holds an
+    affirmation/correctness token and NO payment verb, and the remainder still names a payment -
+    so an ordinary two-payment breath whose first clause carries its own verb
+    ("send 1000 to joint, then send 50 to Amei" / "从储蓄转一千到联名账户，然后转五十给阿美") is
+    never cut down to one.
 
     "yes 1000 is correct. send $50 to ah girl" -> "send $50 to ah girl"
+    "1000是对的，然后从我的经常账户转给阿美"  -> "然后从我的经常账户转给阿美"
     "send 1000 to ah girl"                      -> "send 1000 to ah girl"  (unchanged)
     """
     if not turn:
         return turn
-    m = re.search(r"[.!?;]+(\s+|$)", turn)
+    m = _INSTRUCTION_BOUNDARY.search(turn)
     if not m:
         return turn
     prefix, rest = turn[:m.start()].strip(), turn[m.end():].strip()
@@ -575,7 +604,7 @@ SOURCE_ACCOUNT_ALIASES = {
     # saya" resolve the source the customer actually named instead of silently defaulting it.
     "存储账户": "savings", "储蓄账户": "savings", "储蓄户口": "savings",
     "akun simpanan": "savings", "akaun simpanan": "savings",
-    "来往账户": "current", "支票账户": "current",
+    "来往账户": "current", "支票账户": "current", "经常账户": "current",
     "akun semasa": "current", "akaun semasa": "current",
 }
 

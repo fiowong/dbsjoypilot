@@ -393,15 +393,23 @@ async def _run_turn(req: TurnRequest) -> TurnResponse:
                                               "usable text, so the over-trigger is undone"})
 
     # Deterministic safeguard (SCAM false positive): the live Guardrails model may raise
-    # SAFETY_INTERVENTION / SCAM_OR_COERCION_SIGNAL on a benign customer continuation that names
-    # NEITHER scam cue - no named emergency (EMERGENCY_NOUN_RE) and no safe-account / authority
-    # coercion language (SCAM_AUTHORITY_RE). e.g. "1000 dollar betul. hantarlah duitnya ke ah girl
-    # dari akun semasa." is the customer confirming their own payment and picking a source account,
-    # not a scam, yet the live model froze it in BM. GuardrailsAgent.mock only fires SCAM when one
-    # of those two cue groups is present, so relaxing here makes the live verdict match the
-    # reference (mock) policy. It can never weaken the control: a genuine scam ALWAYS names an
-    # emergency or claims bank / authority coercion, so the cues are present and the freeze stands.
-    if (guardrail.decision == GuardrailDecision.SAFETY_INTERVENTION
+    # SCAM_OR_COERCION_SIGNAL on a benign customer continuation that names NEITHER scam cue - no
+    # named emergency (EMERGENCY_NOUN_RE) and no safe-account / authority coercion language
+    # (SCAM_AUTHORITY_RE). e.g. "1000 dollar betul. hantarlah duitnya ke ah girl dari akun semasa."
+    # is the customer confirming their own payment and picking a source account, not a scam, yet
+    # the live model froze it in BM. GuardrailsAgent.mock only fires SCAM when one of those two cue
+    # groups is present, so relaxing here makes the live verdict match the reference (mock) policy.
+    #
+    # BOTH decision labels are accepted. The model is inconsistent about which one it uses for this
+    # category - it returned decision=BLOCK (not SAFETY_INTERVENTION) with
+    # risk_category=SCAM_OR_COERCION_SIGNAL on the turn above, and keying the safeguard on
+    # SAFETY_INTERVENTION alone meant it never fired and the payment stayed frozen. Only the SCAM
+    # category is touched: a BLOCK for any other reason (an UNSUPPORTED_ACTION, say) is left exactly
+    # as the model gave it.
+    #
+    # It can never weaken the control: a genuine scam ALWAYS names an emergency or claims bank /
+    # authority coercion, so the cues are present and the freeze stands (selftest DEMO4/DEMO5).
+    if (guardrail.decision in (GuardrailDecision.SAFETY_INTERVENTION, GuardrailDecision.BLOCK)
             and guardrail.risk_category == RiskCategory.SCAM_OR_COERCION_SIGNAL
             and not EMERGENCY_NOUN_RE.search(req.text)
             and not SCAM_AUTHORITY_RE.search(req.text)):
@@ -1166,6 +1174,58 @@ async def _run_turn(req: TurnRequest) -> TurnResponse:
     emit("PAYMENT_PROPOSAL", 5, {"engine": engine, **proposal.model_dump(),
                                  "trusted": False,
                                  "note": "Untrusted proposal. No beneficiary id, token or approval."})
+
+    # Deterministic safeguard (live AMOUNT over-trigger). The live Payment Agent sometimes fails
+    # to copy an amount out of a turn that states it plainly and reports amount_minor=None:
+    # "Hantar 50 dolar kepada Mei." and "Hantar lima puluh dolar kepada Mei." both came back with
+    # no amount although parse_amount reads S$50 from either, so Joy answered "how much?" and the
+    # turn died at stage 5 with no draft - in Voice Mode, nothing for FaceID to release.
+    #
+    # Deterministic code owns the field here, as it already does for RECIPIENT and for the
+    # transaction type. Safe by construction:
+    #   * parse_amount is the same parser every other non-clarification path already uses;
+    #   * the amount is filled ONLY when the turn also names a payment destination, so a bare
+    #     acknowledgement ("yes 1000 is correct") can never have its number adopted as an amount -
+    #     that is precisely the contamination instruction_text() exists to prevent;
+    #   * an ambiguous amount ("one fifty" = S$1.50 or S$150) is deliberately left ALONE whatever
+    #     field the model asked about, so the routine that recomputes both readings still asks the
+    #     customer instead of us answering it with a third figure parse_amount reads out of it;
+    #   * if it reads nothing, nothing changes and the amount is still asked for.
+    # The proposal the model produced was emitted above, unchanged, so the audit shows the
+    # over-trigger and this override as two separate visible events.
+    if proposal.amount_minor is None and proposal.status != "PROPOSAL_READY":
+        _names_destination = (parse_payee_phrase(req.text, session.customer_id)
+                              or parse_biller_phrase(req.text, session.customer_id)
+                              or parse_card_phrase(req.text, session.customer_id)
+                              or parse_own_account_phrase(req.text, session.customer_id))
+        if _names_destination:
+            _amount, _ = parse_amount(instruction_text(req.text))
+            if _amount is not None:
+                # Checked whatever field the model asked about. The live agent reports the
+                # missing amount as a RECIPIENT question often enough that gating this on
+                # clarification_field == "AMOUNT" let "Send one fifty to Mei." through: the
+                # turn is ambiguous (S$1.50 or S$150) but parse_amount reads a third figure
+                # from it (S$50), so answering here would invent a reading the customer never
+                # gave. An ambiguous amount is always left for the question that offers both.
+                _still_ambiguous = (ambiguous_amount_pair(req.text, req.asr_confidence,
+                                                          session.amount_disambiguated)
+                                    is not None)
+                if not _still_ambiguous:
+                    emit("AMOUNT_RECOVERED", 5, {
+                        "amount_minor": _amount,
+                        "source": "deterministic parse of the customer's own words",
+                        "llm_proposal_overridden": True,
+                        "clarification_field_was": proposal.clarification_field,
+                        "note": "The model proposed no amount, but the turn states one. "
+                                "Deterministic code supplied it from the same parser every other "
+                                "path uses; the amount is still checked against the transcript at "
+                                "stage 8."})
+                    _patch = {"amount_minor": _amount}
+                    # If the AMOUNT was the only open question, it is now answered.
+                    if proposal.clarification_field == "AMOUNT" and proposal.recipient_phrase:
+                        _patch.update({"status": "PROPOSAL_READY", "clarification_field": None,
+                                       "clarification_question": None})
+                    proposal = proposal.model_copy(update=_patch)
 
     # The customer has just CONFIRMED a payee ("did you mean Mei Tan?" -> "yes"), so the recipient
     # field is already settled. The Payment Agent cannot know that: it re-reads the turn, and the
@@ -2027,6 +2087,32 @@ def _ensure_confirmation(session) -> None:
         session._payload, session._signature = None, None
 
 
+def _ensure_validation(session) -> None:
+    """A review cannot be CONFIRMATION_READY without the validation of the draft on screen.
+
+    session.validation is the Validation Agent's verdict on session.draft, and /confirm passes it
+    straight into the comparator, which dereferences validation.field_checks. An EDIT_PAYMENT turn
+    nulls it on purpose (the edit supersedes the payment on screen). But in a MULTI turn the
+    amendment can target a QUEUED draft while the draft under review is a DIFFERENT one, and the
+    merge only restores validation when the amended draft IS the open one (`if match is
+    session.draft`). The open draft then keeps validation=None, and the next /confirm raised
+    AttributeError -> HTTP 500 on the customer's FaceID tap, which the browser could only report as
+    "could not reach the payment system".
+
+    Re-validating here restores the invariant. ValidationAgent.mock IS the reference policy on this
+    path (the first multi turn validates its queued drafts with exactly this call), so this is the
+    same verdict the draft would have carried had the edit not touched the queue instead.
+    """
+    draft = session.draft
+    if draft is None or session.validation is not None:
+        return
+    session.validation = ValidationAgent.mock(
+        draft, list(session.evidence),
+        {"account_masked": draft.account_masked, "payee_masked": draft.payee_masked,
+         "payee_display": draft.payee_display, "transaction_type": draft.transaction_type},
+        session.customer_id)
+
+
 async def run_multi_merge(req: TurnRequest, session, lang: str,
                           emit, say_line, finish) -> TurnResponse:
     """IN-10 continuation, merge a fresh instruction (or a bare ack) into the live queue."""
@@ -2044,6 +2130,7 @@ async def run_multi_merge(req: TurnRequest, session, lang: str,
                     "review and FaceID is still required to proceed."})
         say_line("APPROVAL_PENDING", 5)
         _ensure_confirmation(session)
+        _ensure_validation(session)
         session.state, session.outcome = SessionState.CONFIRMATION_READY, "MULTI_INSTRUCTION"
         return await finish()
 
@@ -2146,7 +2233,11 @@ async def run_multi_merge(req: TurnRequest, session, lang: str,
     # than duplicated, and the spoken "yes" that may have led this turn executed nothing.
     # A turn the model read as PAYMENT_CLARIFICATION has already discarded the confirmation (E3),
     # so it is recreated here, otherwise /confirm 409s and the card can never be acted on.
+    # The VALIDATION is restored for the sibling reason: an EDIT_PAYMENT turn nulls it, and when the
+    # amendment lands on a QUEUED draft the open draft's validation is never recomputed, so
+    # /confirm would dereference None and answer 500.
     _ensure_confirmation(session)
+    _ensure_validation(session)
     session.state, session.outcome = SessionState.CONFIRMATION_READY, "MULTI_INSTRUCTION"
     emit("MULTI_MERGE_SUMMARY", 7, {
         "updated": updated, "appended": appended,
@@ -2256,6 +2347,14 @@ async def run_confirmation(req: ConfirmRequest) -> TurnResponse:
     if session.frozen or session.cancelled:
         raise HTTPException(409, f"The transaction is frozen or cancelled "
                                  f"(frozen={session.frozen}, cancelled={session.cancelled}). "
+                                 f"Start a new conversation to continue.")
+    # Fail CLOSED and out loud. Every material field is about to be handed to the comparator, which
+    # dereferences validation.field_checks, so a missing validation is a 500 waiting to happen - and
+    # a 500 reaches the customer as "could not reach the payment system", which is both untrue and
+    # unactionable. The invariant is restored upstream (_ensure_validation); this is the backstop.
+    if session.validation is None:
+        raise HTTPException(409, f"The payment on screen has no validation result "
+                                 f"(validation=NONE for draft {session.draft.draft_id}). "
                                  f"Start a new conversation to continue.")
 
     draft, confirmation = session.draft, session.confirmation

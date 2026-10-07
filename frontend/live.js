@@ -23,13 +23,20 @@ function guessLang(text){
 // Ordinary Malay words, for the majority count below. Mirrors the backend's _BM_VOCAB
 // (parsing.py): a majority vote needs the small joining words too ("dan", "dari", "satu"),
 // or every Malay sentence scores as mostly English because its nouns happen to be English.
-const _BM_VOCAB = new Set(['hantar','kepada','dolar','duit','saya','tidak','boleh','jumlah','akaun','bayar',
+const _BM_VOCAB = new Set(['hantar','kepada','dolar','dollar','dollars','duit','saya','tidak','boleh','jumlah','akaun','bayar',
   'sekarang','lima','lapan','sepuluh','ribu','seratus','buang','had','cucu','cepat',
   'maaf','dan','atau','dari','ke','di','untuk','dengan','ini','itu','ada','nak',
   'sudah','sila','tolong','nanti','satu','dua','tiga','empat','enam','tujuh',
   'sembilan','puluh','ringgit','semua','lagi','juga','tapi','kalau','sebab','macam',
   'mana','apa','siapa','bil','bayaran','pindah','pindahkan','awak','kami','dia',
   'mereka','bahasa','wang','selamat','jangan','tanya','tak','cakap','buat','kita']);
+// This set is kept BYTE-FOR-BYTE equal to the backend's _BM_VOCAB (parsing.py) on purpose. The
+// card is a mirror of the backend's dominant_language(), so any word that counts differently here
+// than there makes the card disagree with the answer that follows. Two earlier attempts to be
+// "smarter" than the backend both broke that parity and put a Bahasa card back into English:
+// adding a neutral-word list (the backend counts "dollar" as BM, so skipping it here made a
+// 10-9 Malay turn tie 9-9 and English won), and counting only part of the turn. Do not add
+// cleverness here; change the backend and mirror it, or leave it alone.
 
 /* The language the customer used MOST, for a turn that mixes several. EN wins a tie.
    A deliberate mirror of the backend's dominant_language()/language_word_counts() in
@@ -46,6 +53,8 @@ function dominantLang(text){
   // four-character phrase outweighs four English words and "mostly Chinese" would be
   // decided by stroke count rather than by what the customer actually said.
   counts.ZH = (s.match(/[一-鿿]+/g) || []).length;
+  // Same tokenisation as the backend's language_word_counts(): [A-Za-z]+ only, so a bare digit
+  // ("50") belongs to neither tongue and never tips the count either way.
   for (const word of (s.toLowerCase().match(/[A-Za-z]+/g) || [])) {
     counts[_BM_VOCAB.has(word) ? 'BM' : 'EN']++;
   }
@@ -66,6 +75,13 @@ function dominantLang(text){
 // Raised together with TURN_DEADLINE_S: a live turn makes up to five model calls, and the
 // old 25s ceiling cut the turn off mid-way, which is what made the last agent show "mock".
 const REQUEST_TIMEOUT_MS = 45000;
+
+// The language this conversation is actually being spoken in, as settled by the BACKEND (it
+// counts the customer's words and holds the winner for the whole session). Null until the first
+// reply arrives, because before that there is nothing to know. Used for the chrome that has to be
+// drawn before an answer exists - the "working on it" card - so it lands in the same tongue as the
+// card that replaces it. See the assignment inside liveFreeTurn().
+let SETTLED_IFACE_LANG = null;
 
 async function postJSON(path, body){
   const ctrl = new AbortController();
@@ -371,15 +387,20 @@ async function liveConfirmOnce(session, lang, my, skipFaceId){
       language: lang, biometric: true, faceid_result: 'SUCCESS'
     });
   }catch(err){
-    // A 409 is not "the payment system is unreachable"; the backend refused because there is
-    // nothing left to confirm or the transaction was stopped. Saying otherwise is false and hides
-    // the real cause, so the true reason (the backend's own detail) goes to the audit panel.
+    // A 409 is not "the payment system is unreachable": the backend ANSWERED, and said there is
+    // nothing left to authorise (no draft awaiting, a session lost to a backend restart, or a
+    // frozen transaction). Reporting that as unreachable is false, hides the real cause, and
+    // sends the customer to retry a payment that will never authorise - which is exactly what a
+    // Face ID tap on a session with no draft looked like: a correct Face ID card, then an
+    // "unreachable" bubble. So the two failures are told differently to the customer, and the
+    // backend's own reason still goes to the audit panel either way.
     if(err && err.status === 409){
       audit('CONFIRM_REFUSED_409 · '+(err.detail || 'no draft awaiting confirmation'),'stop');
+      iface(c.nothingToConfirm || c.unreachable);
     } else {
       audit('CONFIRM_CALL_FAILED · '+err.message,'stop');
+      iface(c.unreachable);
     }
-    iface(c.unreachable);
     return null;
   }
   if(my!==RUN) return null;
@@ -487,7 +508,17 @@ async function liveFreeTurn(text, viaVoice, asrConfidence, asrSource){
   }
   // Mirrors the backend's dominant_language() so the processing card is in the same language
   // as the reply that is about to arrive (see dominantLang above).
-  let lang = dominantLang(text);
+  //
+  // The card is drawn BEFORE the backend answers, so on the FIRST turn it can only guess. From
+  // the second turn on this conversation already HAS a settled language - the one the backend
+  // chose, and the one every other card (field review, Face ID, receipt) is about to follow -
+  // so preferring it means the card cannot disagree with the answer that arrives a moment later.
+  // That is what stopped a Bahasa conversation from showing an English "working on it" card
+  // followed by Bahasa confirmation and Face ID cards: three cards from one backend, two tongues.
+  // A turn written in Chinese characters still wins immediately, because that is a script rather
+  // than a guess, and it is how a mid-conversation switch to 中文 lands on the switch turn itself.
+  const guessed = dominantLang(text);
+  let lang = (guessed === 'ZH') ? 'ZH' : (SETTLED_IFACE_LANG || guessed);
   // Clear only the STALE, transient mic status markers ("Listening…" / "Hearing…" /
   // "Stopped listening…") left over from a PREVIOUS mic press. The live "Heard you" marker
   // is dropped at the source (micCapture) the moment the transcript settles, so nothing of
@@ -591,7 +622,12 @@ async function liveFreeTurn(text, viaVoice, asrConfidence, asrSource){
   // customer's words and holds the winner for the whole session). Adopt it for everything the
   // customer sees next (the field review, the Face ID prompt, the receipt) instead of the
   // local guess above, which only looked at this one sentence and disagreed with the backend.
-  if(resp.session && resp.session.interface_language) lang = resp.session.interface_language;
+  if(resp.session && resp.session.interface_language){
+    lang = resp.session.interface_language;
+    // Remember it for the NEXT turn's "working on it" card, which is drawn before any answer
+    // exists and therefore has no backend language to consult of its own.
+    SETTLED_IFACE_LANG = lang;
+  }
   dismissWorking(workPopup); // the answer is in, so stop saying "working on it"
   const seenStages=new Set();
   const steps = eventsToSteps(resp.events, seenStages).concat(finalStateSteps(resp.session));

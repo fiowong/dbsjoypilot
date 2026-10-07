@@ -378,7 +378,7 @@ MESSAGES: Dict[str, Dict[str, str]] = {
         "EN": "Noted, {name}. The payment to {payee} is set to come from {source}. The payment "
               "on your screen is still waiting for your review.",
         "ZH": "好的，{name}。给{payee}的付款已设为从{source}扣款。您屏幕上的那笔付款仍在等您确认。",
-        "BM": "Nota, {name}. Bayaran kepada {payee} ditetapkan dari {source}. Bayaran pada skrin "
+        "BM": "Baik, {name}. Bayaran kepada {payee} ditetapkan dari {source}. Bayaran pada skrin "
               "anda masih menunggu pengesahan anda.",
     },
     "IDEMPOTENT_RETRY_DONE": {

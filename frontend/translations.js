@@ -128,6 +128,11 @@ const T = {
       // The one sentence the CLIENT has to write itself: when the backend cannot be reached there
       // is no catalogue line to quote, so this fallback is chrome too and follows the same language.
       unreachable:'Sorry, I could not reach the payment system just now. Please try again.',
+      // Shown when the backend ANSWERED /confirm with 409: there is nothing left to authorise
+      // (no draft, a session lost to a restart, or a frozen transaction). That is a refusal, not
+      // a network failure, so it must not be reported as "unreachable" - doing so hid the real
+      // cause and left the customer retrying a payment that could never authorise.
+      nothingToConfirm:'There is no payment waiting for your approval right now. Tell me who you’d like to pay and how much, and we’ll start again.',
       faceid:{ kicker:'MOCK FACEID · SIMULATED', title:'Face ID',
         body:'Joy is asking for a <b>transaction-specific</b> biometric confirmation on the registered device.',
         confirm:'Confirm with Face ID',
@@ -206,12 +211,13 @@ const T = {
       doubleCheckKicker:'再确认一次',
       doubleCheckNote:'再确认一次，确保无误。此时仍未签名，也未汇出任何款项。',
       unreachable:'抱歉，我刚刚联系不上支付系统，请再试一次。',
+      nothingToConfirm:'现在没有等待您确认的付款。请告诉我要付款给谁、金额是多少，我们会重新开始。',
       faceid:{ kicker:'模拟 FACEID · 模拟环境', title:'Face ID',
         body:'Joy 正在已注册的设备上请求<b>与本次交易绑定</b>的生物识别确认。',
         confirm:'用 Face ID 确认',
         note:'模拟功能。本原型并不声称已接入生产环境的 FaceID（BRD §7.4）。',
         draftLabel:'草稿', amountLabel:'金额' },
-      // 身份升级验证：第一阶段无法确认说话人时触发。刻意不显示金额与收款人——
+      // 身份升级验证：第一阶段无法确认说话人时触发。刻意不显示金额与收款人, 
       // 请求已被暂缓，未验证身份的人不应看到这笔付款的内容。
       stepup:{ kicker:'身份验证 · 模拟环境', title:'请确认是您本人',
         body:'Joy 无法确认您就是已注册的客户。请先通过 Face ID 验证，<b>验证通过后才会显示这笔付款</b>。',
@@ -240,14 +246,14 @@ const T = {
       welcome:{ kicker:'JOY · DBS', title:'你好，我是 Joy',
         body:'告诉我您要付给<b>谁</b>、付<b>多少</b>。可以用 English、中文或 Bahasa Melayu。',
         start:'开始',
-        note:'在您批准之前不会汇出任何款项——每一笔付款都会先由 DBS 检查。' },
+        note:'在您批准之前不会汇出任何款项, 每一笔付款都会先由 DBS 检查。' },
       // 付款完成、收据出现后显示。它回答文字记录无法回答的问题：这次对话结束了吗？我还能再付一笔吗？
       // 并没有需要等待的冷却时间（实测：一笔新的付款全程约 20–30 秒），所以这里邀请下一笔付款并说明所需时间，
       // 而不是编造一个倒计时，让顾客去等一个并不存在的延迟。
       goodbye:{ kicker:'JOY · 完成', title:'谢谢！',
-        body:'这笔付款已经完成。您随时可以再付一笔——只要告诉我付给谁、付多少。每一笔付款大约需要 20–30 秒来准备。',
+        body:'这笔付款已经完成。您随时可以再付一笔, 只要告诉我付给谁、付多少。每一笔付款大约需要 20–30 秒来准备。',
         done:'完成',
-        note:'在您批准之前不会汇出任何款项——每一笔付款都会先由 DBS 检查。' }
+        note:'在您批准之前不会汇出任何款项, 每一笔付款都会先由 DBS 检查。' }
     },
     simple:{ intro:'好，我们慢慢来，一项一项看。',
       recipient:n=>`收款人：${n}。对吗？`,
@@ -271,6 +277,7 @@ const T = {
       doubleCheckKicker:'SEMAK SEKALI LAGI',
       doubleCheckNote:'Mengesahkan dua kali, sekadar memastikan. Ini masih belum menandatangani atau menghantar apa-apa.',
       unreachable:'Maaf, saya tidak dapat menghubungi sistem pembayaran sebentar tadi. Sila cuba lagi.',
+      nothingToConfirm:'Tiada bayaran yang menunggu pengesahan anda sekarang. Beritahu saya siapa yang anda mahu bayar dan berapa banyak, dan kita mulakan semula.',
       faceid:{ kicker:'FACEID SIMULASI · SIMULATED', title:'Face ID',
         body:'Joy meminta pengesahan biometrik yang <b>khusus untuk transaksi ini</b> pada peranti berdaftar.',
         confirm:'Sahkan dengan Face ID',
