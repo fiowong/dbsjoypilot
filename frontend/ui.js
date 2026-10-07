@@ -84,7 +84,7 @@ const customer = t => bubble('you','YOU',t);
 // hand-written. One convention, one substitution point, and no regex rewriting of the word
 // "Auntie", which used to mangle any sentence that legitimately contained it.
 const fill     = t => String(t==null?'':t).replace(/\{name\}/g, CUSTOMER_NAME);
-const iface    = t => bubble('iface','INTERFACE', fill(t));
+const iface    = t => bubble('iface','JOY', fill(t));
 const sysLine  = t => bubble('sys','SYSTEM',t);
 
 /* Chrome strings that address the customer by name carry an empty `<span data-nslot></span>`
@@ -608,7 +608,7 @@ function clarifyCard(text, onRetry, lang){
   const d=document.createElement('div');
   d.className='row them';
   d.innerHTML=
-    `<span class="lab IFACE">INTERFACE</span>
+    `<span class="lab JOY">JOY</span>
      <div class="ccard">
        <span class="ckick">${c.kicker}</span>
        <div class="ctitle">${c.title}</div>

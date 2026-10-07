@@ -269,6 +269,16 @@ REGRESSIONS: Dict[str, dict] = {
                             "asr_confidence": 0.96},
                            {"text": "1000是对的，然后从我的经常账户转给阿美", "asr_confidence": 0.96}],
                  "confirm": None},
+    # The BM twin of IN-MERGE, and the reason it exists: the ZH row passed because "1000是对的"
+    # was recognised as an affirmation and 转 as a payment verb. The Malay equivalents
+    # ("1000 dollar betul", "hantarlah") were NOT - so the affirmation's 1000 leaked out as the
+    # queued payment's amount, and clause 2 read back S$1,000.00 instead of S$50.00. Same
+    # assertion, BM wording: the merge may set the source, it must never move the amount.
+    "IN-MERGE-BM": {"branch": "-",
+                    "title": "BM continuation amends the QUEUED clause in place, amount unchanged",
+                    "turns": [{"text": _BM_T1, "asr_confidence": 0.96},
+                              {"text": _BM_T2, "asr_confidence": 0.96}],
+                    "confirm": None},
 
     # --- the guardrails false-positive relaxer ---------------------------------------------------
     # The live Guardrails model can read the customer confirming her OWN payment as a scam and

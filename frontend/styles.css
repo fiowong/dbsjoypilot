@@ -596,9 +596,10 @@ button{font-family:inherit}
 .lab{font-size:9px;font-weight:800;letter-spacing:.7px;padding:2px 7px;border-radius:5px;display:inline-block}
 .lab.AUNTIE{background:var(--brand-tint2);color:var(--brand-ink2)}
 .lab.ATTACKER{background:var(--stop-bg);color:var(--stop)}
-/* bubble() writes the FULL label text as the class (label="INTERFACE" → class="lab INTERFACE"),
-   so these must use that spelling. `.lab.IFACE` is the variant clarifyCard() emits. */
-.lab.INTERFACE,.lab.IFACE{background:var(--info-bg);color:var(--info)}
+/* bubble() writes the FULL label text as the class (label="JOY" → class="lab JOY"), so these
+   must use that spelling. INTERFACE / IFACE are the legacy spellings, kept so a stale cached
+   page or an external caller still renders correctly. */
+.lab.JOY,.lab.INTERFACE,.lab.IFACE{background:var(--info-bg);color:var(--info)}
 .lab.SYSTEM{background:#F0F0F4;color:#52525B}
 .lab.UNDERSTOOD{background:var(--ok-bg);color:#047857}
 .lab.YOU{background:var(--dbs-black);color:#fff}

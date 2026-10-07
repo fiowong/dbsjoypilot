@@ -256,14 +256,26 @@ def _scale_word_in(lowered: str, raw: str) -> Optional[str]:
 # word char, so \b对\b never matches "1000是对的" because 对 sits between 是 and 的. The Latin
 # tokens keep their boundaries; the CJK affirmations are matched as bare substrings so an
 # acknowledgement spoken in Mandarin ("对的", "是的", "对", "嗯") is still recognised.
+# The Malay affirmations belong here too ("betul" = correct, "benar" = right). They were MISSING,
+# which is what let "1000 dollar betul. hantarlah duitnya ke ah girl dari akun semasa." keep its
+# "1000": instruction_text saw no affirmation, left the turn whole, and the multi-instruction merge
+# adopted the 1000 as the ah girl payment's amount - the S$1,000-vs-S$50 bug. An affirmation list
+# that covers EN and ZH but not BM is exactly the blind spot a trilingual demo cannot afford.
 _AFFIRM_TOKENS = re.compile(
     r"\b(yes|yeah|yep|yah|ya|correct|right|ok|okay|sure|confirm|affirm|true|agreed|good|great|"
-    r"fine|sounds|perfect|alright|setuju|ok lah|ya lah)\b"
+    r"fine|sounds|perfect|alright|setuju|betul|benar|ok lah|ya lah)\b"
     r"|对的|是的|没错|正确|对|嗯", re.I)
 # Same CJK boundary caveat: 汇/给/帮我/转 are matched bare so "转给阿美" / "汇一千到联名账户"
 # register as a payment verb even though they are flanked by other CJK characters.
+# The Malay verbs carry inflections, and \bhantar\b does NOT match "hantarlah" (the -lah
+# imperative the demo actually uses) nor "pindahkan" / "bayarkan". Each root therefore takes its
+# optional -kan / -lah suffixes, and the roots that were simply absent (pindah, beri) are added.
+# Without this, "1000 dollar betul. hantarlah duitnya ke ah girl…" still had no payment verb in
+# its tail, so instruction_text refused to trim the acknowledgement and the 1000 was adopted.
 _PAYMENT_VERBS = re.compile(
-    r"\b(send|transfer|pay|hantar|bayar|buat|give|transferkan)\b"
+    r"\b(send|transfer(?:kan)?|pay|give|kirim"
+    r"|hantar(?:kan|lah)?|bayar(?:kan|lah)?|pindah(?:kan|lah)?|buat(?:kan|lah)?|beri(?:kan|lah)?"
+    r")\b"
     r"|汇|给|帮我|转", re.I)
 
 

@@ -165,6 +165,11 @@ _P_V_OK = ("Please help me pay my star hub bill from my current account. "
            "Explain each transaction one at a time, slowly.")
 _P_MM_T2 = "1000是对的，然后从我的经常账户转给阿美"
 _P_MM_TWO = "从我的储蓄账户转1000新元到我的联名账户，然后转50新元给阿美"
+# The BM twins. The ZH cases above always passed; the Malay wording did not, because the
+# affirmation list had no "betul"/"benar" and the verb list had no -lah/-kan forms.
+_P_BM_AFFIRM = "1000 dollar betul. hantarlah duitnya ke ah girl dari akun semasa."
+_P_BM_TWO = ("Pindahkan seribu dollar dari akun simpanan saya ke akun bersama saya, "
+             "kemudian hantarlah lima puluh dolar kepada ah girl.")
 
 PARSER_CASES = [
     # --- language routing: a BM turn that uses the English loanword "dollar" stays BM ---
@@ -262,6 +267,17 @@ PARSER_CASES = [
      lambda: len(split_instructions(_P_MM_TWO, _PCUST)), 2),
     ("a no-target turn returns [text], not []",
      lambda: split_instructions("hello", _PCUST), ["hello"]),
+    # --- the BM continuation's leading ack must never leak into the amount (the BM twin of the
+    #     ZH cases above; the two gaps - the "betul" affirmation and the "hantarlah" verb - are
+    #     what made clause 2 read back S$1,000.00 instead of S$50.00) ---
+    ("'1000 dollar betul' is stripped before parsing",
+     lambda: "betul" not in instruction_text(_P_BM_AFFIRM), True),
+    ("the BM instruction tail survives the strip",
+     lambda: "hantarlah duitnya ke ah girl" in instruction_text(_P_BM_AFFIRM), True),
+    ("the BM remainder leaks no amount",
+     lambda: parse_amount(instruction_text(_P_BM_AFFIRM))[0], None),
+    ("a genuine BM two-instruction breath is NOT stripped",
+     lambda: instruction_text(_P_BM_TWO) == _P_BM_TWO, True),
 ]
 
 
@@ -420,17 +436,35 @@ EXPECTED = {
                                   "equals": 5000},
                                  {"event": "MULTI_ITEM_UPDATED", "field": "source_account_display",
                                   "equals": "DBS Current Account"}]},
+    # The BM twin. Before the fix this row failed on amount_minor=100000: the affirmation's 1000
+    # had been adopted as the queued payment's amount (the S$1,000-vs-S$50 defect).
+    "IN-MERGE-BM": {"state": "CONFIRMATION_READY", "outcome": "MULTI_INSTRUCTION",
+                    "ledger": "NOT_INVOKED",
+                    "events": ["MULTI_ITEM_UPDATED"],
+                    "event_field": [{"event": "MULTI_ITEM_UPDATED", "field": "amount_minor",
+                                     "equals": 5000},
+                                    {"event": "MULTI_ITEM_UPDATED", "field": "source_account_display",
+                                     "equals": "DBS Current Account"}]},
 
     # ---- the guardrails false-positive relaxer (stubbed verdicts) -------------------------------
-    # The benign BM continuation reaches confirmation, and the audit shows the relaxer as the
-    # reason (a second GUARDRAILS_RESULT whose note records the override), so a change that made
-    # the turn proceed for some OTHER reason would not pass.
-    "IN-SCAM-BLOCK": {"state": "CONFIRMATION_READY", "outcome": "ALLOW", "ledger": "NOT_INVOKED",
-                      "absent_keys": ["PAUSE_SCAM"],
+    # The benign BM continuation is NOT frozen, and the audit shows the relaxer as the reason (a
+    # second GUARDRAILS_RESULT whose note records the override), so a change that made the turn
+    # proceed for some OTHER reason would not pass.
+    #
+    # The end state is CLARIFICATION_REQUIRED, not CONFIRMATION_READY. The turn opens with an
+    # affirmation of an amount already on screen ("1000 dollar betul") and THEN names a payment
+    # that states no amount of its own ("hantarlah duitnya ke ah girl dari akun semasa"). Once the
+    # affirmation's 1000 is correctly NOT adopted as the new payment's amount (see the BM
+    # affirmations and the Malay verb forms in parsing._AFFIRM_TOKENS / _PAYMENT_VERBS), the turn
+    # legitimately asks how much to send. These two rows used to reach CONFIRMATION_READY only
+    # because the affirmation's number leaked through as the payment's amount - the exact
+    # S$1,000-vs-S$50 defect, so reaching confirmation here was the BUG, not the behaviour.
+    "IN-SCAM-BLOCK": {"state": "CLARIFICATION_REQUIRED", "outcome": "CLARIFY", "ledger": "NOT_INVOKED",
+                      "absent_keys": ["PAUSE_SCAM"], "keys": ["AMOUNT_MISSING"],
                       "event_field": [{"event": "GUARDRAILS_RESULT", "field": "note",
                                        "contains": "SCAM_OR_COERCION relaxed to ALLOW"}]},
-    "IN-SCAM-SAFE": {"state": "CONFIRMATION_READY", "outcome": "ALLOW", "ledger": "NOT_INVOKED",
-                     "absent_keys": ["PAUSE_SCAM"],
+    "IN-SCAM-SAFE": {"state": "CLARIFICATION_REQUIRED", "outcome": "CLARIFY", "ledger": "NOT_INVOKED",
+                     "absent_keys": ["PAUSE_SCAM"], "keys": ["AMOUNT_MISSING"],
                      "event_field": [{"event": "GUARDRAILS_RESULT", "field": "note",
                                       "contains": "SCAM_OR_COERCION relaxed to ALLOW"}]},
     # The two "must NOT relax" controls. For IN-BLOCK-KEEP the relaxer is category-gated: were it
