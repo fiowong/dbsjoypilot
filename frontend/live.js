@@ -69,6 +69,43 @@ function dominantLang(text){
   return 'EN';
 }
 
+/* Mirror of the backend's detect_language() (parsing.py): which language the turn IS, or MIXED
+   when it genuinely mixes scripts. This is the FIRST thing the backend consults, and a turn in
+   ONE language passes straight through it, only a MIXED turn is ever handed to the majority
+   count. So dominantLang() above is NOT the whole rule, and treating it as the whole rule is
+   exactly what put an English "working on it" card in front of a Chinese reply: "付给John Smith
+   50块" is two Han runs against two Latin words, so the count ties to English, while
+   detect_language() sees Han and no other marker and calls the turn ZH. The card must mirror
+   the function the backend ANSWERS from, not the sub-step it falls back to.
+   Kept in step with parsing.py: CJK_MARKERS / BM_MARKERS / EN_MARKERS. */
+function detectLang(text){
+  const s = String(text || '');
+  const hasZh = /[\u4e00-\u9fff]/.test(s);
+  const bm = /\b(hantar|kepada|dolar|dollar|duit|saya|tidak|boleh|jumlah|akaun|bayar|sekarang|lima|lapan|sepuluh|ribu|seratus|buang|had|cucu|cepat|maaf)\b/i.test(s);
+  const en = /\b(transfer|send|pay|please|account|confirm)\b/i.test(s);
+  const signals = (hasZh ? 1 : 0) + (bm ? 1 : 0) + (en ? 1 : 0);
+  if (hasZh && signals > 1) return 'MIXED';
+  if (hasZh) return 'ZH';
+  if (bm) return en ? 'MIXED' : 'BM';
+  return 'EN';
+}
+
+/* Mirror of the backend's messages.interface_language(): which catalogue language the reply
+   will actually be WRITTEN in. A single-language turn passes through unchanged; only a MIXED
+   turn falls back to the majority count. This, not dominantLang(), is the function the reply
+   comes from, so it is the one the processing card has to agree with. */
+function interfaceLang(text){
+  const detected = detectLang(text);
+  if (detected === 'EN' || detected === 'ZH' || detected === 'BM') return detected;
+  return dominantLang(text);
+}
+
+/* Mirror of agents.LANGUAGE_SWITCH_RE: the only thing that moves a conversation's settled
+   language mid-session. Kept here so the card can apply the backend's WHOLE rule below
+   (a settled language sticks unless this turn explicitly asks to switch), instead of a
+   frontend-only "Chinese always wins" shortcut that the backend does not actually take. */
+const LANGUAGE_SWITCH_RE = /(用中文|看不清楚|中文|mandarin|bahasa|melayu|in malay)/i;
+
 // Every backend call is bounded. Without this a stalled upstream froze the customer view
 // indefinitely: the request sat open, the input stayed disabled and Auntie never answered,
 // with nothing on screen to say why. A timeout is not a decision, it is a refusal to wait
@@ -510,19 +547,21 @@ async function liveFreeTurn(text, viaVoice, asrConfidence, asrSource){
     if(my!==RUN) return;
     audit('LIVE BACKEND · '+API_BASE,'ok');
   }
-  // Mirrors the backend's dominant_language() so the processing card is in the same language
-  // as the reply that is about to arrive (see dominantLang above).
+  // Mirror the backend's OWN reply-language decision (orchestrator.py, right before the pipeline
+  // runs): it answers in interface_language(this turn) UNLESS a session language is already
+  // settled AND this turn is not an explicit request to switch, in which case the settled one
+  // sticks. The card is drawn BEFORE the backend answers, so mirroring the whole decision - not
+  // just the majority count - is what makes it agree with the answer that arrives a moment later.
   //
-  // The card is drawn BEFORE the backend answers, so on the FIRST turn it can only guess. From
-  // the second turn on this conversation already HAS a settled language - the one the backend
-  // chose, and the one every other card (field review, Face ID, receipt) is about to follow -
-  // so preferring it means the card cannot disagree with the answer that arrives a moment later.
-  // That is what stopped a Bahasa conversation from showing an English "working on it" card
-  // followed by Bahasa confirmation and Face ID cards: three cards from one backend, two tongues.
-  // A turn written in Chinese characters still wins immediately, because that is a script rather
-  // than a guess, and it is how a mid-conversation switch to 中文 lands on the switch turn itself.
-  const guessed = dominantLang(text);
-  let lang = (guessed === 'ZH') ? 'ZH' : (SETTLED_IFACE_LANG || guessed);
+  // Two turns the old "Chinese always wins, else the count" shortcut got wrong, both reported by
+  // the customer: "付三十块给Uncle Lim" and "付给John Smith 50块" are Han plus Latin, the count
+  // ties to English, so the card came up English over a Chinese reply. detect_language() sees Han
+  // and no other marker, calls the turn ZH, and the backend answers in Chinese; interfaceLang()
+  // now says ZH too. Dropping the shortcut also means a settled language stays settled the way
+  // the backend keeps it (only LANGUAGE_SWITCH_RE moves it), instead of a bare Chinese sentence
+  // forcing the card to ZH while the backend - still sticky - answers in the old language.
+  const turnLang = interfaceLang(text);
+  let lang = (SETTLED_IFACE_LANG && !LANGUAGE_SWITCH_RE.test(text)) ? SETTLED_IFACE_LANG : turnLang;
   // Clear only the STALE, transient mic status markers ("Listening…" / "Hearing…" /
   // "Stopped listening…") left over from a PREVIOUS mic press. The live "Heard you" marker
   // is dropped at the source (micCapture) the moment the transcript settles, so nothing of
