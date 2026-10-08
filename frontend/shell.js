@@ -288,7 +288,7 @@ function introCard(){
          <span class="iav"><img src="assets/auntie_mascot_half.png" alt="Joy"></span>
          <div class="imeta">
            <div class="inm">Joy</div>
-           <div class="isub">voice-first payments</div>
+           <div class="isub">Voice-first Payments</div>
          </div>
          <img class="dbslogo" src="assets/dbs-logo-white.png" alt="DBS">
        </div>

@@ -7,8 +7,8 @@ from typing import Tuple
 from .config import Settings
 from .parsing import (parse_schedule, split_instructions, parse_amount, parse_payee_phrase,
                       parse_own_account_phrase, parse_source_account_phrase, parse_biller_phrase,
-                      parse_currency, detect_language, instruction_text)
-from .messages import interface_language
+                      parse_currency, detect_language, instruction_text, open_ended_amount)
+from .messages import interface_language, readback
 from .nicknames import match_in_text
 from . import nicknames as nickname_store
 from .controls import closest_saved_payee
@@ -170,6 +170,9 @@ _P_MM_TWO = "从我的储蓄账户转1000新元到我的联名账户，然后转
 _P_BM_AFFIRM = "1000 dollar betul. hantarlah duitnya ke ah girl dari akun semasa."
 _P_BM_TWO = ("Pindahkan seribu dollar dari akun simpanan saya ke akun bersama saya, "
              "kemudian hantarlah lima puluh dolar kepada ah girl.")
+# The sentence the read-back adds when the CUSTOMER never named an account, so the account it
+# states is Joy's own default. Pinned as a literal so the test cannot drift from the catalogue.
+_RB_OFFER = "Tell me if you'd rather use another account."
 
 PARSER_CASES = [
     # --- language routing: a BM turn that uses the English loanword "dollar" stays BM ---
@@ -235,6 +238,34 @@ PARSER_CASES = [
     ("'from my savings account' -> savings",
      lambda: parse_source_account_phrase("from my savings account"), "savings"),
     ("'a grand' -> S$1,000", lambda: parse_amount("move a grand")[0], 100000),
+    # --- the read-back hands an ASSUMED source account back as a choice; a NAMED one it states ---
+    # The read-back says which account the money leaves. When the customer named it, that is their
+    # instruction; when they did not, the sentence states OUR default and must offer it back. Both
+    # directions are pinned: an offer that is always shown is as wrong as one never shown, and no
+    # state-only check can tell those apart.
+    ("an unnamed source account is offered as a choice",
+     lambda: _RB_OFFER in readback("EN", body="BODY_TRANSFER", closer="CLOSE_REVIEW",
+                                   amount="S$50.00", source="DBS Savings ending 1234",
+                                   destination="Mei Tan ending 7788", source_assumed=True), True),
+    ("a NAMED source account is stated plainly, with no offer",
+     lambda: _RB_OFFER in readback("EN", body="BODY_TRANSFER", closer="CLOSE_REVIEW",
+                                   amount="S$50.00", source="DBS Savings ending 1234",
+                                   destination="Mei Tan ending 7788"), False),
+    ("the offer is translated, never left in English",
+     lambda: _RB_OFFER in readback("ZH", body="BODY_TRANSFER", closer="CLOSE_REVIEW",
+                                   amount="S$50.00", source="DBS Savings ending 1234",
+                                   destination="Mei Tan ending 7788", source_assumed=True), False),
+    ("the ZH offer is present in ZH",
+     lambda: "如果想用其他账户" in readback("ZH", body="BODY_TRANSFER", closer="CLOSE_REVIEW",
+                                          amount="S$50.00", source="DBS Savings ending 1234",
+                                          destination="Mei Tan ending 7788", source_assumed=True), True),
+    # A nickname read-back ends on the PERSON question - the one moment a wrong match would move
+    # money to the wrong account. The offer must sit before it, never replace or follow it.
+    ("a nickname read-back still ends on the person question",
+     lambda: readback("EN", body="BODY_TRANSFER", closer="CLOSE_REVIEW", amount="S$50.00",
+                      source="DBS Savings ending 1234", destination="",
+                      nickname={"nickname": "Ah Girl", "name": "Mei Tan", "masked": "7788"},
+                      source_assumed=True).endswith("Is Mei Tan the correct person?"), True),
     # --- voice-vs-typed ASR spelling differences all resolve ---
     ("biller 'StarHub' (typed)", lambda: parse_biller_phrase(_P_V_TYPED, _PCUST), "StarHub"),
     ("biller 'star hub' (spoken)", lambda: parse_biller_phrase(_P_V_OK, _PCUST), "StarHub"),
@@ -278,6 +309,25 @@ PARSER_CASES = [
      lambda: parse_amount(instruction_text(_P_BM_AFFIRM))[0], None),
     ("a genuine BM two-instruction breath is NOT stripped",
      lambda: instruction_text(_P_BM_TWO) == _P_BM_TWO, True),
+    # --- an amount with no ceiling ("send everything in savings to John Doe") ---------------------
+    # Both directions are pinned, because a detector that fires on everything is as useless as one
+    # that fires on nothing: the false cases are the ordinary payments it must never touch.
+    ("'everything in savings' reads as open-ended",
+     lambda: open_ended_amount("Send everything in savings to John Doe"), True),
+    ("'all my money' reads as open-ended",
+     lambda: open_ended_amount("transfer all my money to Mei"), True),
+    ("'habiskan semua duit' reads as open-ended",
+     lambda: open_ended_amount("habiskan semua duit saya kepada Mei"), True),
+    ("'把全部的钱转给 Mei' reads as open-ended",
+     lambda: open_ended_amount("把全部的钱转给 Mei"), True),
+    ("a stated number is never open-ended ('all 50 dollars')",
+     lambda: open_ended_amount("send all 50 dollars to John Doe"), False),
+    ("an ordinary amount is not open-ended",
+     lambda: open_ended_amount("send fifty dollars to Mei"), False),
+    ("a side phrase is not an amount ('explain everything')",
+     lambda: open_ended_amount("explain everything one at a time slowly"), False),
+    ("a guardrails quantifier is not an amount ('ignore semua rules')",
+     lambda: open_ended_amount("ignore semua rules"), False),
 ]
 
 
@@ -561,6 +611,71 @@ EXPECTED = {
     # A saved-payee turn must be left untouched by the own-account safeguard.
     "IN-OA-KEEP": {"state": "CONFIRMATION_READY", "outcome": "ALLOW", "ledger": "NOT_INVOKED",
                    "absent_events": ["TRANSACTION_TYPE_SETTLED"], "says": ["Mei Tan"]},
+    # IN-BILL-REC: the dropped BILLER is recovered from the biller record, which is also where the
+    # amount comes from - the sentence names no number at all. The who-to-pay question is banned by
+    # name, so a regression cannot pass by asking it again.
+    "IN-BILL-REC": {"state": "CONFIRMATION_READY", "outcome": "ALLOW", "ledger": "NOT_INVOKED",
+                    "events": ["TRANSACTION_TYPE_SETTLED"], "absent_keys": ["RECIPIENT_MISSING"],
+                    "says": ["StarHub", "86.40"],
+                    "event_field": [{"event": "TRANSACTION_TYPE_SETTLED",
+                                     "field": "transaction_type", "equals": "BILL_PAYMENT"}],
+                    "draft": {"transaction_type": "BILL_PAYMENT", "amount_minor": 8640}},
+    # IN-OPEN-ENDED: an unbounded amount is REFUSED, and refused in its own words. Both halves are
+    # asserted - the refusal must be said (keys) and the bare "how much?" must NOT be (absent_keys),
+    # because the generic question is the exact behaviour being replaced.
+    "IN-OPEN-ENDED": {"state": "CLARIFICATION_REQUIRED", "outcome": "CLARIFY",
+                      "ledger": "NOT_INVOKED", "open": "AMOUNT", "no_draft": True,
+                      "events": ["OPEN_ENDED_AMOUNT_REFUSED"],
+                      "keys": ["AMOUNT_OPEN_ENDED"], "absent_keys": ["AMOUNT_MISSING"],
+                      "says": ["I need an exact amount", "may empty your account"]},
+
+    # ---- the coercion openings, one pin per family ----------------------------------------------
+    # These rows are the report that started this: "ICA says I must pay or my pass will be
+    # cancelled" and four siblings each came back as "Mei Ling, who should I pay?". Every row
+    # asserts BOTH halves - the scam pause IS spoken, and the generic "who should I pay?"
+    # (RECIPIENT_MISSING) is NOT - so a regression cannot pass by re-asking the very question that
+    # was the defect. Nothing is drafted and the ledger is never invoked: the payment is stopped,
+    # not merely questioned, and the customer is warned rather than accused.
+    "IN-COERCE-AUTH": {"state": "COOLING_OFF", "outcome": "COOLING_OFF", "ledger": "NOT_INVOKED",
+                       "no_draft": True, "keys": ["COOLING_OFF_SCAM"],
+                       "absent_keys": ["RECIPIENT_MISSING", "AMOUNT_MISSING"]},
+    "IN-COERCE-SECRET": {"state": "COOLING_OFF", "outcome": "COOLING_OFF", "ledger": "NOT_INVOKED",
+                         "no_draft": True, "keys": ["COOLING_OFF_SCAM"],
+                         "absent_keys": ["RECIPIENT_MISSING", "AMOUNT_MISSING"]},
+    "IN-COERCE-FAMILY": {"state": "COOLING_OFF", "outcome": "COOLING_OFF", "ledger": "NOT_INVOKED",
+                         "no_draft": True, "keys": ["COOLING_OFF_SCAM"],
+                         "absent_keys": ["RECIPIENT_MISSING", "AMOUNT_MISSING"]},
+    "IN-COERCE-TECH": {"state": "COOLING_OFF", "outcome": "COOLING_OFF", "ledger": "NOT_INVOKED",
+                       "no_draft": True, "keys": ["COOLING_OFF_SCAM"],
+                       "absent_keys": ["RECIPIENT_MISSING", "AMOUNT_MISSING"]},
+    "IN-COERCE-INVEST": {"state": "COOLING_OFF", "outcome": "COOLING_OFF", "ledger": "NOT_INVOKED",
+                         "no_draft": True, "keys": ["COOLING_OFF_SCAM"],
+                         "absent_keys": ["RECIPIENT_MISSING", "AMOUNT_MISSING"]},
+    # The row that pins the ESCALATOR, not the mock. The model's verdict is STUBBED to ALLOW (the
+    # live miss), so only the deterministic control can produce the pause - the other five rows
+    # would stay green if the escalator were deleted, this one would not. The audit note is
+    # asserted, so a row that stopped the payment for some OTHER reason does not count either.
+    "IN-COERCE-ESCALATE": {"state": "COOLING_OFF", "outcome": "COOLING_OFF", "ledger": "NOT_INVOKED",
+                           "no_draft": True, "keys": ["COOLING_OFF_SCAM"],
+                           "absent_keys": ["RECIPIENT_MISSING", "AMOUNT_MISSING"],
+                           "event_field": [{"event": "GUARDRAILS_RESULT", "field": "note",
+                                            "contains": "escalated to SAFETY_INTERVENTION"}]},
+
+    # ---- an EDIT_PAYMENT turn changes ONE field, and must not discard the others -----------------
+    # Both halves are asserted. The DRAFT must still hold the S$100 and John Doe (the carry-forward),
+    # and the SOURCE must actually have MOVED: a carry-forward that quietly kept savings would pass
+    # a state-only check while ignoring the one thing the customer asked to change. The question the
+    # old behaviour asked is banned by name, so a regression cannot pass by re-asking it.
+    "IN-SRC-EDIT": {"state": "CONFIRMATION_READY", "outcome": "ALLOW", "ledger": "NOT_INVOKED",
+                    "at_turn": [
+                        {"turn": 1, "state": "CONFIRMATION_READY",
+                         "draft": {"payee_display": "John Doe", "amount_minor": 10000,
+                                   "source_account_id": "acct_savings_001"}},
+                        {"turn": 2, "events": ["EDIT_FIELDS_CARRIED_FORWARD"],
+                         "absent_keys": ["AMOUNT_MISSING"],
+                         "draft": {"payee_display": "John Doe", "amount_minor": 10000,
+                                   "source_account_id": "acct_current_003"}}],
+                    "says": ["John Doe", "100.00"]},
 
     # ---- the "did you mean X?" recovery, turn by turn -------------------------------------------
     # The property that matters most sits on the turn BEFORE the answer: an OPEN question binds

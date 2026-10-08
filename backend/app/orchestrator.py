@@ -21,12 +21,13 @@ from .parsing import (parse_amount, parse_corrected_amount, last_committed_amoun
                        schedule_from_hint,
                        is_schedule_correction, schedule_named_but_unusable,
                        unknown_payee_phrase, colloquial_scale_phrase,
+                       open_ended_amount,
                        lookup_card, lookup_own_account)
 from .agents import (GuardrailsAgent, IntentClassifierAgent, PaymentAgent, ValidationAgent,
                      PersonalizationAgent, CONFIRMATION_BYPASS_RE, LANGUAGE_SWITCH_RE,
                      AFFIRMATION_RE, NEGATION_RE, INSUFFICIENT_FUNDS_RE, SAFETY_HELP_RE,
                      MANDATORY_CONTROL_RE, ROLE_OVERRIDE_RE,
-                     EMERGENCY_NOUN_RE, TRANSFER_WORD_RE, SCAM_AUTHORITY_RE)
+                     EMERGENCY_NOUN_RE, TRANSFER_WORD_RE, coercion_cue)
 from .agent_runtime import AgentUnavailable
 from .llm_client import arm_turn_deadline, disarm_turn_deadline
 # The learned-nickname store. Imported here (not via parsing) because the audit event needs to
@@ -177,7 +178,7 @@ def _turn_states_its_own_amount(text: str, customer_id: str) -> bool:
 
 
 def _say_payment_clarification(req: "TurnRequest", session: Session, proposal: PaymentProposal,
-                               say_line) -> None:
+                               say_line, emit) -> None:
     """Render the Stage-5 clarification question from the field the Payment Agent flagged.
 
     The agent's own ``clarification_question`` is an untrusted proposal, it stays in the audit
@@ -197,6 +198,25 @@ def _say_payment_clarification(req: "TurnRequest", session: Session, proposal: P
             session.pending_amount_payee = payee
             option_a, option_b = money(ambiguous[0]), money(ambiguous[1])
             say_line("AMOUNT_AMBIGUOUS", 5, option_a=option_a, option_b=option_b)
+            return
+        if open_ended_amount(req.text) and proposal.recipient_phrase:
+            # The customer did not forget the amount - they asked for one with no ceiling ("send
+            # everything in savings to John Doe"). "How much?" is the wrong answer to that: it
+            # reads as a request for a number, when what actually happened is that Joy was asked
+            # for an UNBOUNDED amount, and for a transfer that is a way to empty the account. So
+            # the refusal is spoken first, with the reason, and the question follows it. Nothing is
+            # prepared either way: the draft is still NOT_CREATED and no amount is assumed.
+            #
+            # Gated on a destination being named, so an open-ended phrase in a turn that names no
+            # payment target cannot change the wording of anything.
+            emit("OPEN_ENDED_AMOUNT_REFUSED", 5, {
+                "spoken": "everything / all / whole balance",
+                "clarification_field": "AMOUNT",
+                "canonical_draft": "NOT_CREATED",
+                "note": "The customer asked for an amount with no ceiling. Deterministic code "
+                        "refused to prepare an unbounded payment and asked for an exact amount "
+                        "instead; no amount was assumed and nothing was drafted."})
+            say_line("AMOUNT_OPEN_ENDED", 5)
             return
         say_line("AMOUNT_MISSING", 5, phrase=proposal.recipient_phrase or "?")
         return
@@ -496,12 +516,16 @@ async def _run_turn(req: TurnRequest) -> TurnResponse:
                                               "usable text, so the over-trigger is undone"})
 
     # Deterministic safeguard (SCAM false positive): the live Guardrails model may raise
-    # SCAM_OR_COERCION_SIGNAL on a benign customer continuation that names NEITHER scam cue - no
-    # named emergency (EMERGENCY_NOUN_RE) and no safe-account / authority coercion language
-    # (SCAM_AUTHORITY_RE). e.g. "1000 dollar betul. hantarlah duitnya ke ah girl dari akun semasa."
-    # is the customer confirming their own payment and picking a source account, not a scam, yet
-    # the live model froze it in BM. GuardrailsAgent.mock only fires SCAM when one of those two cue
-    # groups is present, so relaxing here makes the live verdict match the reference (mock) policy.
+    # SCAM_OR_COERCION_SIGNAL on a benign customer continuation that carries NO coercion cue at
+    # all. e.g. "1000 dollar betul. hantarlah duitnya ke ah girl dari akun semasa." is the customer
+    # confirming their own payment and picking a source account, not a scam, yet the live model
+    # froze it in BM. GuardrailsAgent.mock fires SCAM only when coercion_cue() names a family, so
+    # relaxing here makes the live verdict match the reference (mock) policy.
+    #
+    # The gate reads the BROAD tier (coercion_cue), not the two narrow cues it used to read. That
+    # is the safe direction for THIS relaxer: it can now refuse to undo a freeze on any of the five
+    # coercion families, where before it would happily unfreeze a "hacked computer" or a "don't
+    # tell the bank" turn the model had correctly frozen.
     #
     # BOTH decision labels are accepted. The model is inconsistent about which one it uses for this
     # category - it returned decision=BLOCK (not SAFETY_INTERVENTION) with
@@ -510,18 +534,17 @@ async def _run_turn(req: TurnRequest) -> TurnResponse:
     # category is touched: a BLOCK for any other reason (an UNSUPPORTED_ACTION, say) is left exactly
     # as the model gave it.
     #
-    # It can never weaken the control: a genuine scam ALWAYS names an emergency or claims bank /
-    # authority coercion, so the cues are present and the freeze stands (selftest DEMO4/DEMO5).
+    # It can never weaken the control: a genuine scam always carries a coercion cue, so the cue is
+    # present and the freeze stands (selftest DEMO4, IN-SCAM-HOLD).
     if (guardrail.decision in (GuardrailDecision.SAFETY_INTERVENTION, GuardrailDecision.BLOCK)
             and guardrail.risk_category == RiskCategory.SCAM_OR_COERCION_SIGNAL
-            and not EMERGENCY_NOUN_RE.search(req.text)
-            and not SCAM_AUTHORITY_RE.search(req.text)):
+            and coercion_cue(req.text) is None):
         guardrail = GuardrailResult(
             decision=GuardrailDecision.ALLOW, risk_category=RiskCategory.SAFE_PAYMENT_REQUEST,
             risk_level="LOW", detected_language=guardrail.detected_language,
             message_key="CONTINUE",
             developer_reason="SCAM_OR_COERCION relaxed to ALLOW by deterministic safeguard "
-                             "(no emergency noun and no authority/safe-account coercion language).")
+                             "(the turn carries no coercion cue).")
         engine = "deterministic-safeguard"
         emit("GUARDRAILS_RESULT", 3, {"engine": engine, **guardrail.model_dump(),
                                       "prompt_version": Settings.PROMPT_VERSION,
@@ -631,6 +654,42 @@ async def _run_turn(req: TurnRequest) -> TurnResponse:
                                               "verdict reaching the gate was " + previous_decision
                                               + "/" + previous_category
                                               + " on a turn carrying a system-message injection"})
+
+    # Deterministic ESCALATION (coercion): the mirror image of the relaxer above, and the reason it
+    # exists. Until now the live Guardrails model was the ONLY thing that could ever raise a scam
+    # verdict, and it reads a closed rubric - so on a coercion story it had never been told about
+    # (a claimed government agency, "don't tell your family", a hacked computer, a sure-win
+    # investment, a grandson on a new number) it answered ALLOW, and Joy then asked "who should I
+    # pay?", which is the one answer a scam needs. The deterministic layer could already TIGHTEN for
+    # a system-message injection; this is the same control for coercion, and it sits below every
+    # relaxer, so no relaxer can undo it.
+    #
+    # It fires only on a turn that carries a coercion cue, so an ordinary turn is untouched, and it
+    # never downgrades a verdict the model already gave: a BLOCK stays a BLOCK. SAFETY_INTERVENTION
+    # is included so a turn the model read as a DIFFERENT safety problem still gets the coercion
+    # category and the coercion wording, which is what the audit and the customer both need.
+    coercion = coercion_cue(req.text)
+    if coercion and guardrail.decision in (GuardrailDecision.ALLOW, GuardrailDecision.CLARIFY,
+                                           GuardrailDecision.SAFETY_INTERVENTION):
+        previous_decision = guardrail.decision.value
+        previous_category = (guardrail.risk_category.value if guardrail.risk_category else "none")
+        guardrail = GuardrailResult(
+            decision=GuardrailDecision.SAFETY_INTERVENTION,
+            risk_category=RiskCategory.SCAM_OR_COERCION_SIGNAL,
+            risk_level=("CRITICAL" if coercion == "AUTHORITY_IMPERSONATION" else "HIGH"),
+            detected_language=guardrail.detected_language,
+            message_key="PAUSE_SCAM",
+            developer_reason="Coercion escalated by deterministic control (" + coercion + "): the "
+                             "turn pressures the customer to move money, so no payment field is "
+                             "read and nothing reaches the payment agent.")
+        engine = "deterministic-safeguard"
+        emit("GUARDRAILS_RESULT", 3, {"engine": engine, **guardrail.model_dump(),
+                                      "prompt_version": Settings.PROMPT_VERSION,
+                                      "schema_version": Settings.SCHEMA_VERSION,
+                                      "note": "escalated to SAFETY_INTERVENTION by deterministic "
+                                              "control on a coercion cue (" + coercion + "), the "
+                                              "verdict reaching the gate was " + previous_decision
+                                              + "/" + previous_category})
 
     if guardrail.decision == GuardrailDecision.BLOCK:
         # BRD §8.5.7 deterministic routing: BLOCK -> session.state = "FROZEN".
@@ -1365,6 +1424,48 @@ async def _run_turn(req: TurnRequest) -> TurnResponse:
                                  "trusted": False,
                                  "note": "Untrusted proposal. No beneficiary id, token or approval."})
 
+    # Deterministic safeguard (an EDIT_PAYMENT must not discard the fields it does not mention).
+    # A correction changes ONE field and leaves the rest of the payment alone, but the Payment
+    # Agent only ever sees THIS turn's sentence. So "send it from my current account instead" came
+    # back carrying the account and nothing else: the S$100 the customer had already given was
+    # gone, and Joy asked "how much would you like to send?" for a number it had been told one turn
+    # earlier. Every field the turn does NOT restate is therefore carried forward from the draft on
+    # screen.
+    #
+    # Only BLANKS are filled, which is what makes this safe: a field the turn DOES state still wins,
+    # even when it names someone unknown ("no, it's Jane"), and the payee resolution below still
+    # reports that name as not found. This is the same carry-forward a date-only correction already
+    # relies on, widened from "only WHEN it runs" to "whatever the turn left unsaid".
+    if (intent.intent == "EDIT_PAYMENT" and session.draft is not None
+            and not date_correction):
+        carried = []
+        if proposal.amount_minor is None and session.draft.amount_minor is not None:
+            proposal.amount_minor = session.draft.amount_minor
+            carried.append("AMOUNT")
+        if not proposal.recipient_phrase and session.draft.payee_display:
+            proposal.recipient_phrase = session.draft.payee_display
+            carried.append("RECIPIENT")
+        if not proposal.transaction_type:
+            proposal.transaction_type = session.draft.transaction_type
+            carried.append("TRANSACTION_TYPE")
+        if carried:
+            # The payment is whole again, so a clarification the model raised only because its own
+            # sentence was short is no longer true and must not be asked.
+            if (proposal.status != "PROPOSAL_READY"
+                    and proposal.amount_minor is not None and proposal.recipient_phrase):
+                proposal.status = "PROPOSAL_READY"
+                proposal.clarification_field = None
+                proposal.clarification_question = None
+            if "RECIPIENT" in carried and not payee_confirmed_this_turn:
+                session.payee_phrase = proposal.recipient_phrase
+            emit("EDIT_FIELDS_CARRIED_FORWARD", 5, {
+                "carried": carried,
+                "from_draft_version": session.current_draft_version,
+                "proposal_status": proposal.status,
+                "note": "An EDIT_PAYMENT turn changes one field. Every field this turn did not "
+                        "restate was carried forward from the payment already on screen, so a "
+                        "correction cannot discard what the customer has already told us."})
+
     # Deterministic safeguard (live AMOUNT over-trigger). The live Payment Agent sometimes fails
     # to copy an amount out of a turn that states it plainly and reports amount_minor=None:
     # "Hantar 50 dolar kepada Mei." and "Hantar lima puluh dolar kepada Mei." both came back with
@@ -1447,117 +1548,113 @@ async def _run_turn(req: TurnRequest) -> TurnResponse:
             "status": "PROPOSAL_READY", "recipient_phrase": session.payee_phrase,
             "clarification_field": None, "clarification_question": None})
 
-    # Deterministic safeguard (live RECIPIENT over-trigger). The Payment Agent is never told who
-    # the customer's saved payees are, so the recipient is the one field it can only ever COPY out
-    # of the turn - and a live model sometimes fails to copy it. "Send John Smith 50 dollars from
-    # my savings account" came back NEEDS_CLARIFICATION / RECIPIENT, so the turn ended at stage 5
-    # and Joy asked who to pay, about a person the customer had just named. In Voice Mode that also
-    # left no draft for FaceID to release.
+    # Deterministic safeguard (the live Payment Agent's blind spots). The Payment Agent is never
+    # told who the customer's saved payees are, nor their billers, their cards or their own
+    # accounts, so EVERY destination is a field it can only ever COPY out of the turn - and a live
+    # model sometimes fails to copy it, or copies it as the wrong SHAPE.
     #
-    # Deterministic code owns the field here, exactly as it does above for a confirmed payee and for
-    # a date-only correction: if the resolver can already read a saved payee out of this turn, the
-    # proposal is brought up to PROPOSAL_READY and the ordinary stage 6 binds the destination.
+    # Two recorded failures, one cause:
+    #   * "Send John Smith 50 dollars from my savings account" came back NEEDS_CLARIFICATION /
+    #     RECIPIENT, so the turn ended at stage 5 and Joy asked who to pay, about a person the
+    #     customer had just named.
+    #   * "Pay StarHub next Friday." came back the same way. StarHub is a BILLER, and the recovery
+    #     used to know only saved payees, so a bill the customer had just named died asking "who
+    #     should I pay?" - and in Voice Mode that also left no draft for FaceID to release.
     #
-    # This can only ever UNDO an over-trigger, it can never create a binding:
-    #   * parse_payee_phrase matches ONLY against the customer's own saved-payee records and the
-    #     nicknames bound to them, so anything it returns is a payee the customer already holds;
-    #   * if it finds nothing, nothing changes and the question is asked exactly as before - the
+    # The reading is not re-implemented here. _instruction_proposal() is the SAME deterministic
+    # recogniser the reference policy (PaymentAgent.mock) and the multi-instruction splitter use,
+    # with the same detection order (bill -> card -> own account -> saved payee), and it carries a
+    # bill's or a card's amount out of the trusted record. Reusing it is the point: the live path
+    # and the reference policy cannot then disagree about what the customer named.
+    #
+    # It only ever UNDOES a blind spot, it can never create a binding:
+    #   * every parser behind it matches ONLY against records the customer already holds - their
+    #     saved payees and the nicknames bound to them, their billers, their cards, their own
+    #     accounts - so anything it returns is something the customer already has;
+    #   * it is consulted only where it DISAGREES with the model's own reading (a missing
+    #     destination, a missing record-backed amount, or the wrong shape), so a proposal the model
+    #     already got right is never rewritten and the audit never records an override that did
+    #     not happen;
+    #   * if it reads nothing, nothing changes and the question is asked exactly as before - the
     #     unknown-name machinery below ("Ah Boy" -> "which of your payees is that?") still runs;
     #   * the proposal the model actually produced was emitted above, unchanged, so the audit still
-    #     shows the over-trigger and this override as two separate visible events;
+    #     shows the model's own reading and this override as two separate visible events;
     #   * the destination is still bound at stage 6 from the trusted repository, as for any payment.
-    #
-    # Recipient only. A biller, a card or the customer's own account is deliberately not recovered
-    # here, because those also have to set transaction_type, and guessing the type would be a worse
-    # error than asking.
-    if (proposal.status != "PROPOSAL_READY"
-            and proposal.clarification_field == "RECIPIENT"
-            and not payee_confirmed_this_turn):
-        recovered = parse_payee_phrase(req.text, session.customer_id)
-        if recovered:
-            if proposal.amount_minor is None:
-                # The recipient is settled, but a missing amount is still a genuine question and
-                # asking two at once is worse than asking one. Ask the one that is actually open.
-                emit("RECIPIENT_RECOVERED", 5, {
-                    "recipient_phrase": recovered,
+    if not payee_confirmed_this_turn:
+        recovered = _instruction_proposal(req.text, session.customer_id)
+        # A bill or a card has ONE authoritative amount (the outstanding bill, the card balance) and
+        # it lives in the record, not in the sentence. That is also what makes it safe to supply
+        # without asking: the customer is authorising the amount the read-back shows them.
+        _record_backed = (recovered is not None
+                          and recovered.transaction_type in ("BILL_PAYMENT",
+                                                             "CREDIT_CARD_PAYMENT"))
+        _name_differs = (recovered is not None
+                         and (recovered.recipient_phrase or "").strip().lower()
+                         != (proposal.recipient_phrase or "").strip().lower())
+        _shape_differs = (recovered is not None and recovered.transaction_type is not None
+                          and recovered.transaction_type != proposal.transaction_type)
+        _amount_differs = (_record_backed and recovered.amount_minor is not None
+                           and recovered.amount_minor != proposal.amount_minor)
+        # An ambiguous amount ("one fifty" = S$1.50 or S$150) must stay a question: the recogniser
+        # reads a THIRD value out of those words, so adopting it would answer a question the
+        # customer has not answered. The same predicate the mock and the clarification renderer
+        # use, so the three cannot disagree. A bill or a card is exempt - its amount is not read
+        # from the sentence at all.
+        _ambiguous = (recovered is not None and not _record_backed
+                      and ambiguous_amount_pair(req.text, req.asr_confidence,
+                                                session.amount_disambiguated) is not None)
+        if (recovered is not None and recovered.recipient_phrase
+                and (_name_differs or _shape_differs or _amount_differs)):
+            if _ambiguous:
+                amount = None                 # the customer must answer; see above
+            elif _record_backed:
+                amount = recovered.amount_minor
+            else:
+                amount = (proposal.amount_minor if proposal.amount_minor is not None
+                          else recovered.amount_minor)
+            patch = {"recipient_phrase": recovered.recipient_phrase,
+                     "transaction_type": recovered.transaction_type,
+                     "source_account_phrase": (recovered.source_account_phrase
+                                               or proposal.source_account_phrase),
+                     "currency": recovered.currency}
+            # The SHAPE was wrong (the model read a bill, a card or an own-account move as an
+            # ordinary transfer) is a different claim from "the model dropped the name", so the two
+            # are recorded under their own event names. A judge reading the audit can tell which
+            # blind spot fired.
+            _event = ("TRANSACTION_TYPE_SETTLED" if _shape_differs else "RECIPIENT_RECOVERED")
+            if amount is None:
+                # The destination is settled, but there is no amount to settle it with, so a
+                # missing amount is still a genuine question. Asking one question is better than
+                # asking two, and better than asking the wrong one.
+                emit(_event, 5, {
+                    "recipient_phrase": recovered.recipient_phrase,
+                    "transaction_type": recovered.transaction_type,
                     "source": "deterministic parse of the customer's own words",
                     "llm_proposal_overridden": True,
                     "asked_instead": "AMOUNT",
-                    "note": "The model proposed no recipient, but the turn names a saved payee. "
-                            "Deterministic code supplied the recipient and left the missing "
-                            "amount as the question actually being asked."})
-                proposal = proposal.model_copy(update={
-                    "recipient_phrase": recovered,
-                    "clarification_field": "AMOUNT", "clarification_question": None})
+                    "note": "The model proposed no destination, or read the transaction as the "
+                            "wrong shape. Deterministic code supplied the destination from the same "
+                            "recogniser the reference policy uses, and left the missing amount as "
+                            "the question actually being asked."})
+                patch.update({"clarification_field": "AMOUNT", "clarification_question": None})
             else:
-                emit("RECIPIENT_RECOVERED", 5, {
-                    "recipient_phrase": recovered,
-                    "source": "deterministic parse of the customer's own words",
-                    "llm_proposal_overridden": True,
-                    "amount_minor": proposal.amount_minor,
-                    "note": "The model proposed no recipient, but the turn names a saved payee, so "
-                            "deterministic code supplied that field instead of asking who to pay. "
-                            "The destination still comes only from the saved-payee record."})
-                proposal = proposal.model_copy(update={
-                    "status": "PROPOSAL_READY", "recipient_phrase": recovered,
-                    "clarification_field": None, "clarification_question": None})
-
-    # Deterministic safeguard (live TRANSACTION TYPE). PAYMENT_SYSTEM_PROMPT only ever described
-    # "one SGD transfer to a saved payee", so the live model reads an OWN-ACCOUNT move ("From my
-    # savings account to my joint account, move one grand") as a saved-payee transfer with no
-    # recipient, and the turn dies at stage 5 asking who to pay - about the customer's OWN account.
-    # PaymentAgent.mock has an own-account branch and gets this right, which is exactly why every
-    # own-account turn works offline and fails in the recording.
-    #
-    # The transaction TYPE is deterministic: the customer either named a biller, their card, one of
-    # their OWN accounts, or a saved payee, and all four are recognised by parsers that read the
-    # trusted repository. This mirrors the detection order PaymentAgent.mock and
-    # _instruction_proposal already use (bill -> card -> own account -> saved payee), so the live
-    # path and the reference policy cannot disagree.
-    #
-    # It can only ever correct the SHAPE, never the destination: the account name comes from
-    # parse_own_account_phrase, which matches only accounts the customer already holds, and the
-    # destination is still bound at stage 6 from that same record.
-    if (not parse_biller_phrase(req.text, session.customer_id)
-            and not parse_card_phrase(req.text, session.customer_id)
-            and not payee_confirmed_this_turn):
-        own_name = parse_own_account_phrase(req.text, session.customer_id)
-        if own_name and proposal.transaction_type != "OWN_ACCOUNT_TRANSFER":
-            amount = proposal.amount_minor
-            if amount is None:
-                amount = parse_amount(instruction_text(req.text))[0]
-            source = parse_source_account_phrase(req.text) or proposal.source_account_phrase
-            if amount is None:
-                # The destination is settled, but a missing amount is still a genuine question,
-                # and asking two at once is worse than asking one.
-                emit("TRANSACTION_TYPE_SETTLED", 5, {
-                    "transaction_type": "OWN_ACCOUNT_TRANSFER",
-                    "destination_phrase": own_name,
-                    "source": "deterministic parse of the customer's own words",
-                    "llm_proposal_overridden": True,
-                    "asked_instead": "AMOUNT",
-                    "note": "The model proposed a different shape, but the turn names an account "
-                            "the customer owns. Deterministic code set the transaction type and "
-                            "left the missing amount as the question actually being asked."})
-                proposal = proposal.model_copy(update={
-                    "recipient_phrase": own_name, "transaction_type": "OWN_ACCOUNT_TRANSFER",
-                    "source_account_phrase": source,
-                    "clarification_field": "AMOUNT", "clarification_question": None})
-            else:
-                emit("TRANSACTION_TYPE_SETTLED", 5, {
-                    "transaction_type": "OWN_ACCOUNT_TRANSFER",
-                    "destination_phrase": own_name,
-                    "source": "deterministic parse of the customer's own words",
-                    "llm_proposal_overridden": True,
+                emit(_event, 5, {
+                    "recipient_phrase": recovered.recipient_phrase,
+                    "transaction_type": recovered.transaction_type,
                     "amount_minor": amount,
-                    "note": "The model proposed a different shape, but the turn names an account "
-                            "the customer owns. Deterministic code set the transaction type; the "
-                            "destination still comes only from the trusted account record."})
-                proposal = proposal.model_copy(update={
-                    "status": "PROPOSAL_READY", "recipient_phrase": own_name,
-                    "amount_minor": amount, "transaction_type": "OWN_ACCOUNT_TRANSFER",
-                    "source_account_phrase": source,
-                    "clarification_field": None, "clarification_question": None})
+                    "source": "deterministic parse of the customer's own words",
+                    "llm_proposal_overridden": True,
+                    "note": "The model proposed no destination, or read the transaction as the "
+                            "wrong shape. Deterministic code supplied both from the same recogniser "
+                            "the reference policy uses; the destination is still bound at stage 6 "
+                            "from the trusted repository."})
+                patch.update({"amount_minor": amount, "status": "PROPOSAL_READY",
+                              "clarification_field": None, "clarification_question": None})
+            proposal = proposal.model_copy(update=patch)
+            # Stage 6 reads session.payee_phrase FIRST, so a phrase left over from an earlier turn
+            # would otherwise win over the destination just recovered. Same rule as the EDIT
+            # carry-forward above.
+            session.payee_phrase = recovered.recipient_phrase
 
     if proposal.status != "PROPOSAL_READY":
         # ---------- A name the customer used that we hold nobody for ----------
@@ -1621,7 +1718,7 @@ async def _run_turn(req: TurnRequest) -> TurnResponse:
             # customer hears, the INTERFACE_LINE below is rendered from the catalogue.
             "agent_question_proposal": proposal.clarification_question,
             "canonical_draft": "NOT_CREATED"})
-        _say_payment_clarification(req, session, proposal, say_line)
+        _say_payment_clarification(req, session, proposal, say_line, emit)
         return await finish()
 
     # ---------- Stage 6: deterministic payee and account resolution ----------
@@ -1866,7 +1963,13 @@ async def _run_turn(req: TurnRequest) -> TurnResponse:
                          lang, session.customer_id, emit, say_line,
                          nickname=session.nickname_used,
                          colloquial_phrase=colloquial_scale_phrase(req.text),
-                         hold=_identity_hold(session))
+                         hold=_identity_hold(session),
+                         # The account in this sentence came from the customer, or from us? The
+                         # draft was built either way, but the read-back must not state OUR
+                         # default as though the customer had chosen it. An empty
+                         # source_account_phrase is exactly "nobody named an account", so the
+                         # sentence offers it back as a choice instead of asserting it.
+                         source_assumed=not proposal.source_account_phrase)
     # Consumed. The nickname belongs to the payment that produced it; a later payment in the same
     # session must not inherit "I found Ah Girl as Mei Tan" because an earlier one was reached
     # through that name.
@@ -1904,7 +2007,8 @@ def _emit_draft_readback(draft: Draft, reference: Optional[str], schedule_dict: 
                          lang: str, customer_id: str, emit, say_line,
                          nickname: Optional[str] = None,
                          colloquial_phrase: Optional[str] = None,
-                         hold: bool = False) -> None:
+                         hold: bool = False,
+                         source_assumed: bool = False) -> None:
     """Emit the INITIATION_READBACK for a canonical draft.
 
     The read-back SHAPE follows the transaction type, a bill/card reads back the outstanding
@@ -1922,6 +2026,12 @@ def _emit_draft_readback(draft: Draft, reference: Optional[str], schedule_dict: 
     read-back appends a confirmation of the interpretation ("Please confirm that a 'a grand' means
     S$1,000.00."), the same "advise first" posture the demo takes for every other field. Standard
     scale words ("thousand") are never flagged.
+
+    `source_assumed` says the customer never named an account, so the one in this sentence is OUR
+    default and not their instruction. The read-back then hands it back as a choice ("Tell me if
+    you'd rather use another account"). This changes no flow - the draft is still built, the
+    review still walks the same three fields - it only stops Joy from stating an assumption as
+    though the customer had made it.
     """
     # IDENTITY HOLD. When Stage 1 could not verify the speaker the request is held, and Joy must
     # not read the payment back: doing so would present the amount and the payee to someone whose
@@ -1955,6 +2065,7 @@ def _emit_draft_readback(draft: Draft, reference: Optional[str], schedule_dict: 
         reference=reference,
         schedule=schedule_dict if schedule_dict else None,
         nickname=nickname_part,
+        source_assumed=source_assumed,
         colloquial=colloquial_text))
 
 

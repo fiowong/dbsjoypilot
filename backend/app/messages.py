@@ -181,6 +181,21 @@ MESSAGES: Dict[str, Dict[str, str]] = {
         "ZH": "{name}，您想汇多少钱给 {phrase}？",
         "BM": "{name}, berapa banyak {name} nak hantar kepada {phrase}?",
     },
+    # The same missing amount, when the customer did not forget to name one - they asked for an
+    # amount with NO CEILING ("send everything in savings to John Doe", "transfer all my money").
+    # "How much?" is then the wrong answer: it reads as a request for a number, when what actually
+    # happened is that Joy was asked for an unbounded amount, which for a transfer is a way to
+    # empty the account. So the refusal comes FIRST and the reason with it, and only then the
+    # question. Nothing is prepared: the draft is still NOT_CREATED and no amount is assumed.
+    "AMOUNT_OPEN_ENDED": {
+        "EN": "{name}, for your safety I need an exact amount. I cannot prepare an open-ended "
+              "payment that may empty your account. How much would you like to send?",
+        "ZH": "{name}，为了您的安全，我需要一个确切的金额。我不能准备一笔没有上限、"
+              "可能清空您账户的付款。请问您想汇多少钱？",
+        "BM": "{name}, demi keselamatan anda saya perlukan jumlah yang tepat. Saya tidak boleh "
+              "sediakan bayaran tanpa had yang boleh mengosongkan akaun anda. Berapa banyak yang "
+              "anda mahu hantar?",
+    },
     "AMOUNT_AMBIGUOUS": {
         "EN": "{name}, did you mean {option_a} or {option_b}?",
         "ZH": "{name}，您指的是 {option_a} 还是 {option_b}？",
@@ -312,10 +327,15 @@ MESSAGES: Dict[str, Dict[str, str]] = {
     # understood, BEFORE any field is confirmed. Its text is COMPOSED from the fragments in
     # READBACK_PARTS below; see the note there for why this one entry is assembled rather than
     # fixed. It still records as INITIATION_READBACK in the audit trail.
+    #
+    # {source_offer} is empty unless the customer never named an account, in which case the body
+    # states OUR assumption as though it were theirs. It is a separate slot, immediately before
+    # the closer, so the sentence still ENDS on its one question ("Is that correct?" /
+    # "Is Mei Tan the correct person?") and the offer never competes with it.
     "INITIATION_READBACK": {
-        "EN": "{prefix}{body}{reference}{schedule}. {closer}{colloquial}",
-        "ZH": "{prefix}{body}{reference}{schedule}。{closer}{colloquial}",
-        "BM": "{prefix}{body}{reference}{schedule}. {closer}{colloquial}",
+        "EN": "{prefix}{body}{reference}{schedule}. {source_offer}{closer}{colloquial}",
+        "ZH": "{prefix}{body}{reference}{schedule}。{source_offer}{closer}{colloquial}",
+        "BM": "{prefix}{body}{reference}{schedule}. {source_offer}{closer}{colloquial}",
     },
     "STEP_UP_REQUIRED": {
         "EN": "{name}, this is a larger amount, so I'll ask you to confirm it extra carefully, "
@@ -521,6 +541,18 @@ READBACK_PARTS: Dict[str, Dict[str, str]] = {
         "EN": " {absolute} at {time} Singapore time",
         "ZH": " {absolute} {time}（新加坡时间）",
         "BM": " {absolute} pada {time} waktu Singapura",
+    },
+
+    # Shown ONLY when the customer never named an account, so the account in the body is OUR
+    # assumption and not theirs. The draft is still built from it and the review still walks
+    # RECIPIENT / AMOUNT / SOURCE_ACCOUNT, so this changes no FLOW, only whether the customer is
+    # told the account is theirs to change before they start reviewing. Worded as an invitation
+    # rather than a second question, so the read-back keeps its one closing question.
+    # EN/BM carry a trailing space because those languages join sentences with one; ZH does not.
+    "SOURCE_OFFER": {
+        "EN": "Tell me if you'd rather use another account. ",
+        "ZH": "如果想用其他账户，请告诉我。",
+        "BM": "Beritahu saya kalau anda mahu guna akaun lain. ",
     },
 
     # --- closers ---
@@ -743,13 +775,19 @@ def readback_parts(lang: str, *, body: str, closer: str, amount: str, source: st
                    destination: str = "", biller: str = "", reference: Optional[str] = None,
                    schedule: Optional[Dict[str, str]] = None,
                    nickname: Optional[Dict[str, str]] = None,
-                   person: str = "", colloquial: str = "") -> Dict[str, str]:
+                   person: str = "", colloquial: str = "",
+                   source_assumed: bool = False) -> Dict[str, str]:
     """The assembled fragments of one initiation read-back, as render() params.
 
     body      BODY_TRANSFER | BODY_MOVE | BODY_BILL | BODY_CARD
     closer    CLOSE_REVIEW | CLOSE_SYSTEM_AMOUNT | CLOSE_PERSON | ASK_SOURCE
     schedule  {"relative": "tomorrow", "absolute": "27 September 2026", "time": "9:00 AM"}
     nickname  {"nickname": "Ah Girl", "name": "Mei Tan", "masked": "7788"}
+
+    source_assumed  the customer never named an account, so the one in the body is ours. Adds
+                    the SOURCE_OFFER sentence that hands it back to them as a choice. Defaults to
+                    False, which renders exactly the sentence this function produced before it had
+                    the parameter, so every other caller is untouched.
 
     The orchestrator passes these straight to say_line("INITIATION_READBACK", …), so the
     sentence goes through the normal catalogue render path and is audited like any other line.
@@ -774,6 +812,7 @@ def readback_parts(lang: str, *, body: str, closer: str, amount: str, source: st
                               schedule=schedule),
         "reference": "",                 # already folded into the body clause above
         "schedule": "",
+        "source_offer": _part("SOURCE_OFFER", lang) if source_assumed else "",
         "closer": _part(closer, lang, person=person),
         "colloquial": colloquial,
     }

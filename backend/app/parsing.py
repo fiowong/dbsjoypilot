@@ -1380,6 +1380,49 @@ def is_schedule_correction(text: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# An amount with no ceiling ("send everything in savings to John Doe")
+# ---------------------------------------------------------------------------
+# The customer asked to move an amount that is not a number: "everything", "all my money", "the
+# whole balance". parse_amount correctly reads nothing from those words, so the turn reaches the
+# ordinary "how much?" question - and that question is the wrong answer. It reads as a request for
+# a number, when what actually happened is that Joy was asked for an UNBOUNDED amount, and for a
+# transfer that is a way to empty the account.
+#
+# Every alternative below names a WHOLE, so a turn that does state a number is never caught
+# ("send all 50 dollars"): the predicate stands itself down as soon as parse_amount finds one.
+# Trilingual, like the other safeguards: the demo is spoken in EN, ZH and BM.
+_OPEN_ENDED_AMOUNT_RE = re.compile(
+    r"\b(everything|all of it|the lot|every cent|every dollar|as much as possible|"
+    r"max(imum)? out|empty (my|the|your) account|clear out (my|the|your) account|"
+    r"(whole|entire|full) (balance|savings|account)|"
+    r"all (my|the|of my) (money|savings|balance|funds|cash|salary|pay)|"
+    r"all my (money|savings|balance|funds|cash|salary|pay)|"
+    r"whatever('s| is) (left|in))\b"
+    r"|\b(semua(nya)?|habiskan|seluruh)\s+(duit|wang|simpanan|baki|harta)"
+    r"|全部|全都|所有|一切|清空|整个账户",
+    re.IGNORECASE)
+
+
+def open_ended_amount(text: str) -> bool:
+    """True when the turn asks to send an amount with no ceiling.
+
+    "Send everything in savings to John Doe", "transfer all my money to Mei", "habiskan semua
+    duit". The customer named no number because they did not mean a number, so the caller must not
+    treat this as an ordinary missing amount: the answer is not "how much?" but a refusal to
+    prepare an unbounded payment.
+
+    Read from the INSTRUCTION part of the turn (the same `instruction_text` every other amount
+    reader uses), so a side phrase cannot trip it - "explain everything, one at a time" is not an
+    amount. A turn that does state a number returns False whatever else it says, so the caller's
+    own amount check always wins.
+    """
+    instruction = instruction_text(text)
+    if parse_amount(instruction)[0] is not None:
+        return False
+    return _OPEN_ENDED_AMOUNT_RE.search(instruction) is not None
+
+
+# ---------------------------------------------------------------------------
 # Multiple independent instructions in one breath (IN-10)
 # Split a single turn such as
 #   "Pay StarHub S$86.40 from savings, send Ah Girl S$50, and move S$1,000 to joint"

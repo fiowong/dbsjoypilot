@@ -354,7 +354,7 @@ SC.B2 = () => [
       risk_flags:[]}},
   {t:'stage',n:8,s:'pass'},{t:'stage',n:9,s:'pass'},{t:'stage',n:10,s:'pass'},
   {t:'state',v:'CONFIRMATION_READY'},{t:'outcome',v:'ALLOW',c:'ok'},
-  {t:'iface',v:"You want to send S$20.00 from DBS Savings ending 1234 to John Doe ending 4521. I can prepare this payment for you to review. Is that correct?"},
+  {t:'iface',v:"You want to send S$20.00 from DBS Savings ending 1234 to John Doe ending 4521. Tell me if you'd rather use another account. I can prepare this payment for you to review. Is that correct?"},
   {t:'popup',d:150,cfg:{kicker:'BRANCH B · B2: DUPLICATE PAYEE',title:'The LLM never picked the payee',
     body:'The Payment Agent extracted the phrase <b>“John”</b>. Deterministic code found two matches and asked Auntie to choose. The <code>beneficiary_id</code> is bound from the repository, never generated.',
     fields:`<div class="fr"><span class="k">Chosen</span><span class="v">${PAYEES.john_doe.beneficiary_id}</span></div>
@@ -594,7 +594,7 @@ SC.E2 = () => {
     {t:'sys',v:'Deterministic comparator: PASS · Risk policy: PASS · Old field confirmations reused: NO · Next state: FRESH_CONFIRMATION_REQUIRED'},
     {t:'hit',b:'E',n:'E2'},
     {t:'state',v:'FRESH_CONFIRMATION_REQUIRED'},{t:'outcome',v:'EDIT_APPLIED',c:'brand'},
-    {t:'iface',v:"You want to send S$15.00 from DBS Savings ending 1234 to Mei Tan ending 7788. I can prepare this payment for you to review. Is that correct?"},
+    {t:'iface',v:"You want to send S$15.00 from DBS Savings ending 1234 to Mei Tan ending 7788. Tell me if you'd rather use another account. I can prepare this payment for you to review. Is that correct?"},
     {t:'review',lang:'EN',d:d2},
     ...executeChain('EN',d2),
     {t:'iface',v:T.EN.done('S$15.00','Mei Tan','txn_00'+draftSeq)},
