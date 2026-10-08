@@ -261,6 +261,26 @@ REGRESSIONS: Dict[str, dict] = {
               "turns": [{"text": ("from my savings account to my joint account, move a grand, "
                                   "then send one fifty to Ah Girl."), "asr_confidence": 0.96}],
               "confirm": None},
+    # The ANSWER to a decimal-ambiguity question, which nothing covered before: only the QUESTION
+    # was pinned (IN-AMT-AMB, no_draft:True). "one fifty" is two amounts in the words, and
+    # parse_amount reads a THIRD out of it (S$50), so the answer has to be captured, not re-derived.
+    "IN-AF-ANSWER": {"branch": "-",
+                     "title": "The answer completes a breath held for a decimal-ambiguous amount",
+                     "turns": [{"text": ("from my savings account to my joint account, move a grand, "
+                                         "then send one fifty to Ah Girl."), "asr_confidence": 0.96},
+                               {"text": "150", "asr_confidence": 0.97}],
+                     "confirm": None},
+    "IN-AMT-ANS": {"branch": "-",
+                   "title": "A decimal-ambiguity answer is honoured, not frozen",
+                   "turns": [{"text": "Send one fifty to Mei.", "asr_confidence": 0.96},
+                             {"text": "150", "asr_confidence": 0.97}],
+                   "confirm": None},
+    "IN-AMT-SCOPE": {"branch": "-",
+                     "title": "A settled amount is not reused for a later ambiguous instruction",
+                     "turns": [{"text": "Send one fifty to Mei.", "asr_confidence": 0.96},
+                               {"text": "150", "asr_confidence": 0.97},
+                               {"text": "Send one fifty to Alice.", "asr_confidence": 0.96}],
+                     "confirm": None},
     "IN-ZH": {"branch": "-", "title": "ZH two-payment breath resolves like the English one",
               "turns": [{"text": "从我的存储账户转1000新元到我的联名账户，然后转50新元给阿美。",
                          "asr_confidence": 0.96}], "confirm": None},

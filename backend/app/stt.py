@@ -55,6 +55,18 @@ WORD_INFO_ENGINES = {
     "16k_en", "8k_en", "8k_zh_large", "16k_en_large", "16k_ca", "16k_ja",
 }
 
+# ``hotword_list`` is a per-engine capability too, and it is checked BEFORE the parameter is sent
+# because the failure is not a dropped feature, it is a REJECTED HANDSHAKE. 16k_multi_lang - the
+# only engine that covers Malay - answers 4001 参数不合法 with "the hotword function does not
+# support [engine_model_type: 16k_multi_lang]", so the BM mic died and fell back to the browser
+# recogniser while English and Chinese (both 16k_zh_en) worked fine. An engine that cannot bias
+# toward payee names still CONNECTS without the bias; a misheard name is then caught by the
+# downstream "did you mean X?" recovery instead.
+HOTWORD_ENGINES = {
+    "16k_zh_en", "16k_zh", "8k_zh", "8k_zh_finance", "16k_zh-TW",
+    "16k_en", "8k_en", "8k_zh_large", "16k_en_large", "16k_ca", "16k_ja",
+}
+
 SAMPLE_RATE = 16000          # Tencent accepts 8k or 16k; 16k is what we capture
 VOICE_FORMAT_PCM = 1         # voice_format=1 -> raw PCM
 CHUNK_MS = 200               # doc recommends ~200ms of audio per frame, sent 1:1 realtime
@@ -193,8 +205,16 @@ class TencentRealtimeASR:
         # Bias the engine toward the customer's own payee names / nicknames (see build_hotword_list),
         # so a misheard name arrives correctly spelled. The value is percent-encoded in the URL by
         # _signed_url; the signature is computed over the raw value. Optional: absent -> no bias.
-        if self.hotwords:
-            params["hotword_list"] = self.hotwords
+        # Sent ONLY to engines that accept it (see HOTWORD_ENGINES): on 16k_multi_lang the parameter
+        # does not degrade gracefully, it rejects the handshake outright.
+        sent_hotwords = (self.hotwords if self.hotwords and self.engine in HOTWORD_ENGINES
+                         else None)
+        if sent_hotwords:
+            params["hotword_list"] = sent_hotwords
+        elif self.hotwords:
+            log.info("ASR engine %s does not support hotword_list; connecting without payee-name "
+                     "biasing (the 'did you mean?' recovery still covers a misheard name)",
+                     self.engine)
 
         url = _signed_url(Settings.ASR_APPID, Settings.ASR_SECRET_ID,
                           Settings.ASR_SECRET_KEY, params)
@@ -215,7 +235,7 @@ class TencentRealtimeASR:
         self._finished.clear()
         self._reader = asyncio.create_task(self._read_loop())
         log.info("ASR connected: engine=%s language=%s hotwords=%s",
-                 self.engine, self.language, self.hotwords)
+                 self.engine, self.language, sent_hotwords)
 
     async def send_audio(self, pcm: bytes) -> None:
         if self._ws is None:

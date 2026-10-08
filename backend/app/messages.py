@@ -186,6 +186,18 @@ MESSAGES: Dict[str, Dict[str, str]] = {
         "ZH": "{name}，您指的是 {option_a} 还是 {option_b}？",
         "BM": "{name}, maksudkan {option_a} atau {option_b}?",
     },
+    # The same question when it comes out of a MULTI-instruction breath. A bare "did you mean
+    # S$1.50 or S$150.00?" after "move a grand to joint, then send one fifty to Ah Girl" is
+    # unanswerable, the customer cannot tell which of the payments it is about, so this variant
+    # names the destination. Nothing is prepared until it is answered: a multi breath is not split
+    # into drafts while one of its amounts is still two amounts.
+    "AMOUNT_AMBIGUOUS_MULTI": {
+        "EN": "{name}, before I prepare these, for the payment to {destination}: did you mean "
+              "{option_a} or {option_b}?",
+        "ZH": "{name}，在准备之前，关于付给 {destination} 的那笔：您指的是 {option_a} 还是 {option_b}？",
+        "BM": "{name}, sebelum saya sediakan, untuk bayaran kepada {destination}: maksudkan "
+              "{option_a} atau {option_b}?",
+    },
 
     # ---------- Stage 5: a name Joy does not know yet ----------
     # "Send Ah Girl S$100": the customer has a name for their daughter and expects Joy to know it.

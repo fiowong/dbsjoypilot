@@ -219,6 +219,60 @@ def ambiguous_amount_pair(text: str, asr_confidence: float,
     return amount, amount * 1000
 
 
+def spoken_digit_ambiguity_pair(text: str) -> Optional[Tuple[int, int]]:
+    """(lower_minor, higher_minor) when a SPOKEN turn's amount is a bare number the words could
+    have produced two ways, or None.
+
+    A recogniser writes numbers as DIGITS, so the words are gone before the turn reaches us:
+    "one fifty" and "one hundred and fifty" both arrive as "150". The first is two amounts
+    (S$1.50 or S$150.00); the second is one. The transcript cannot tell them apart, so the amount
+    is materially ambiguous and is put to the customer rather than resolved to the larger reading.
+
+    Only the "X|YY" shape counts: a leading 1-12 and a trailing 10-99, so three digits in all.
+    "100" ("one hundred"), "1500" ("fifteen hundred") and a decimal ("1.50") are all unambiguous.
+
+    The caller gates this on the turn having come from a real recogniser. A TYPED "150" is exactly
+    what the customer meant and must never be questioned.
+    """
+    if re.search(r"\d\.\d", text):
+        return None
+    # Only a SINGLE standalone number is considered. A turn carrying several numbers (a date, a
+    # reference) is not this shape, and "150" is not the amount in "on the 28th, send 150".
+    digits = re.findall(r"\d+", text.replace(",", ""))
+    if len(digits) != 1:
+        return None
+    whole = int(digits[0])
+    if not (100 <= whole <= 999):
+        return None
+    units, sub = divmod(whole, 100)
+    if not (1 <= units <= 12 and 10 <= sub <= 99):
+        return None
+    low = units * 100 + sub            # S$1.50 when the digits are "150"
+    return low, whole * 100            # S$150.00
+
+
+def resolve_amount_choice(text: str, candidates: Optional[List[int]]) -> Optional[int]:
+    """The amount the customer PICKED when answering "S$1.50 or S$150.00?", or None.
+
+    Only a reading that was actually OFFERED is accepted. The question put exactly two amounts to
+    the customer, so an answer that matches neither is far more likely to be a mis-parse or an
+    unrelated number than a deliberate third value, and guessing at one is the one thing amount
+    handling must never do. An answer that is still ambiguous in the words ("one fifty" said
+    again) resolves to nothing and the question is simply asked again.
+
+    Fail-closed on purpose: a customer who wants a different amount can restate the whole
+    instruction, which re-derives it from scratch through the ordinary path.
+    """
+    if decimal_ambiguity_pair(text) is not None:
+        return None
+    amount, _ = parse_amount(instruction_text(text))
+    if amount is None:
+        return None
+    if candidates and amount in candidates:
+        return amount
+    return None
+
+
 def _number_word_matches(haystack_lowered: str, haystack_raw: str) -> List[Tuple[str, int]]:
     """Every number word present, with its value. Longest phrase wins on overlap."""
     found: List[Tuple[str, int]] = []

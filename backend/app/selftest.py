@@ -424,8 +424,31 @@ EXPECTED = {
                    "says": ["want to send", "Mei Tan"]},
     "IN-TYPO": {"state": "CONFIRMATION_READY", "outcome": "MULTI_INSTRUCTION", "ledger": "NOT_INVOKED",
                 "says": ["two instructions", "1,000.00"]},
-    "IN-AF": {"state": "CONFIRMATION_READY", "outcome": "MULTI_INSTRUCTION", "ledger": "NOT_INVOKED",
-              "says": ["two instructions", "1,000.00"]},
+    # IN-AF is the row that HID this defect. It asserted the split of an accounts-first breath and
+    # never asserted the figure, so "one fifty" being read as S$50.00 - a THIRD value, neither the
+    # S$1.50 nor the S$150.00 the words allow - sat behind a green test. It now stops at the
+    # ambiguity question, which is what it should have caught all along.
+    "IN-AF": {"state": "CLARIFICATION_REQUIRED", "outcome": "CLARIFY", "ledger": "NOT_INVOKED",
+              "keys": ["AMOUNT_AMBIGUOUS_MULTI"], "no_draft": True,
+              "says": ["1.50", "150.00"]},
+    # IN-AF-ANSWER: and once the customer answers, the held breath is re-split and the ambiguous
+    # instruction is built from the SETTLED amount rather than from its ambiguous words.
+    "IN-AF-ANSWER": {"state": "CONFIRMATION_READY", "outcome": "MULTI_INSTRUCTION",
+                     "ledger": "NOT_INVOKED", "events": ["AMOUNT_DISAMBIGUATED"],
+                     "says": ["two instructions", "1,000.00", "150.00"]},
+    # IN-AMT-ANS: the single-instruction twin. Answering "S$1.50 or S$150.00?" with "150" PREPARES
+    # the S$150 payment. Before this it FROZE ("the amount does not match what you said"), because
+    # validation re-parsed the ambiguous words, which read S$50.
+    "IN-AMT-ANS": {"state": "CONFIRMATION_READY", "outcome": "ALLOW", "ledger": "NOT_INVOKED",
+                   "events": ["AMOUNT_DISAMBIGUATED"],
+                   "draft": {"amount_minor": 15000, "payee_display": "Mei Tan"}},
+    # IN-AMT-SCOPE: the settled amount belongs to ONE payment. A later ambiguous instruction to a
+    # different person is a NEW question, not the old answer being reused. Pinned at turn 3, since
+    # the top-level checks span the whole run and turn 1 asks the same question.
+    "IN-AMT-SCOPE": {"state": "CLARIFICATION_REQUIRED", "outcome": "CLARIFY",
+                     "ledger": "NOT_INVOKED",
+                     "at_turn": [{"turn": 3, "keys": ["AMOUNT_AMBIGUOUS"], "open": "AMOUNT",
+                                  "says": ["1.50", "150.00"]}]},
     "IN-ZH": {"state": "CONFIRMATION_READY", "outcome": "MULTI_INSTRUCTION", "ledger": "NOT_INVOKED",
               "says": ["1,000.00", "Mei Tan"]},
     # The amended amount/source live on MULTI_ITEM_UPDATED: the open draft on to_public() is

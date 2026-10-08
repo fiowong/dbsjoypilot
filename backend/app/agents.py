@@ -721,14 +721,27 @@ class ValidationAgent:
         # not) speak an amount, and any amount they did say never overrides the latest balance.
         # An own-account move or saved-payee transfer carries an amount the customer stated, so
         # it must equal what the evidence shows.
+        #
+        # `amount_settled` is the customer's OWN answer to an open "S$1.50 or S$150.00?" question.
+        # That answer IS the evidence for the amount, and it is the only evidence there can be:
+        # the original words are ambiguous by construction, so re-parsing them yields a value
+        # nobody said (parse_amount reads S$50 out of "one fifty"). Checked against what they
+        # picked, and recorded as a VERIFIED_SESSION_FACT so the audit can tell a chosen amount
+        # from one read out of the transcript.
+        amount_source = "TRANSCRIPT"
+        settled = verified.get("amount_settled")
         if is_bill or is_card:
             amount_ok = True
+        elif settled is not None:
+            amount_ok = draft.amount_minor == settled
+            amount_source = "VERIFIED_SESSION_FACT"
         else:
             amount_ok = evidence_amount is not None and evidence_amount == draft.amount_minor
         checks.append(FieldCheck(
             field_name="AMOUNT", result="MATCH" if amount_ok else "MISMATCH",
-            evidence_source="TRANSCRIPT",
-            evidence_value=str(evidence_amount) if evidence_amount is not None else None,
+            evidence_source=amount_source,
+            evidence_value=(str(settled) if settled is not None
+                            else str(evidence_amount) if evidence_amount is not None else None),
             draft_value=str(draft.amount_minor)))
 
         # The currency is now CHECKED rather than asserted. It used to hardcode SGD on both

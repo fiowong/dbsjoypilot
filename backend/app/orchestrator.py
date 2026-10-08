@@ -13,7 +13,9 @@ from .data import POLICY
 from .repository import get_repository
 from .parsing import (parse_amount, parse_corrected_amount, last_committed_amount,
                        parse_payee_phrase, parse_reference, detect_language, instruction_text,
-                       ambiguous_amount_pair, parse_card_phrase, parse_own_account_phrase,
+                       ambiguous_amount_pair, decimal_ambiguity_pair, resolve_amount_choice,
+                       spoken_digit_ambiguity_pair,
+                       parse_card_phrase, parse_own_account_phrase,
                        parse_schedule, parse_currency, parse_biller_phrase,
                        parse_source_account_phrase, split_instructions, lookup_biller,
                        schedule_from_hint,
@@ -93,6 +95,87 @@ class TurnResponse(BaseModel):
     events: List[dict]
 
 
+def _names_payment_target(text: str, customer_id: str) -> bool:
+    """True when the turn names a payment target (a saved payee, a biller, a card or an own account).
+
+    Used to tell an ANSWER from a new instruction: "150" is an answer, "send 150 to Ah Girl" is an
+    instruction that happens to carry a number. Named apart from the local ``_names_destination``
+    inside ``_run_turn``, which would otherwise shadow it.
+    """
+    return bool(parse_payee_phrase(text, customer_id)
+                or parse_biller_phrase(text, customer_id)
+                or parse_card_phrase(text, customer_id)
+                or parse_own_account_phrase(text, customer_id))
+
+
+def _settled_amount_fact(session: Session, draft: Draft) -> dict:
+    """The customer's answer to an open "S$1.50 or S$150.00?" question, as a verified session fact.
+
+    Spread into the ``verified`` dict handed to the Validation Agent. Empty when the customer has
+    not answered one, and empty for a draft that is not the payment the question was about, so
+    every other payment validates exactly as it did before.
+    """
+    if session.settled_amount_minor is None:
+        return {}
+    if (session.pending_amount_payee
+            and draft.payee_display.lower() != session.pending_amount_payee.lower()):
+        return {}
+    return {"amount_settled": session.settled_amount_minor}
+
+
+# Which asr_confidence_source values mean "a real recogniser produced this text". A recogniser
+# writes numbers as DIGITS, so a spoken amount has to be read differently from a typed one.
+_SPOKEN_ASR_SOURCES = {"engine_reported", "engine_stability", "browser_recognition"}
+
+
+def _settled_for(session: Session, payee: Optional[str]) -> bool:
+    """True when the customer has already answered an amount question for THIS payment.
+
+    Scoped by payee, so answering the question for one payment never silences it for a different
+    one. A turn that names no payment target at all is the ANSWER turn itself: the amount is
+    settled, and asking again would loop.
+    """
+    if session.settled_amount_minor is None:
+        return False
+    if payee is None or not session.pending_amount_payee:
+        return True
+    return payee.lower() == session.pending_amount_payee.lower()
+
+
+def _spoken_amount_ambiguity(text: str, req: "TurnRequest", session: Session,
+                             payee: Optional[str] = None) -> Optional[tuple]:
+    """The two readings of a materially ambiguous amount in this turn, or None.
+
+    An amount is ambiguous in two different ways, and both end in the same question:
+      * the WORDS are ambiguous ("one fifty"), which is material at any audio confidence; and
+      * the turn came from a RECOGNISER and its amount is a bare "X|YY" number, because the
+        recogniser writes numbers as digits - "one fifty" and "one hundred and fifty" both arrive
+        as "150", and the first of those is two amounts. A TYPED "150" is not ambiguous: it is
+        exactly what the customer meant.
+    """
+    if _settled_for(session, payee):
+        return None
+    ambiguous = ambiguous_amount_pair(text, req.asr_confidence, session.amount_disambiguated)
+    if ambiguous is not None:
+        return ambiguous
+    if req.asr_confidence_source in _SPOKEN_ASR_SOURCES:
+        return spoken_digit_ambiguity_pair(text)
+    return None
+
+
+def _turn_states_its_own_amount(text: str, customer_id: str) -> bool:
+    """True when the turn's number IS the amount the customer is authorising.
+
+    A bill or a credit-card payment takes its amount from the biller's / card's own record
+    (PRODUCT_RULE), so a number spoken alongside it is not the payment amount and must not be
+    questioned as one. Only a transfer states its own amount.
+    """
+    if parse_biller_phrase(text, customer_id) or parse_card_phrase(text, customer_id):
+        return False
+    return bool(parse_payee_phrase(text, customer_id)
+                or parse_own_account_phrase(text, customer_id))
+
+
 def _say_payment_clarification(req: "TurnRequest", session: Session, proposal: PaymentProposal,
                                say_line) -> None:
     """Render the Stage-5 clarification question from the field the Payment Agent flagged.
@@ -101,11 +184,17 @@ def _say_payment_clarification(req: "TurnRequest", session: Session, proposal: P
     payload but never reaches the customer. The deterministic layer picks the catalogue key from
     ``clarification_field``, and for an ambiguous amount it recomputes the two readings with the
     same predicate the agent used, so the question cannot contradict the reason it was asked.
+
+    The two readings are also STORED on the session. They are what the customer's answer is
+    matched against next turn, so a reading can only ever be one that was actually offered.
     """
     if proposal.clarification_field == "AMOUNT":
-        ambiguous = ambiguous_amount_pair(req.text, req.asr_confidence,
-                                          session.amount_disambiguated)
+        payee = display_phrase(proposal.recipient_phrase) or None
+        ambiguous = _spoken_amount_ambiguity(req.text, req, session, payee)
         if ambiguous is not None:
+            session.pending_amount_choices = list(ambiguous)
+            session.pending_amount_text = None      # a single instruction re-derives from evidence
+            session.pending_amount_payee = payee
             option_a, option_b = money(ambiguous[0]), money(ambiguous[1])
             say_line("AMOUNT_AMBIGUOUS", 5, option_a=option_a, option_b=option_b)
             return
@@ -999,6 +1088,62 @@ async def _run_turn(req: TurnRequest) -> TurnResponse:
             "note": "A customer who asks for scam help is never charged a fee for asking."})
         say_line("SAFETY_HELP", 4)
         return await finish()
+
+    # ---------- Answering an open "S$1.50 or S$150.00?" question ----------
+    # An amount that is ambiguous in the WORDS ("one fifty") cannot be recovered from them: the
+    # reading the customer picked is not in the sentence, and parse_amount reads a THIRD value out
+    # of it (S$50), neither of the two readings they were offered. So the choice is captured HERE,
+    # deterministically and against the readings that were actually offered, and handed to
+    # validation as a verified session fact. The alternative, re-deriving an amount from the same
+    # ambiguous words, is what used to reject a correct answer with "the amount does not match what
+    # you said" on the very payment the customer had just clarified.
+    if session.pending_amount_choices:
+        offered = list(session.pending_amount_choices)
+        chosen = resolve_amount_choice(req.text, offered)
+        if chosen is None and not _names_payment_target(req.text, session.customer_id):
+            # Still two amounts in the words, or no amount at all. Ask again rather than guess a
+            # reading: a guessed reading is a silently changed amount.
+            session.state, session.outcome = SessionState.CLARIFICATION_REQUIRED, "CLARIFY"
+            session.open_clarification_field = "AMOUNT"
+            session.note_clarification("AMOUNT_AMBIGUOUS")
+            emit("CLARIFICATION_REPEATED", 5, {
+                "clarification_key": "AMOUNT_AMBIGUOUS",
+                "offered": [money(v) for v in offered],
+                "canonical_draft": "NOT_CREATED",
+                "note": "The answer was neither of the two readings offered, so the question is "
+                        "asked again. No reading is guessed at."})
+            say_line("AMOUNT_AMBIGUOUS", 5, option_a=money(offered[0]), option_b=money(offered[1]))
+            return await finish()
+        if chosen is None:
+            # The customer named a target and an amount that is neither reading: a new instruction
+            # supersedes the question. Cleared so it can never be answered by a later stray turn.
+            session.pending_amount_choices = None
+            session.pending_amount_text = None
+            emit("AMOUNT_QUESTION_SUPERSEDED", 5, {
+                "offered": [money(v) for v in offered],
+                "note": "A fresh instruction naming its own target and amount supersedes the open "
+                        "ambiguity question; the old readings are discarded."})
+        else:
+            session.settled_amount_minor = chosen
+            session.amount_disambiguated = True
+            session.pending_amount_choices = None
+            session.open_clarification_field = None
+            emit("AMOUNT_DISAMBIGUATED", 5, {
+                "chosen_amount_minor": chosen,
+                "offered": [money(v) for v in offered],
+                "source": "the customer's own answer to the ambiguity question",
+                "note": "The amount is now a VERIFIED SESSION FACT. Validation checks the draft "
+                        "against it, and the ambiguous words are never re-parsed for a reading."})
+            breath = session.pending_amount_text
+            session.pending_amount_text = None
+            if breath:
+                # A multi-instruction breath was held back because one of its amounts was two
+                # amounts. It is re-split now, and the instruction that was ambiguous is built
+                # from the settled amount instead of from its ambiguous words.
+                resumed = split_instructions(breath, session.customer_id)
+                if len(resumed) >= 2:
+                    return await run_multi_turn(req, session, lang, resumed, emit, say_line, finish)
+
     # Deterministic safeguard (restatement): the live classifier has nothing to work with when the
     # customer merely RESTATES a value that is already on the approval card - "Aiyoh, lima puluh
     # saja lah." ("just fifty") arrives with the S$50 draft already prepared - so it returns a
@@ -1138,6 +1283,37 @@ async def _run_turn(req: TurnRequest) -> TurnResponse:
         return await run_multi_merge(req, session, lang, emit, say_line, finish)
     if len(instructions) >= 2:
         return await run_multi_turn(req, session, lang, instructions, emit, say_line, finish)
+
+    # ---------- Stage 5 pre-check: an amount the RECOGNISER made ambiguous ----------
+    # A recogniser writes numbers as DIGITS, so "one fifty" reaches us as "150" - and so does "one
+    # hundred and fifty". The first is two amounts (S$1.50 or S$150.00), the second is one, and the
+    # transcript cannot tell them apart. The amount is therefore put to the customer instead of
+    # being resolved to the larger reading. Deterministic and BEFORE the agent, so it fires whatever
+    # the model would have proposed. A TYPED "150" is untouched: that is what the customer meant.
+    # Only the digit form is handled here; an amount ambiguous in its WORDS is still raised by the
+    # Payment Agent, so that path keeps its existing event order.
+    _spoken_payee = _instruction_destination(req.text, session.customer_id)
+    _spoken_ambiguous = (spoken_digit_ambiguity_pair(req.text)
+                         if req.asr_confidence_source in _SPOKEN_ASR_SOURCES else None)
+    if (_spoken_ambiguous is not None
+            and not _settled_for(session, _spoken_payee)
+            and _turn_states_its_own_amount(req.text, session.customer_id)):
+        session.pending_amount_choices = list(_spoken_ambiguous)
+        session.pending_amount_text = None
+        session.pending_amount_payee = _spoken_payee
+        session.state, session.outcome = SessionState.CLARIFICATION_REQUIRED, "CLARIFY"
+        session.open_clarification_field = "AMOUNT"
+        session.note_clarification("AMOUNT_AMBIGUOUS")
+        emit("CLARIFICATION_OPENED", 5, {
+            "clarification_field": "AMOUNT",
+            "clarification_key": "AMOUNT_AMBIGUOUS",
+            "offered": [money(_spoken_ambiguous[0]), money(_spoken_ambiguous[1])],
+            "cause": "the recogniser wrote the amount as digits, and the words behind them could "
+                     "have been either reading",
+            "canonical_draft": "NOT_CREATED"})
+        say_line("AMOUNT_AMBIGUOUS", 5,
+                 option_a=money(_spoken_ambiguous[0]), option_b=money(_spoken_ambiguous[1]))
+        return await finish()
 
     # ---------- Stage 5: Payment Agent ----------
     # Reached only by a single-payment turn. Everything above returned early, so the model is
@@ -1610,6 +1786,9 @@ async def _run_turn(req: TurnRequest) -> TurnResponse:
         # verified fact rather than folded into the transcript, so the audit stays honest about
         # where the name came from.
         verified["recipient_confirmed"] = True
+    # The customer's own answer to an open "S$1.50 or S$150.00?" question, when this draft is the
+    # payment that question was about. Empty for every other payment.
+    verified.update(_settled_amount_fact(session, draft))
     validation, engine = await ValidationAgent.run(draft, session.evidence, verified,
                                                    session.customer_id)
     session.validation = validation
@@ -1794,10 +1973,28 @@ def _proposal_from_existing_draft(draft: Draft, lang: str) -> PaymentProposal:
         transaction_type=draft.transaction_type)
 
 
-def _instruction_proposal(text: str, customer_id: str) -> Optional[PaymentProposal]:
+def _instruction_proposal(text: str, customer_id: str,
+                          settled_amount_minor: Optional[int] = None,
+                          settled_payee: Optional[str] = None) -> Optional[PaymentProposal]:
     """A PaymentProposal for ONE instruction, using the SAME deterministic detection order as the
     single-instruction Payment Agent mock (bill → card → own-account → saved payee). Returns None
-    when the piece names no supported target."""
+    when the piece names no supported target.
+
+    ``settled_amount_minor`` is the amount the customer chose when answering an open
+    "S$1.50 or S$150.00?" question. It is authoritative for an instruction whose own words are
+    ambiguous, because those words cannot be parsed into the reading they picked (parse_amount
+    reads a third value, S$50, out of "one fifty"). It applies only to ``settled_payee``, the
+    payment the question was actually about.
+    """
+    def _amount_of(piece: str, recipient: Optional[str]) -> Optional[int]:
+        if (settled_amount_minor is not None
+                and recipient is not None and settled_payee is not None
+                and recipient.lower() == settled_payee.lower()
+                and decimal_ambiguity_pair(piece) is not None):
+            return settled_amount_minor
+        amount, _ = parse_amount(instruction_text(piece))
+        return amount
+
     biller_name = parse_biller_phrase(text, customer_id)
     if biller_name:
         biller = lookup_biller(customer_id, biller_name)
@@ -1820,7 +2017,7 @@ def _instruction_proposal(text: str, customer_id: str) -> Optional[PaymentPropos
             transaction_type="CREDIT_CARD_PAYMENT")
     own_name = parse_own_account_phrase(text, customer_id)
     if own_name:
-        amount, _ = parse_amount(instruction_text(text))
+        amount = _amount_of(text, own_name)
         return PaymentProposal(
             status="PROPOSAL_READY", detected_language=detect_language(text),
             recipient_phrase=own_name, amount_minor=amount,
@@ -1829,13 +2026,27 @@ def _instruction_proposal(text: str, customer_id: str) -> Optional[PaymentPropos
             transaction_type="OWN_ACCOUNT_TRANSFER")
     payee_phrase = parse_payee_phrase(text, customer_id)
     if payee_phrase:
-        amount, _ = parse_amount(instruction_text(text))
+        amount = _amount_of(text, payee_phrase)
         return PaymentProposal(
             status="PROPOSAL_READY", detected_language=detect_language(text),
             recipient_phrase=payee_phrase, amount_minor=amount,
             currency=parse_currency(text),
             source_account_phrase=parse_source_account_phrase(text))
     return None
+
+
+def _instruction_destination(text: str, customer_id: str) -> Optional[str]:
+    """The display name of the payment target ONE instruction names, or None.
+
+    Only used to make the multi-instruction ambiguity question answerable ("for the payment to
+    Mei Tan") instead of a bare "did you mean S$1.50 or S$150.00?" floating under a sentence that
+    named two payments. It resolves nothing on its own; the destination still comes from the
+    trusted saved-payee record when the payment is actually built.
+    """
+    proposal = _instruction_proposal(text, customer_id)
+    if proposal is None or not proposal.recipient_phrase:
+        return None
+    return display_phrase(proposal.recipient_phrase)
 
 
 def _multi_clause(lang: str, draft: Draft, customer_id: str, *,
@@ -1905,8 +2116,44 @@ async def run_multi_turn(req: TurnRequest, session, lang: str, instructions: Lis
     # above it sit on screen together and the customer cannot tell which to answer first.
     open_questions: List[str] = []
 
+    # An amount that is ambiguous in the WORDS ("one fifty" = S$1.50 or S$150.00) stops the split
+    # BEFORE any draft is built. A draft needs an amount, and the ambiguous words cannot supply a
+    # trustworthy one, parse_amount reads a THIRD value out of them (S$50), neither reading. So the
+    # whole breath is held and the question asked, and it is re-split once the customer answers.
+    # Previously this path queued "one fifty" as S$50 with no question at all, which is how a green
+    # selftest hid a silently changed amount (the IN-AF row never asserted the figure).
     for text in instructions:
-        proposal = _instruction_proposal(text, session.customer_id)
+        destination = _instruction_destination(text, session.customer_id)
+        # _spoken_amount_ambiguity covers BOTH kinds of ambiguity and the "already settled for
+        # this payee" case, so a fresh ambiguous instruction to somebody else still asks.
+        ambiguous = _spoken_amount_ambiguity(text, req, session, destination)
+        if ambiguous is None:
+            continue
+        session.pending_amount_choices = list(ambiguous)
+        session.pending_amount_text = req.text
+        session.pending_amount_payee = destination
+        session.state, session.outcome = SessionState.CLARIFICATION_REQUIRED, "CLARIFY"
+        session.open_clarification_field = "AMOUNT"
+        session.note_clarification("AMOUNT_AMBIGUOUS")
+        emit("CLARIFICATION_OPENED", 5, {
+            "clarification_field": "AMOUNT",
+            "clarification_key": "AMOUNT_AMBIGUOUS",
+            "offered": [money(ambiguous[0]), money(ambiguous[1])],
+            "destination": destination,
+            "instructions_held": len(instructions),
+            "canonical_draft": "NOT_CREATED",
+            "note": "A multi-instruction breath is not split into drafts while one of its "
+                    "amounts is still two amounts. Nothing is queued, so nothing can be "
+                    "confirmed at a value the customer never chose."})
+        say_line("AMOUNT_AMBIGUOUS_MULTI", 5,
+                 option_a=money(ambiguous[0]), option_b=money(ambiguous[1]),
+                 destination=destination or "")
+        return await finish()
+
+    for text in instructions:
+        proposal = _instruction_proposal(text, session.customer_id,
+                                         session.settled_amount_minor,
+                                         session.pending_amount_payee)
         if proposal is None or proposal.amount_minor is None:
             continue
         resolution = resolve_payee_and_account(session.customer_id, proposal,
@@ -1943,7 +2190,8 @@ async def run_multi_turn(req: TurnRequest, session, lang: str, instructions: Lis
         # MISMATCH, and froze the payment.
         validation = ValidationAgent.mock(draft, [text], {
             "account_masked": draft.account_masked, "payee_masked": draft.payee_masked,
-            "payee_display": draft.payee_display, "transaction_type": draft.transaction_type},
+            "payee_display": draft.payee_display, "transaction_type": draft.transaction_type,
+            **_settled_amount_fact(session, draft)},
             session.customer_id)
         if validation.status != "PASS":
             continue
@@ -2123,7 +2371,8 @@ def _ensure_validation(session) -> None:
     session.validation = ValidationAgent.mock(
         draft, list(session.evidence),
         {"account_masked": draft.account_masked, "payee_masked": draft.payee_masked,
-         "payee_display": draft.payee_display, "transaction_type": draft.transaction_type},
+         "payee_display": draft.payee_display, "transaction_type": draft.transaction_type,
+         **_settled_amount_fact(session, draft)},
         session.customer_id)
 
 
@@ -2151,7 +2400,9 @@ async def run_multi_merge(req: TurnRequest, session, lang: str,
     updated, appended = 0, 0
     changed = None
     for text in new_instrs:
-        proposal = _instruction_proposal(text, session.customer_id)
+        proposal = _instruction_proposal(text, session.customer_id,
+                                         session.settled_amount_minor,
+                                         session.pending_amount_payee)
         if proposal is None:
             continue
         resolution = resolve_payee_and_account(session.customer_id, proposal,
@@ -2189,7 +2440,8 @@ async def run_multi_merge(req: TurnRequest, session, lang: str,
                 "account_masked": match.account_masked,
                 "payee_masked": match.payee_masked,
                 "payee_display": match.payee_display,
-                "transaction_type": match.transaction_type}, session.customer_id)
+                "transaction_type": match.transaction_type,
+                **_settled_amount_fact(session, match)}, session.customer_id)
             session.pending_validations[idx] = v
             if match is session.draft:
                 session.validation = v
@@ -2226,7 +2478,8 @@ async def run_multi_merge(req: TurnRequest, session, lang: str,
                 "account_masked": new_draft.account_masked,
                 "payee_masked": new_draft.payee_masked,
                 "payee_display": new_draft.payee_display,
-                "transaction_type": new_draft.transaction_type}, session.customer_id)
+                "transaction_type": new_draft.transaction_type,
+                **_settled_amount_fact(session, new_draft)}, session.customer_id)
             if v.status != "PASS":
                 continue
             session.pending_drafts.append(new_draft)

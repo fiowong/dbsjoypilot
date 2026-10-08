@@ -78,6 +78,25 @@ class Session:
         # can say "I found Ah Girl as Mei Tan", and carried in the audit so the claim is checkable.
         self.nickname_used: Optional[str] = None
         self.amount_disambiguated: bool = False
+        # The two readings of a materially ambiguous amount ("one fifty" = S$1.50 or S$150.00),
+        # held only while the question is open. They are what the ANSWER is matched against, so a
+        # reading can only ever be the one the customer was actually offered.
+        self.pending_amount_choices: Optional[List[int]] = None
+        # The instruction (or the whole multi-instruction breath) the open amount question belongs
+        # to. A multi breath cannot be split into drafts until its amount is settled, because a
+        # draft needs an amount and the ambiguous words cannot supply a trustworthy one, so the
+        # breath is held here and re-split once the customer has answered.
+        self.pending_amount_text: Optional[str] = None
+        # The destination the open question is about ("Mei Tan"). It SCOPES the settled amount: the
+        # choice belongs to that payment, and must never be read as the amount of a later,
+        # unrelated instruction that happens to be ambiguous too. Kept after the question is
+        # answered, because it is what the settled amount is keyed on.
+        self.pending_amount_payee: Optional[str] = None
+        # The amount the customer CHOSE when they answered that question. A VERIFIED SESSION FACT:
+        # "one fifty" cannot be re-parsed into the reading they picked (parse_amount reads a THIRD
+        # value out of it, S$50), so validation is TOLD the amount rather than left to re-derive an
+        # amount nobody said. Without this the customer's own answer was rejected as a mismatch.
+        self.settled_amount_minor: Optional[int] = None
         self.review_restarted: bool = False
         self.frozen: bool = False
         self.cancelled: bool = False
