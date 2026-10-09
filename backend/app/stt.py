@@ -28,31 +28,57 @@ from dataclasses import dataclass
 from typing import Awaitable, Callable, Optional
 from urllib.parse import quote
 
-from .config import Settings
+from .config import Settings, active_proxy
 
 log = logging.getLogger("auntiejoy.stt")
 
 HOST = "asr.cloud.tencent.com"
 
-# Tencent has no single engine that covers English + Chinese + Malay, so two are needed.
+# Tencent has no single engine that covers English + Chinese + Malay, so two are needed, and
+# the Auto mic pill therefore has to sacrifice one language.
 #   16k_zh_en     -> Chinese + English (+31 dialects), auto-detects between them
 #   16k_multi_lang-> English, Malay and 13 others, auto-detects at sentence level; no Chinese
+#
+# Auto resolves to 16k_zh_en, deliberately. The rule it follows is that Auto must never be
+# WORSE than the pill it replaces: the default pill is EN, which already opens 16k_zh_en, so
+# Auto as English + Chinese is a strict superset of the default and can only add recognition.
+# Auto as 16k_multi_lang would DROP Chinese for anyone who selected it -- giving up the larger
+# Singapore language group, and giving it up silently, because the wrong engine still returns a
+# confident transcript rather than an error. Malay keeps its own explicit pill and its own
+# engine. (Verified against the live API: both engines authenticate and transcribe; the choice
+# is about coverage, not about either engine being broken.)
+#
+# "multilingual" is kept as an alias of "auto" so a client still sending the old value keeps
+# working rather than silently falling through to the EN default.
 ENGINE_BY_LANGUAGE = {
     "en": "16k_zh_en",
     "zh": "16k_zh_en",
     "mixed": "16k_zh_en",
     "bm": "16k_multi_lang",
-    # "multilingual" / "auto" = the Auto mic option: one engine that covers English + Malay
-    # (and 13 others) so the customer never has to pick a language before speaking a mixed turn.
-    "multilingual": "16k_multi_lang",
-    "auto": "16k_multi_lang",
+    "auto": "16k_zh_en",
+    "multilingual": "16k_zh_en",
 }
 
 # ``word_info`` (which is what makes per-word stable_flag available) is only supported on
 # some engines. Without it there is no stability signal at all, so confidence is unknown.
+#
+# 16k_multi_lang IS in this set, and that matters because it is the engine Malay runs on:
+# leaving it out meant BM was the one demo language whose confidence was always "unreported",
+# so the frontend sent its 0.93 stand-in and the UI read "clarity not reported" for every
+# Malay turn. Verified live against the API (three Malay utterances, all returning a populated
+# word_list and stable_flag data). The value is threshold-neutral -- 0.93 stand-in and 1.0
+# measured both sit above the 0.60 audio-risk floor and the 0.85 ambiguity threshold -- so this
+# swaps a placeholder for a real measurement without changing any decision.
+#
+# Caveat worth keeping in view: stable_flag measures whether the ENGINE has stopped revising a
+# word, not whether the word is RIGHT. Malay is read back by the English voice (no Malay voice
+# exists in the international catalogue), and the engine can be confidently wrong about it --
+# measured 1.0 on a badly mangled transcription. So this is a genuine engine-produced signal,
+# honestly labelled "engine_stability", and never a claim of transcription accuracy.
 WORD_INFO_ENGINES = {
-    "16k_zh_en", "16k_zh", "8k_zh", "8k_zh_finance", "16k_zh-TW", "16k_zh_en",
+    "16k_zh_en", "16k_zh", "8k_zh", "8k_zh_finance", "16k_zh-TW",
     "16k_en", "8k_en", "8k_zh_large", "16k_en_large", "16k_ca", "16k_ja",
+    "16k_multi_lang",
 }
 
 # ``hotword_list`` is a per-engine capability too, and it is checked BEFORE the parameter is sent
@@ -218,9 +244,20 @@ class TencentRealtimeASR:
 
         url = _signed_url(Settings.ASR_APPID, Settings.ASR_SECRET_ID,
                           Settings.ASR_SECRET_KEY, params)
+        # One line so a proxied egress is visible instead of surfacing as an unexplained
+        # handshake failure. Decides nothing; the client is pinned to USE_ENV_PROXY below.
+        proxy = active_proxy()
+        if proxy:
+            log.info("ASR connecting via proxy %s", proxy)
         try:
+            # proxy=None means "connect directly". websockets defaults to proxy=True, which
+            # means "use the proxy in HTTP_PROXY/HTTPS_PROXY" -- the same trap httpx has, and
+            # it fails as a generic handshake error that reads like bad credentials. Opt in
+            # with AUNTIEJOY_USE_ENV_PROXY=1 on a network that genuinely needs a proxy.
             self._ws = await asyncio.wait_for(
-                websockets.connect(url, max_size=None, ping_interval=None), timeout=10
+                websockets.connect(url, max_size=None, ping_interval=None,
+                                   proxy=(True if Settings.USE_ENV_PROXY else None)),
+                timeout=10
             )
             raw = await asyncio.wait_for(self._ws.recv(), timeout=10)
         except asyncio.TimeoutError as exc:

@@ -1,8 +1,9 @@
 /* 5.5/6 tts.js, the mouth. Loads AFTER live.js (needs API_BASE + guessLang).
  *
- * Speaks the backend's INTERFACE_LINE text by asking our own /tts endpoint, which proxies
- * Cartesia and returns raw mono 16-bit PCM at 24 kHz as it's synthesised. Audio plays
- * through a chunked WebAudio queue so the first syllable reaches the customer within a
+ * Speaks the backend's INTERFACE_LINE text by asking our own /tts endpoint, which relays
+ * Tencent Cloud TextToVoice and returns raw mono 16-bit PCM. The sample rate is whatever the
+ * backend reports in the X-Audio-Sample-Rate header (16 kHz today), never a constant here.
+ * Audio plays through a chunked WebAudio queue so the first syllable reaches the customer within a
  * fraction of a second of the bubble appearing, instead of after the whole sentence has
  * been generated. Any new user input (typing a message or pressing the mic) triggers
  * barge-in: stopSpeaking() cuts Auntie off mid-sentence so she never talks over the customer.
@@ -25,11 +26,12 @@
  *      70 audible clicks. Instead each buffer is handed to Web Audio with an exact start
  *      time computed up front, so consecutive buffers butt together sample-accurately.
  */
-// Cartesia sonic-latest always emits mono 16-bit signed little-endian PCM at 24 kHz,
-// matching the format we request in tts.py. The browser needs to know this to build
-// AudioBuffers without first asking the server, keeping it as a constant makes it
-// impossible for the two sides to drift apart unnoticed.
-const TTS_SAMPLE_RATE = 24000;
+// Fallback sample rate, used ONLY if the /tts response omits X-Audio-Sample-Rate. The
+// backend asks Tencent for Codec=pcm and tells us the rate in that header, and we build
+// every AudioBuffer from the header rather than from this constant, so the two sides
+// cannot drift apart unnoticed. (They did once: this file said 24 kHz while the provider
+// had moved to 16 kHz, which shifts the pitch and the timing of every sentence.)
+const TTS_SAMPLE_RATE_FALLBACK = 16000;
 
 // How much audio to hold back before starting playback. Big enough to ride out a slow
 // chunk without starving the speaker mid-word; small enough that the first syllable is
@@ -110,15 +112,50 @@ async function _speakStream(text, lang){
   }
   _ttsAbort = null;
   if(!res.ok || !res.body){
-    // 503 = not configured on the server, no point retrying every line.
+    // 503 = not configured on the server, no point retrying every line: disable the mouth.
+    // 502 = the provider rejected THIS line (bad voice, text it cannot read). That is not
+    //       permanent, so the mouth stays on and the next line is still attempted.
     if(res && res.status === 503) _ttsEnabled = false;
+    else if(res && res.status === 502) console.warn('[joy] tts: synthesis failed for this line (502)');
     return;
+  }
+
+  // WHICH ENGINE ACTUALLY SPOKE THIS LINE, read straight off the response. More accurate
+  // than polling /health, which would describe the state a moment later, and it costs
+  // nothing. The backend reports the engine that produced the audio, the engine that was
+  // selected, and whether those two differ.
+  const spokeWith = res.headers.get('X-TTS-Provider');
+  const selected = res.headers.get('X-TTS-Selected');
+  const fellBack = res.headers.get('X-TTS-Fallback') === '1';
+  if(spokeWith && (spokeWith !== _ttsProvider || fellBack !== _ttsFallbackActive)){
+    _ttsProvider = spokeWith;
+    _ttsFallbackActive = fellBack;
+    // A fallback always starts from the SELECTED engine, so that is the one that failed.
+    // Named from the server's own field rather than assumed, so a future provider chain
+    // does not silently produce a wrong attribution.
+    if(selected) _ttsSelected = selected;
+    _ttsFallbackFrom = fellBack ? (selected || _ttsSelected) : '';
+    _renderTtsProvider();
+    // The reason text lives in /health (UTF-8 JSON), not in a header, so fetch it only when
+    // a fallback actually happened.
+    if(fellBack) refreshTtsProviderState();
   }
 
   const ctx = _ttsAudioCtx();
   const reader = res.body.getReader();
   const chain = { sources: new Set(), stopRequested: false };
   _ttsChain = chain;
+
+  // The backend declares the PCM format on every response. Trust the header over the
+  // compiled-in fallback: getting this wrong does not fail loudly, it plays every sentence
+  // at the wrong pitch and the wrong speed, which is far harder to notice than an error.
+  const sampleRate = parseInt(res.headers.get('X-Audio-Sample-Rate'), 10) || TTS_SAMPLE_RATE_FALLBACK;
+  // Mono only: the backend requests Codec=pcm from Tencent, which is always 1 channel.
+  // If a future provider ever sends stereo, this is the line that has to change.
+  const channels = parseInt(res.headers.get('X-Audio-Channels'), 10) || 1;
+  if(channels !== 1){
+    console.warn('[joy] tts: unexpected channel count', channels, '- playback may be wrong');
+  }
 
   // ---- scheduling state (all on the audio clock, in seconds) ----
   let pending = [];       // decoded AudioBuffers waiting to be handed to Web Audio
@@ -187,7 +224,7 @@ async function _speakStream(text, lang){
       const float32 = new Float32Array(n);
       for(let i=0; i<n; i++) float32[i] = view.getInt16(i * 2, true) / 32768;
 
-      const audioBuf = ctx.createBuffer(1, n, TTS_SAMPLE_RATE);
+      const audioBuf = ctx.createBuffer(1, n, sampleRate);
       audioBuf.copyToChannel(float32, 0);
       pending.push(audioBuf);
       bufferedSec += audioBuf.duration;
@@ -231,4 +268,157 @@ function stopSpeaking(){
     chain.sources.clear();
     if(_ttsChain === chain) _ttsChain = null;
   }
+}
+
+/* ==========================================================================
+   VOICE ENGINE SWITCH — Cartesia (default) vs TRTC (Tencent)
+
+   The top-bar "TRTC Mode" checkbox. OFF = Cartesia speaks; ON = Tencent speaks. The backend
+   owns the decision (POST /tts/provider) and this file only reflects it, so the UI can never
+   claim an engine the server is not using.
+
+   WHAT THIS DOES NOT DO: it changes only which engine turns an already-decided line into
+   sound. It cannot change what Joy says, who authorises a payment, or any stage of the
+   control chain. A voice provider is not a security boundary, and nothing here should ever
+   be described as one.
+
+   THE FALLBACK IS SHOWN, NOT HIDDEN. If the selected engine cannot speak (out of credit, bad
+   key, service down) the backend falls back to the other one and says why. The SPEAKING row
+   turns amber and names the reason, because a voice that silently changes mid-demo is far
+   more confusing than one that explains itself.
+   ========================================================================== */
+
+// Mirrors the backend's state. _ttsProvider is the engine that ACTUALLY spoke the last
+// line; _ttsSelected is what the TRTC Mode toggle has asked for. They differ only during a
+// fallback, and keeping them apart is what lets the row say "Tencent (fallback)" without
+// the toggle appearing to have moved on its own.
+let _ttsProvider = 'cartesia';
+let _ttsSelected = 'cartesia';
+let _ttsFallbackActive = false;
+let _ttsFallbackFrom = '';
+
+// The backend uses three canonical names; the customer only needs to know the vendor.
+function _providerLabel(name){
+  if(name === 'cartesia') return 'Cartesia';
+  if(name === 'texttospeechse') return 'Tencent TRTC';
+  if(name === 'texttovoice') return 'Tencent';
+  return name || '—';
+}
+
+/* Paint the SPEAKING row from the state we hold.
+   The row answers ONE question -- who is talking right now -- so it shows the engine that
+   actually spoke, and marks it amber when that is not the engine we asked for. Naming the
+   selected engine here instead would have the row confidently credit the voice to a
+   provider that just failed. */
+function _renderTtsProvider(){
+  const row = document.getElementById('ttsProvRow');
+  const val = document.getElementById('ttsProvVal');
+  if(!val) return;
+  const speaking = _providerLabel(_ttsProvider);
+  val.textContent = _ttsFallbackActive ? `${speaking} (fallback)` : speaking;
+  if(row){
+    row.classList.toggle('warn', _ttsFallbackActive);
+    // Name the engine that failed from the server's own record, never by elimination: with
+    // three canonical engines "the other one" is not well defined.
+    const failed = _providerLabel(_ttsFallbackFrom || _ttsSelected);
+    row.title = _ttsFallbackActive
+      ? `${failed} could not speak, so ${speaking} answered instead.`
+      : `Speaking with ${speaking}.`;
+  }
+}
+
+/* Ask the backend to switch mouths. Returns the response, or null on failure. */
+async function setTtsProvider(name){
+  try{
+    const res = await fetch(`${API_BASE}/tts/provider`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider: name })
+    });
+    if(!res.ok){
+      console.warn('[joy] tts provider switch rejected:', res.status);
+      return null;
+    }
+    const d = await res.json();
+    _ttsSelected = d.tts_provider || name;
+    _ttsProvider = _ttsSelected;
+    _ttsFallbackActive = !!d.fallback_active;
+    _ttsFallbackFrom = '';
+    // The selected engine has no usable configuration: say so now rather than waiting for
+    // the next spoken line to fail.
+    if(d.configured === false){
+      console.warn('[joy] tts provider', _ttsProvider, 'is not configured on the server');
+    }
+    _renderTtsProvider();
+    return d;
+  }catch(err){
+    console.warn('[joy] tts provider switch failed:', err && err.message);
+    return null;
+  }
+}
+
+(function initTtsToggle(){
+  const box = document.getElementById('ttsToggle');
+  if(!box) return;
+  box.onchange = async () => {
+    const want = box.checked ? 'tencent' : 'cartesia';
+    // Cut any audio mid-sentence before switching, so the change is audible immediately
+    // instead of after the current line finishes in the old voice.
+    stopSpeaking();
+    box.disabled = true;
+    try{
+      const d = await setTtsProvider(want);
+      // Revert the switch if the server refused it. A toggle that stays flipped while the
+      // backend ignored it is the one outcome worth actively preventing.
+      if(!d) box.checked = !box.checked;
+    }finally{
+      box.disabled = false;
+    }
+  };
+})();
+
+/* On load, adopt the SERVER's state rather than assuming the default. The provider is
+   runtime-switchable and survives across page loads within a server session, so a reload
+   must not show "Cartesia" while the backend is actually speaking with Tencent. */
+(async function syncTtsProviderFromServer(){
+  try{
+    const res = await fetch(`${API_BASE}/health`);
+    if(!res.ok) return;
+    const d = await res.json();
+    if(d && d.tts_provider){
+      _ttsSelected = d.tts_provider;
+      _ttsProvider = d.tts_served_provider || d.tts_provider;
+      _ttsFallbackActive = !!d.tts_fallback_active;
+      _ttsFallbackFrom = d.tts_fallback_from || '';
+      const box = document.getElementById('ttsToggle');
+      // The checkbox means "use Tencent", so it is checked exactly when a Tencent mouth is
+      // active — whichever of the two Tencent engines that turns out to be.
+      if(box) box.checked = !!d.tts_provider_is_tencent;
+      _renderTtsProvider();
+    }
+  }catch(err){
+    // A missing /health must never break the mouth; the default state already renders.
+  }
+})();
+
+/* Re-read the provider state after a line has been spoken, so a fallback that happened
+   during playback becomes visible without the operator having to reload. Cheap (one small
+   GET) and only runs when a fallback is plausible. */
+async function refreshTtsProviderState(){
+  try{
+    const res = await fetch(`${API_BASE}/health`);
+    if(!res.ok) return;
+    const d = await res.json();
+    if(!d) return;
+    const served = d.tts_served_provider || d.tts_provider;
+    const changed = (served && served !== _ttsProvider)
+      || (!!d.tts_fallback_active !== _ttsFallbackActive);
+    if(changed){
+      _ttsSelected = d.tts_provider || _ttsSelected;
+      _ttsProvider = served || _ttsProvider;
+      _ttsFallbackActive = !!d.tts_fallback_active;
+      _ttsFallbackFrom = d.tts_fallback_from || '';
+      _renderTtsProvider();
+    }
+  }catch(err){ /* never let a status refresh break playback */ }
 }

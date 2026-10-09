@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Joy · DBS Voice-First Payments</title>
+<!-- Banking-grade type. Inter is the requested DBS/enterprise face; the CSS stack keeps a
+     full system fallback, so an offline demo laptop simply renders in system-ui instead. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap">
+<link rel="stylesheet" href="styles.css?v=20261007e">
+</head>
+<body>
+<div class="wrap" id="studio">
+
+  <div class="top">
+    <div class="logo">
+      <img class="dbslogo" src="assets/dbs-logo-white.png" alt="DBS">
+      <div>
+        <h1>Joy</h1>
+        <div class="tag">Joy listens. DBS protects. You approve.</div>
+      </div>
+    </div>
+    <div class="badges">
+      <span class="bdg">DBS · DCTA · JOY</span>
+      <span class="bdg mock">MOCK VOICE-RISK · SIMULATED FACEID · SYNTHETIC LEDGER</span>
+      <span class="bdg live" id="engine">5 AGENTS · 16-STAGE CHAIN</span>
+      <label class="techtoggle"><input type="checkbox" id="techToggle" checked><span>Technical panels</span></label>
+      <label class="techtoggle voicetoggle" title="Demo: submit the turn as a voice that is not the registered customer">
+        <input type="checkbox" id="voiceToggle"><span>Voice mode</span></label>
+      <button class="ghostbtn" id="railToggle" title="Backup: run one of the MECE scenarios">Scenarios</button>
+      <button class="ghostbtn" id="restartBtn" title="Back to the DBS app">DBS app</button>
+      <button class="personalize-btn" id="personalizeBadge" title="How Joy is adapting to this conversation">Personalisation: Standard</button>
+    </div>
+  </div>
+
+  <!-- Backup only: the MECE A-H scenario rail. Hidden unless the user asks for it. -->
+  <div class="rail" id="rail" hidden>
+    <h2>SCENARIOS: MECE BRANCHES A-H (BRD §6) · BACKUP ONLY</h2>
+    <div class="grp HAPPY"><span class="glab">HAPPY</span>
+      <button class="sbtn" data-s="HAPPY">HAPPY · Golden path</button>
+    </div>
+    <div class="grp A"><span class="glab">A</span>
+      <button class="sbtn" data-s="A1">A1 Another person uses device</button>
+      <button class="sbtn" data-s="A2">A2 Synthetic / replayed voice</button>
+      <button class="sbtn" data-s="A3">A3 Old spoken "yes" replayed</button>
+    </div>
+    <div class="grp B"><span class="glab">B</span>
+      <button class="sbtn" data-s="B1">B1 Amount materially ambiguous</button>
+      <button class="sbtn" data-s="B2">B2 Duplicate saved payee</button>
+      <button class="sbtn" data-s="B3">B3 Draft mismatch → freeze</button>
+    </div>
+    <div class="grp C"><span class="glab">C</span>
+      <button class="sbtn" data-s="C1">C1 Direct confirmation bypass</button>
+      <button class="sbtn" data-s="C2">C2 Poisoned payee metadata</button>
+      <button class="sbtn" data-s="C3">C3 False internal state</button>
+    </div>
+    <div class="grp D"><span class="glab">D</span>
+      <button class="sbtn" data-s="D1">D1 Safe-account scam</button>
+      <button class="sbtn" data-s="D2">D2 Coached to remove limits</button>
+      <button class="sbtn" data-s="D3">D3 Family-emergency scam</button>
+    </div>
+    <div class="grp E"><span class="glab">E</span>
+      <button class="sbtn" data-s="E1">E1 Field-by-field review</button>
+      <button class="sbtn" data-s="E2">E2 You correct the amount</button>
+      <button class="sbtn" data-s="E3">E3 Language mismatch</button>
+    </div>
+    <div class="grp F"><span class="glab">F</span>
+      <button class="sbtn" data-s="F1">F1 Forged approval claim</button>
+      <button class="sbtn" data-s="F2">F2 Payload changed after signing</button>
+      <button class="sbtn" data-s="F3">F3 Expired / replayed / duplicate</button>
+    </div>
+    <div class="grp G"><span class="glab">G</span>
+      <button class="sbtn" data-s="G1">G1 Multiple / out-of-shape request</button>
+    </div>
+    <div class="grp H"><span class="glab">H</span>
+      <button class="sbtn" data-s="H1">H1 Insufficient funds</button>
+    </div>
+  </div>
+
+  <!-- ================= STAGE: phone mockup + technical inspector ================= -->
+  <div class="stage">
+
+    <!-- ---------- the device ---------- -->
+    <div class="device" id="device">
+      <div class="device-screen" id="deviceScreen">
+
+        <!-- mock status bar + dynamic island, shared by every screen -->
+        <div class="statusbar">
+          <span class="sb-time">9:41</span>
+          <span class="sb-right">
+            <span class="sb-sig"><i></i><i></i><i></i><i></i></span>
+            <span class="sb-bat"><b></b></span>
+          </span>
+        </div>
+        <div class="island"></div>
+
+        <!-- 1 · DBS digibank LOG IN (the User ID / PIN form IS the screen. The
+             launchpad hero photo, the six tiles and the form's back arrow were
+             removed on 2 Oct: with no launchpad there was nothing to go back to.) -->
+        <section class="scr on" id="scrLogin">
+          <div class="lgwrap">
+
+            <div class="lgform" id="lgForm">
+              <div class="lgform-head">
+                <img class="dbslogo" src="assets/dbs-logo-white.png" alt="DBS">
+              </div>
+
+              <label class="lgf">
+                <span class="lgin">
+                  <input id="lgUser" value="S1234567A" placeholder="User ID" autocomplete="off" spellcheck="false">
+                  <span class="lgok" id="lgUserOk" aria-hidden="true"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="m5 13 4.5 4.5L19 7"/></svg></span>
+                </span>
+              </label>
+
+              <label class="lgf">
+                <span class="lgin">
+                  <input id="lgPin" type="password" value="SAMPLEPASSWORD1234" placeholder="PIN" autocomplete="off">
+                </span>
+              </label>
+
+              <div class="lgforgot">Forgot <a href="#" id="lgForgotUser">User ID</a> or <a href="#" id="lgForgotPin">PIN</a>?</div>
+
+              <div class="lgrow">
+                <button class="btn-dbs lgbtn" id="lgSubmit" type="button">LOGIN</button>
+                <button class="lgface" id="lgFace" type="button" title="Log in with Face ID" aria-label="Log in with Face ID">
+                  <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8V5.5A2.5 2.5 0 0 1 5.5 3H8"/><path d="M16 3h2.5A2.5 2.5 0 0 1 21 5.5V8"/><path d="M21 16v2.5a2.5 2.5 0 0 1-2.5 2.5H16"/><path d="M8 21H5.5A2.5 2.5 0 0 1 3 18.5V16"/><path d="M9 9.5v2"/><path d="M15 9.5v2"/><path d="M9.5 15.5a3.5 3.5 0 0 0 5 0"/></svg>
+                </button>
+              </div>
+
+              <div class="lgsep"><span>New to digibank?</span></div>
+              <button class="lgstarted" id="lgStarted" type="button">GET STARTED</button>
+
+              <div class="lgnote">Prototype only, these are sample credentials.
+                No real credentials are collected, stored or transmitted.</div>
+              <div class="lgfoot">DBS Bank Ltd · Reg. No. 196800306E · Demonstration build</div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 2 · DBS APP (home / Pay & Transfer) -->
+        <section class="scr" id="appwin">
+          <div class="appbar">
+            <img class="dbslogo sm" src="assets/dbs-logo-white.png" alt="DBS">
+            <span class="appbar-t">digibank</span>
+            <!-- Single top-right control, and it is LOG OUT (matching iggy). It used to open
+                 Joy, but Joy is reachable from the home CTA and the Pay & Transfer row, which
+                 is the real customer journey anyway - so this slot does the honest thing. -->
+            <button class="appbar-x" id="appBack" type="button">
+              <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5"/><path d="m11 18-6-6 6-6"/></svg>
+              <span>Log out</span>
+            </button>
+          </div>
+          <div class="appbody" id="appBody"></div>
+          <!-- ============== BOTTOM TAB NAV (5 tabs) ==============
+               Stays inside #appwin, never over the device screen edges. Active tab is
+               whatever carries .on: home / pay / wealth / apply / more. -->
+          <nav class="tabnav" id="tabnav" aria-label="digibank navigation">
+            <button class="tab on" data-tab="home"   type="button"><img src="assets/tab-home.png" alt=""><span>Home</span></button>
+            <button class="tab"    data-tab="pay"    type="button"><img src="assets/tab-pay.png" alt=""><span>Pay &amp; Transfer</span></button>
+            <button class="tab"    data-tab="wealth" type="button"><img src="assets/tab-wealth.png" alt=""><span>digiWealth</span></button>
+            <button class="tab"    data-tab="apply"  type="button"><img src="assets/tab-apply.png" alt=""><span>Apply</span></button>
+            <button class="tab"    data-tab="more"   type="button"><img src="assets/tab-more.png" alt=""><span>More</span></button>
+          </nav>
+        </section>
+
+        <!-- 3 · JOY CHAT -->
+        <section class="scr" id="scrJoy">
+          <!-- DARK app bar (near-black + 3px red underline): back control on the left, identity
+               and trust state centred. Deliberately no avatar here, Joy introduces herself with
+               her face only in the intro card, and appears again solely in popups, so the persistent
+               chat chrome never shows her twice. The back control is absolutely positioned so the
+               title is centred on the SCREEN, not on the space left over after the button. -->
+          <div class="abar">
+            <button class="aback" id="joyBack" type="button" aria-label="Back to digibank">
+              <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 6-6 6 6 6"/></svg>
+              <span>Back</span>
+            </button>
+            <div class="ameta">
+              <div class="nm">Joy Voice Assist</div>
+              <div class="sub"><i class="safedot"></i>Protected by DBS Safeguard</div>
+            </div>
+          </div>
+          <div class="chat" id="chat"></div>
+          <!-- VOICE-FIRST COMPOSER.
+               The three language pills are CENTRED above the composer (the language is the
+               first choice a voice-first customer makes). The composer itself is one white
+               pill: a keyboard toggle on the LEFT, the MIC as the dominant control in the
+               CENTRE, and a matching spacer on the right so the mic stays optically centred.
+               The text field is hidden until the keyboard is tapped (see setComposerTyping),
+               so the default surface is speak-first, not type-first. -->
+          <div class="langtog" id="langtog" title="Which language should the mic listen for?">
+            <button class="lt on" data-lang="en-SG" data-l="EN">EN</button>
+            <button class="lt" data-lang="zh-CN" data-l="ZH">中文</button>
+            <button class="lt" data-lang="ms-MY" data-l="BM">BM</button>
+          </div>
+          <div class="cinput" id="cinput">
+            <button class="kbd" id="kbd" type="button" title="Type instead" aria-label="Type instead">
+              <svg class="ic ic-type" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="6" width="20" height="12" rx="2.4"/><path d="M6 10h.01M9.5 10h.01M13 10h.01M16.5 10h.01"/><path d="M6 13.5h.01M18 13.5h.01"/><path d="M9.5 13.5h5"/></svg>
+              <svg class="ic ic-dismiss" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="3" width="20" height="11" rx="2"/><path d="M6 6.5h.01M9.5 6.5h.01M13 6.5h.01M16.5 6.5h.01"/><path d="M6 9.5h.01M18 9.5h.01"/><path d="M9.5 9.5h5"/><path d="m8 17 4 4 4-4"/></svg>
+            </button>
+            <input class="fld" id="fld" placeholder="Speak or type payment command…" autocomplete="off">
+            <button class="mic" id="mic" title="Speak" aria-label="Speak">
+              <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="2" width="6" height="13" rx="3"/><path d="M12 19v3"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/></svg>
+            </button>
+            <span class="cspacer" aria-hidden="true"></span>
+          </div>
+        </section>
+
+        <!-- ================= POPUP (Joy appears in every popup) =================
+             Deliberately INSIDE the phone screen rather than floating over the whole page:
+             the customer is holding a phone, so the field-by-field confirmation and the
+             FaceID prompt have to appear on that screen. It also stops the popup from
+             covering the technical inspector panels, so judges see both at once. -->
+        <div class="modal" id="modal">
+          <div class="mcard" id="mcard"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ---------- technical inspector ---------- -->
+    <div class="ins">
+
+      <div class="panel">
+        <h3>END-TO-END CONTROL CHAIN <span class="cnt">BRD §8.2 · STAGES 0-15</span></h3>
+        <div class="chain" id="chain"></div>
+        <!-- The one line a judge remembers. It is PER TURN, not a static blurb: it names what
+             the model did, what deterministic code decided, and what moved as a result. -->
+        <div class="capline" id="capline">Determinism decides. Nothing moves without your biometric.</div>
+      </div>
+
+      <div class="panel">
+        <h3>TYPED AGENT CONTRACTS <span class="cnt" id="acnt">0 calls</span></h3>
+        <div class="agents" id="agents"><div class="placeholder">Awaiting the first committed turn…</div></div>
+      </div>
+
+      <div class="panel">
+        <h3>STATE · OUTCOME · EVIDENCE</h3>
+        <div class="statewrap statewrap3">
+          <div class="sbox"><div class="k">SESSION STATE</div><div class="v" id="stState">IDLE</div></div>
+          <div class="sbox"><div class="k">DRAFT</div><div class="v" id="stDraft">-</div></div>
+          <div class="sbox"><div class="k">CONTROL OUTCOME</div>
+            <div style="margin-top:3px"><span class="outbadge" id="stOut">-</span></div>
+          </div>
+        </div>
+        <div class="statewrap statewrap3">
+          <div class="sbox"><div class="k">MOCK LEDGER</div><div class="v" id="stLedger">NOT_INVOKED</div></div>
+          <div class="sbox"><div class="k">SIGNATURE</div><div class="v" id="stSig">NONE</div></div>
+          <div class="sbox"><div class="k">LANGUAGE</div><div class="v" id="stLang">-</div></div>
+        </div>
+        <div class="statewrap">
+          <div class="sbox"><div class="k">LAST HEARD</div><div class="v" id="stHeard">-</div></div>
+          <div class="sbox"><div class="k">PERSONALISATION</div><div class="v" id="stPers">Standard</div></div>
+        </div>
+        <!-- Hidden until it is true: a voice engine indicator that only ever shows when the
+             real one failed is honest by construction. -->
+        <div class="sbox vengine" id="vengRow" hidden><div class="k">VOICE ENGINE</div>
+          <div class="v" id="vengVal">-</div>
+        </div>
+        <h3 style="margin-top:8px">APPEND-ONLY AUDIT TIMELINE</h3>
+        <div class="audit" id="audit"><div class="placeholder">No events yet.</div></div>
+      </div>
+
+      <div class="panel">
+        <h3>MECE FAILURE MAP <span class="cnt">BRD §6 · 21 NODES</span></h3>
+        <div class="mece" id="mece"></div>
+      </div>
+
+    </div>
+  </div>
+
+  <div class="foot">
+    <b>Read this as:</b> the customer only ever sees one warm conversation, inside the DBS app.
+    Everything in the panels is what DBS sees, five bounded agents that may screen, classify,
+    propose and audit, and deterministic code that alone resolves, verifies, authorises and executes.
+    No LLM holds a signing key, a gateway credential or ledger access.
+  </div>
+</div>
+
+<!-- The ?v= stamp is a cache-buster. Without it a browser that had the page open serves its
+     cached copies of these files, so a fix that IS in the file never reaches the screen - a
+     Bahasa "working on it" card kept coming up in English long after the code was corrected.
+     Bump the stamp whenever one of these files changes. -->
+<script src="translations.js?v=20261007c"></script>
+<script src="icons.js?v=20261007b"></script>
+<script src="ui.js?v=20261007b"></script>
+<script src="personalization.js?v=20261007b"></script>
+<script src="scenarios.js?v=20261008a"></script>
+<script src="stt.js?v=20261007b"></script>
+<script src="live.js?v=20261008a"></script>
+<script src="tts.js?v=20261007b"></script>
+<script src="shell.js?v=20261007b"></script>
+</body>
+</html>

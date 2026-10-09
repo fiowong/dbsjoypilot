@@ -134,7 +134,29 @@ button{font-family:inherit}
    STAGE, device on the left, technical inspector on the right
    ========================================================================== */
 .stage{display:flex;gap:var(--gutter);align-items:stretch;flex:1 1 auto;min-height:0}
-.stage .device{margin-inline:auto}
+/* HERO PAIR: Joy beside the phone, centred as one group and BOTTOM-aligned, so she reads as
+   standing next to the device rather than floating above it.
+   `flex:0 0 auto` is load-bearing: the pair must stay at its natural width and leave the
+   inspector to take every remaining pixel. Do NOT centre it with auto margins here - auto
+   margins on a flex item absorb the free space that `flex:1` on .ins needs, which collapses
+   the inspector to its content width. Centring is done on the STAGE instead, and only while
+   the inspector is hidden (see #studio.appmode below). */
+.stage .heropair{display:flex;align-items:flex-end;justify-content:center;
+  gap:clamp(8px,1.3vw,22px);flex:0 0 auto;min-width:0}
+/* On the login and digibank-home screens the inspector is display:none, so the stage's only
+   flex item is the pair and this centres it. On the Joy chat screen .ins has flex:1 and eats
+   all the free space, which makes this rule a no-op. One rule, both cases. */
+#studio.appmode .stage{justify-content:center}
+/* Joy herself. Hidden on the chat screen (see #studio.appmode below) because that is where the
+   inspector needs the width and the phone needs the height.
+   `max-height` is a belt-and-braces cap, not a duplicate of the height: if the hero pair's height
+   ever resolves to `auto`, the percentage inside `min()` becomes invalid and `height` falls back
+   to the image's own 720px intrinsic size. The cap stops that from silently making Joy taller
+   than the phone she is standing next to. */
+.joymascot{display:none;flex-shrink:0;height:min(52%,360px);max-height:360px;width:auto;
+  filter:drop-shadow(0 18px 30px rgba(0,0,0,.55))}
+.joymascot img{display:block;height:100%;width:auto;object-fit:contain}
+#studio.appmode .joymascot{display:block}
 .stage .ins{flex:1;min-width:0;min-height:0}
 
 /* ==========================================================================
@@ -148,8 +170,13 @@ button{font-family:inherit}
   position:relative;flex-shrink:0;
   /* --phone-zoom shrinks the UI INSIDE the phone without changing the phone itself: the
      bezel/frame keeps its size, the screen contents render --phone-zoom smaller. 1 = full
-     size. Tune this ONE value to taste. */
-  --phone-zoom:.88;
+     size. Tune this ONE value to taste.
+     Raised .88 -> 1 on 8 Oct: the phone read small on a projector. The frame also grew at the
+     same time (the top bar lost a whole row of badges), so the logical layout width the screen
+     contents see barely moved (432px -> ~418px) while every element inside renders 13.6%
+     larger. Changing this number alone would re-flow the chat; changing it together with the
+     frame keeps the proportions the design was drawn at. */
+  --phone-zoom:1;
   /* Height-driven by the STAGE (which fills the leftover viewport height), with the aspect
      ratio locked, so the phone keeps phone proportions instead of stretching to fill a
      column. Width is derived; max-width is only a guard for very narrow screens. */
@@ -653,9 +680,10 @@ button{font-family:inherit}
 .bub.sys{background:#fff;border:1px dashed var(--line);color:#52525B;font-size:11.5px;
   font-family:ui-monospace,Menlo,Consolas,monospace;line-height:1.55}
 
-/* The four diagnostic panels fill the stage as a 2x2 grid, each row an equal half of the
-   height, so every panel header stays on screen and only the panel BODY scrolls. */
-.ins{display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;gap:var(--gutter);
+/* The two diagnostic panels fill the stage as a 1x2 grid: one full-height column each. It used
+   to be 2x2; the other two panels were folded into these (see index.html), which is why the
+   chain and the agent contracts are now roughly twice as tall as they were. */
+.ins{display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr;gap:var(--gutter);
   min-width:0;min-height:0}
 
 /* ==========================================================================
@@ -790,17 +818,39 @@ button{font-family:inherit}
 .panel{background:var(--studio2);border:1px solid var(--studio-line);border-radius:var(--radius);padding:10px 12px;min-width:0;
   display:flex;flex-direction:column;min-height:0;overflow:hidden}
 .panel>h3{flex:0 0 auto}
-.panel h3{font-size:10.5px;font-weight:800;letter-spacing:1px;color:#8B8B98;margin-bottom:8px;display:flex;align-items:center;gap:7px;flex-wrap:wrap}
-.panel h3 .cnt{margin-left:auto;font-size:9.5px;color:#6F6F7C;font-weight:700}
+/* Type scale: this is read off a projector in a room, not a laptop at 40cm. Body text in the
+   panels is 11-12px and headings 12px; the previous 8-10.5px was legible on a retina display
+   and invisible on a projector, which is the only place this screen is ever seen. */
+.panel h3{font-size:12px;font-weight:800;letter-spacing:1px;color:#A0A0AE;margin-bottom:8px;display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.panel h3 .cnt{margin-left:auto;font-size:10.5px;color:#8A8A98;font-weight:700}
+
+/* ---- the SECOND section inside a panel ----
+   Each panel now carries two related things: what was PLANNED and what was RECORDED (left), who
+   PROPOSED and what was DECIDED (right). A hairline rule and a sub-heading keep them readable
+   as two sections instead of one undifferentiated list.
+   `flex:0 0 auto` -- the section must NOT shrink. The first cut used `flex:0 1 auto`, which gives
+   it flex-shrink:1, so it competed with the list above for the deficit and lost. Measured in
+   Chrome at 1512x760 with five agent cards showing a raw payload: the RIGHT panel's
+   DETERMINISTIC OUTCOME block needs 197px and was squeezed to 85px, so only its heading survived
+   and the whole verdict was cut off by `.panel{overflow:hidden}`. The LEFT panel hid the same
+   fault because its inner `.audit` is itself a scroller and degrades to scrolling; the right
+   panel's `.statewrap` rows are `flex:0 0 auto` with no scroller, so they were simply clipped.
+   With shrink at 0 the list above absorbs the whole deficit -- it is the one that CAN, having
+   `overflow-y:auto` -- and this section keeps its content height, capped by `max-height:44%` so
+   an expanded audit trail can never starve the list. Sized by its own content, as the name says. */
+.psplit{display:flex;flex-direction:column;flex:0 0 auto;min-height:0;max-height:44%;
+  margin-top:9px;padding-top:9px;border-top:1px solid var(--studio-line)}
+.psplit>h3{flex:0 0 auto;margin-bottom:7px}
+.psplit .audit{flex:1 1 auto;min-height:0}
 
 /* control chain */
 .chain{display:flex;flex-direction:column;gap:2px;flex:1 1 auto;min-height:0;overflow-y:auto;padding-right:3px}
 .chain::-webkit-scrollbar{width:5px}.chain::-webkit-scrollbar-thumb{background:#43434F;border-radius:3px}
 .stg{display:flex;gap:8px;align-items:flex-start;padding:3px 6px;border-radius:8px;transition:.2s}
-.stg .no{font-size:9.5px;font-weight:800;color:#6F6F7C;width:19px;flex-shrink:0;padding-top:1px;font-family:ui-monospace,monospace}
-.stg .tx{font-size:10px;color:#A8A8B6;line-height:1.3;flex:1}
-.stg .ty{font-size:8px;color:#5F5F6C;letter-spacing:.3px;margin-top:0}
-.stg .sd{width:7px;height:7px;border-radius:50%;background:#43434F;flex-shrink:0;margin-top:4px}
+.stg .no{font-size:10.5px;font-weight:800;color:#8A8A98;width:21px;flex-shrink:0;padding-top:1px;font-family:ui-monospace,monospace}
+.stg .tx{font-size:12px;color:#B9B9C4;line-height:1.3;flex:1}
+.stg .ty{font-size:10px;color:#8A8A98;letter-spacing:.3px;margin-top:0}
+.stg .sd{width:8px;height:8px;border-radius:50%;background:#43434F;flex-shrink:0;margin-top:5px}
 .stg.run{background:rgba(236,28,36,.15)}
 .stg.run .sd{background:var(--brand);box-shadow:0 0 0 4px rgba(236,28,36,.22)}
 .stg.run .tx{color:#fff}
@@ -875,9 +925,12 @@ button{font-family:inherit}
 /* state panel */
 .statewrap{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-bottom:8px;flex:0 0 auto}
 .statewrap3{grid-template-columns:1fr 1fr 1fr;gap:7px;margin-bottom:8px}
-.sbox{background:#17171B;border:1px solid #33333C;border-radius:10px;padding:6px 9px;min-width:0}
-.sbox .k{font-size:8.5px;font-weight:800;letter-spacing:.7px;color:#6F6F7C;margin-bottom:3px}
-.sbox .v{font-size:11.5px;font-weight:800;color:#fff;font-family:ui-monospace,Menlo,monospace;word-break:break-word}
+.sbox{background:#17171B;border:1px solid #33333C;border-radius:10px;padding:7px 9px;min-width:0}
+.sbox .k{font-size:9.5px;font-weight:800;letter-spacing:.7px;color:#8A8A98;margin-bottom:3px}
+/* 14px, and it WRAPS rather than truncating. The values here are now human labels
+   ("Simulated - approved"), so they must break between words, never mid-word - the old
+   CLARIFICATION_REQUIRED broke across two lines and read as a rendering fault. */
+.sbox .v{font-size:14px;font-weight:800;color:#fff;font-family:ui-monospace,Menlo,monospace;line-height:1.25;overflow-wrap:break-word;word-break:normal}
 .sbox .v.ok{color:#7FE0A8}.sbox .v.stop{color:#FF9B9B}.sbox .v.warn{color:#FFCF87}.sbox .v.brand{color:var(--brand)}
 .outbadge{display:inline-block;padding:5px 11px;border-radius:7px;font-size:11px;font-weight:800;letter-spacing:.4px;
   background:#2A2A33;color:#8B8B98;border:1px solid #3F3F4A}
@@ -900,23 +953,35 @@ button{font-family:inherit}
 /* audit */
 .audit{display:flex;flex-direction:column;gap:2px;flex:1 1 auto;min-height:0;overflow-y:auto;font-family:ui-monospace,Menlo,Consolas,monospace}
 .audit::-webkit-scrollbar{width:5px}.audit::-webkit-scrollbar-thumb{background:#43434F;border-radius:3px}
-.audit .ae{font-size:10.5px;color:#B9B9C4;padding:3px 6px;border-radius:5px;display:flex;gap:7px;line-height:1.4;word-break:break-word}
-.audit .ae .t{color:#5F5F6C;flex-shrink:0}
+.audit .ae{font-size:11px;color:#B9B9C4;padding:3px 6px;border-radius:5px;display:flex;gap:7px;line-height:1.4;word-break:break-word}
+.audit .ae .t{color:#8A8A98;flex-shrink:0}
 .audit .ae.ok{color:#7FE0A8}.audit .ae.stop{color:#FF9B9B}
 .audit .ae.warn{color:#FFCF87}.audit .ae.brand{color:var(--brand)}
+/* Progressive disclosure: three rows by default, the whole chain on demand. A wall of audit
+   lines at equal weight buries the one that matters; three lines plus an explicit "there is
+   more" is both easier to read and more obviously honest about the volume. */
+.audit.trim .ae:nth-last-child(n+4){display:none}
+.auditmore{align-self:flex-start;margin-top:5px;font-size:10.5px;font-weight:700;color:#8A8A98;
+  background:#1E1E24;border:1px solid #33333C;border-radius:7px;padding:4px 9px;cursor:pointer;flex:0 0 auto}
+.auditmore:hover{color:#fff;border-color:#4A4A57}
 
-/* mece */
-.mece{display:flex;flex-direction:column;gap:5px;flex:1 1 auto;min-height:0;overflow-y:auto;padding-right:3px}
-.mece::-webkit-scrollbar{width:5px}.mece::-webkit-scrollbar-thumb{background:#43434F;border-radius:3px}
-.br{background:#17171B;border:1px solid #33333C;border-radius:10px;padding:6px 8px;transition:.2s}
-.br.hit{border-color:var(--brand);background:#241618}
-.br .bh{display:flex;gap:7px;align-items:center;margin-bottom:3px;flex-wrap:wrap}
-.br .bl{font-size:9.5px;font-weight:800;color:#fff;background:#3A3A46;border-radius:5px;padding:2px 6px}
-.br.hit .bl{background:var(--brand);color:#fff}
-.br .bt{font-size:10.5px;color:#A8A8B6;font-weight:600}
-.br .nds{display:flex;gap:4px;flex-wrap:wrap}
-.nd{font-size:9px;font-weight:700;padding:2px 6px;border-radius:5px;background:#2A2A33;color:#71717A;border:1px solid #3A3A46}
-.nd.hit{background:var(--brand-tint);color:var(--brand-ink2);border-color:var(--brand-line)}
+/* requirements coverage — the scoring panel.
+   Five rows, each: number, the challenge's own wording, where it is demonstrated, and an
+   honest status chip. The chip colours carry the honesty: green = live code, amber = the
+   mock/simulated boundary. Amber is a feature here, not a defect - a labelled simulation is
+   credible, an unlabelled one is not. */
+.reqs{display:flex;flex-direction:column;gap:5px;flex:1 1 auto;min-height:0;overflow-y:auto;padding-right:3px}
+.reqs::-webkit-scrollbar{width:5px}.reqs::-webkit-scrollbar-thumb{background:#43434F;border-radius:3px}
+.rq{display:flex;gap:8px;align-items:flex-start;background:#17171B;border:1px solid #33333C;border-radius:10px;padding:7px 9px;transition:.2s}
+.rq.hit{border-color:var(--brand);background:#241618}
+.rq .rqn{flex:0 0 auto;font-size:10px;font-weight:800;color:#fff;background:#3A3A46;border-radius:5px;padding:2px 6px;line-height:1.35}
+.rq.hit .rqn{background:var(--brand);color:#fff}
+.rq .rqb{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1 1 auto}
+.rq .rqt{font-size:11.5px;font-weight:650;color:#E9E9F0;line-height:1.28}
+.rq .rqd{font-size:10px;color:#9A9AA8;line-height:1.3}
+.rq .rqs{flex:0 0 auto;font-size:9px;font-weight:800;letter-spacing:.03em;text-transform:uppercase;padding:3px 6px;border-radius:5px;border:1px solid transparent;white-space:nowrap}
+.rq .rqs.live{background:rgba(127,224,168,.14);color:#7FE0A8;border-color:rgba(127,224,168,.34)}
+.rq .rqs.simulated{background:rgba(255,207,135,.14);color:#FFCF87;border-color:rgba(255,207,135,.34)}
 
 /* ==========================================================================
    top chrome
@@ -937,6 +1002,13 @@ button{font-family:inherit}
   background:var(--studio2);border:1px solid var(--studio-line);color:#C9C9D4;white-space:nowrap}
 .bdg.mock{background:#3A2A12;border-color:#6B4A1C;color:#FFCF87}
 .bdg.live{background:#12301F;border-color:#1F5C3A;color:#7FE0A8}
+/* The two status chips are <button>s now, because each one opens the page that backs up its
+   claim. `.bdg` already restates background, border, padding, size and weight, so the button
+   reset only needs the cursor, the hover and a visible focus ring - a chip that looks inert but
+   is clickable, or vice versa, is worse than either. */
+.bdgbtn{cursor:pointer;transition:.14s}
+.bdgbtn:hover{filter:brightness(1.4)}
+.bdgbtn:focus-visible{outline:2px solid #fff;outline-offset:2px}
 
 /* technical-panels show/hide switch */
 .techtoggle{display:flex;align-items:center;gap:7px;font-size:11px;font-weight:700;color:#C9C9D4;cursor:pointer;user-select:none}
@@ -949,6 +1021,19 @@ button{font-family:inherit}
    the demo shows the system escalating rather than a label announcing it. Do NOT add a
    checked-state colour, body class, banner or badge here. */
 .voicetoggle input:checked{background:var(--brand)}
+
+/* TRTC Mode IS meant to be visible, and for the opposite reason to Voice Mode above: the two
+   engines sound different, a judge may ask which one is speaking, and the operator needs to
+   see the switch state at a glance. A distinct colour rather than the brand red so "Tencent is
+   speaking" cannot be mistaken for the Voice Mode escalation switch sitting next to it. */
+.trtctoggle input:checked{background:#2E9E6B}
+.trtctoggle input:disabled{opacity:.5;cursor:progress}
+
+/* SPEAKING row: amber when the selected engine could not speak and the other one answered
+   instead. The point is that a fallback is never silent -- a voice that changes mid-demo
+   without explanation is far more confusing than one that says why. */
+.vengine.warn .v{color:#F0B429}
+.vengine.warn .k{color:#F0B429}
 
 /* small ghost buttons in the top bar */
 .ghostbtn{font-size:10.5px;font-weight:700;letter-spacing:.4px;padding:5px 10px;border-radius:999px;
@@ -1088,8 +1173,106 @@ body.tech-hidden .ins{display:none}
 @keyframes fpulse{0%,100%{box-shadow:0 0 0 0 rgba(236,28,36,.30)}50%{box-shadow:0 0 0 14px rgba(236,28,36,0)}}
 
 /* footer note */
-.foot{flex:0 0 auto;margin-top:9px;color:var(--muted);font-size:11px;line-height:1.55;max-width:1460px}
+/* One line, not two. The disclaimer used to sit on its own row under the principle, which cost
+   the stage ~16px of height on every screen - and the stage's height IS the phone's height.
+   Pushed right on the same baseline so the two read as one footer sentence plus a colophon. */
+.foot{flex:0 0 auto;margin-top:9px;color:var(--muted);font-size:11px;line-height:1.55;max-width:1460px;
+  display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
 .foot b{color:var(--faint)}
+.foot .disclaim{margin-left:auto;color:#7A7A88;font-size:10.5px}
+
+/* ==========================================================================
+   EXPLAINER OVERLAY (index.html #explain)
+   The two status chips in the top bar open this. It exists so the main screen can stay clean
+   without the evidence disappearing: each chip makes a claim, and clicking the claim is what
+   shows the working.
+   A fixed layer rather than a routed page: the front end is one HTML file with no build step
+   and no router, and a judge has to be able to get back to a live screen in one click without
+   losing a turn that is mid-flight.
+   ========================================================================== */
+.explain{position:fixed;inset:0;z-index:60;display:flex;align-items:center;justify-content:center;
+  padding:clamp(8px,2.6vh,32px);background:rgba(6,6,8,.84);backdrop-filter:blur(3px)}
+.excard{display:flex;flex-direction:column;width:min(1180px,96vw);height:min(920px,94vh);
+  background:var(--studio2);border:1px solid var(--studio-line);border-radius:20px;overflow:hidden;
+  box-shadow:0 30px 80px rgba(0,0,0,.7)}
+.exhead{display:flex;align-items:center;gap:12px;padding:12px 14px;flex:0 0 auto;
+  border-bottom:1px solid var(--studio-line);background:linear-gradient(#1B1B21,#151519)}
+.extabs{display:flex;gap:6px;flex-wrap:wrap;min-width:0}
+.extab{font-size:11.5px;font-weight:800;letter-spacing:.4px;padding:7px 13px;border-radius:999px;
+  background:#202027;border:1px solid var(--studio-line);color:#B9B9C4;cursor:pointer;white-space:nowrap;transition:.14s}
+.extab:hover{color:#fff;border-color:#57575F}
+.extab.on{background:var(--brand);border-color:var(--brand);color:#fff}
+.exclose{margin-left:auto;flex:0 0 auto;width:34px;height:34px;display:grid;place-items:center;
+  border-radius:10px;background:#202027;border:1px solid var(--studio-line);color:#C9C9D4;cursor:pointer;transition:.14s}
+.exclose:hover{background:var(--brand);border-color:var(--brand);color:#fff}
+.exbody{flex:1 1 auto;min-height:0;overflow-y:auto;padding:20px clamp(15px,3vw,30px) 28px}
+.exbody::-webkit-scrollbar{width:9px}
+.exbody::-webkit-scrollbar-thumb{background:#43434F;border-radius:4px}
+
+/* The overlay reuses the page's own dark palette and type scale. Body text is 12.5-14px for the
+   same reason the panels were raised: this is read off a projector, not a laptop at 40cm. */
+.expage h2{font-size:clamp(19px,2.3vw,25px);font-weight:800;color:#fff;letter-spacing:-.3px;margin-bottom:9px}
+.expage h3{font-size:13px;font-weight:800;letter-spacing:.9px;color:#A0A0AE;text-transform:uppercase;
+  margin:24px 0 9px;padding-top:16px;border-top:1px solid var(--studio-line);
+  display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.expage h3 .cnt{margin-left:auto;font-size:10.5px;color:#8A8A98;font-weight:700;letter-spacing:.3px}
+.expage h4{font-size:12.5px;font-weight:800;letter-spacing:.5px;color:#fff;margin-bottom:10px;
+  display:flex;align-items:center;gap:8px}
+.exlead{font-size:14px;line-height:1.6;color:#C9C9D4;max-width:76ch;margin-bottom:4px}
+.exlead b{color:#fff}
+.exsub{font-size:12px;line-height:1.6;color:#9A9AA8;max-width:84ch;margin-bottom:12px}
+.exnote{font-size:12px;line-height:1.6;color:#9A9AA8;margin-top:11px;padding:10px 12px;
+  background:#17171B;border-left:2px solid var(--brand);border-radius:0 8px 8px 0}
+.exdot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.exdot.live{background:#12A150}
+.exdot.sim{background:#F0B429}
+
+/* REAL vs SIMULATED, side by side. The two columns are the argument, so they must not stack on
+   a projector: the reader needs to see both at once. */
+.excols{display:grid;grid-template-columns:1fr 1fr;gap:clamp(14px,2vw,26px);margin-top:16px}
+.excol{background:#17171B;border:1px solid #33333C;border-radius:14px;padding:14px 16px}
+.excol.real{border-color:#1F5C3A}
+.excol.sim{border-color:#6B4A1C}
+.excol ul{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:10px}
+.excol li{font-size:12.5px;line-height:1.55;color:#B9B9C4;padding-left:15px;position:relative}
+.excol li::before{content:'';position:absolute;left:0;top:8px;width:5px;height:5px;border-radius:50%;background:#43434F}
+.excol.real li::before{background:#12A150}
+.excol.sim li::before{background:#F0B429}
+.excol li b{color:#fff}
+
+.exlist{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:10px;max-width:98ch}
+.exlist li{font-size:12.5px;line-height:1.6;color:#B9B9C4;padding-left:16px;position:relative}
+.exlist li::before{content:'';position:absolute;left:0;top:9px;width:6px;height:6px;border-radius:2px;background:var(--brand)}
+.exlist li b{color:#fff}
+
+/* the five agents: two columns of cards, each card a tiny typed contract */
+.exagents{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.exagent{background:#17171B;border:1px solid #33333C;border-radius:12px;padding:12px 14px;min-width:0}
+.exagent .exah{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px}
+.exagent .exan{font-size:12.5px;font-weight:800;color:#fff}
+.exagent .exas{font-size:9.5px;font-weight:800;letter-spacing:.4px;padding:3px 7px;border-radius:5px;
+  background:#3A1618;color:var(--brand);border:1px solid #6B2226;white-space:nowrap}
+.exagent dl{margin:0;display:grid;grid-template-columns:auto 1fr;gap:5px 10px;font-size:11.5px;line-height:1.5}
+.exagent dt{color:#8A8A98;font-weight:700;white-space:nowrap}
+.exagent dd{margin:0;color:#B9B9C4;min-width:0}
+.exagent dd.never{color:#FF9B9B}
+
+/* the sixteen controls, numbered to match the chain on the main screen */
+.exctl{display:grid;grid-template-columns:1fr 1fr;gap:4px 14px}
+.exct{display:flex;gap:9px;align-items:flex-start;padding:5px 8px;border-radius:8px;background:#17171B}
+.exct.llm{background:#241618;border:1px solid #6B2226}
+.exct .exctn{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:10.5px;font-weight:800;
+  color:#8A8A98;flex-shrink:0;padding-top:1px}
+.exct.llm .exctn{color:var(--brand)}
+.exct .exctb{min-width:0}
+.exct .exctt{font-size:12px;color:#C9C9D4;line-height:1.3}
+.exct.llm .exctt{color:#fff;font-weight:700}
+.exct .excty{font-size:10px;color:#8A8A98;line-height:1.35}
+
+/* the failure-branch rail inside the overlay. The buttons are the same `.sbtn` elements the main
+   screen used to carry; only the container changes, so the page-level margins go. */
+.explain .rail{background:#17171B;border:1px dashed var(--studio-line);border-radius:14px;
+  padding:14px 16px;margin:0}
 
 /* ==========================================================================
    small-screen refinements
@@ -1100,14 +1283,28 @@ body.tech-hidden .ins{display:none}
      sensible cap instead of a share of the screen. */
   #studio{height:auto;padding-bottom:0}
   .stage{flex-direction:column;align-items:stretch;flex:0 0 auto}
-  .device{height:min(760px,74vh);margin-inline:auto}
+  .heropair{flex:1 1 auto}
+  .device{height:min(760px,74vh)}
+  /* A DEFINITE height, deliberately not a percentage. Below this breakpoint the page stops
+     being viewport-height-bound, so the hero pair's height is content-derived and indefinite -
+     and `min(52%, 360px)` becomes invalid at used-value time, falls back to `auto`, and renders
+     Joy at her full 720px intrinsic height, taller than the phone beside her. vw always
+     resolves. */
+  .joymascot{height:min(32vw,250px)}
   .ins{grid-template-columns:1fr;grid-template-rows:auto}
-  .chain,.agents,.mece{max-height:clamp(200px,32vh,340px)}
+  .chain,.agents,.reqs{max-height:clamp(200px,32vh,340px)}
   .audit{max-height:180px}
+  /* the overlay's two-column arguments stack here, and the card takes the whole screen */
+  .excols,.exagents,.exctl{grid-template-columns:1fr}
+  .excard{height:96vh;width:98vw}
 }
 @media(max-width:640px){
   .top{align-items:flex-start;flex-direction:column;gap:10px}
   .badges{margin-left:0}
+  /* Joy is a full-width luxury below this: the pair no longer fits beside the phone, and a
+     half-visible mascot is worse than none. Same selector as the rule that shows her, so it
+     wins on order rather than on !important. */
+  #studio.appmode .joymascot{display:none}
   .rail h2{font-size:10px}
   .sbtn{padding:6px 9px;font-size:11px}
   .bdg{white-space:normal;line-height:1.35;text-align:center}

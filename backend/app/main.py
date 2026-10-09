@@ -1,14 +1,14 @@
 import asyncio
 import json as _json
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel
 
 from .config import Settings
-from .stt import ASRError, TencentRealtimeASR, build_hotword_list
-from .tts import TTSError, SAMPLE_RATE, synthesize_stream
+from .stt import ASRError, TencentRealtimeASR, build_hotword_list, engine_for
+from .tts import TTSError, SAMPLE_RATE, synthesize_pcm, provider_order
 from .repository import get_repository
 from . import nicknames as customer_nicknames
 from .llm_client import check_llm_health
@@ -34,12 +34,24 @@ if not _auntiejoy_log.handlers:
     _handler.setFormatter(logging.Formatter("%(levelname)s: %(name)s: %(message)s"))
     _auntiejoy_log.addHandler(_handler)
 
+# How much PCM to hand the browser per chunk on /tts. Small enough that playback can start
+# on the first slice, large enough not to flood the socket with 1-2 kB writes.
+_TTS_RELAY_BYTES = 4096
+
 # 13. FastAPI surface
 # =====================================================================
 app = FastAPI(title="AuntieJoy", version="1.0",
               description="DBS DCTA Scenario 1, voice-first conversational payments. "
                           "Four bounded agents, sixteen deterministic controls.")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+# expose_headers is load-bearing, not cosmetic. tts.js reads X-TTS-Provider off the
+# /tts response to label the SPEAKING row with the engine that actually produced THAT
+# audio. Without an explicit expose_headers, a browser silently hides every custom
+# response header from JS on a cross-origin fetch -- which is exactly the local dev
+# shape this whole three-tier API_BASE resolution exists to support (static frontend
+# on one port, backend on another). Same-origin deployment would hide the bug, so the
+# omission would only ever show up on a developer's laptop.
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"],
+                   expose_headers=["X-TTS-Provider", "X-TTS-Selected", "X-TTS-Fallback"])
 
 
 @app.get("/health")
@@ -60,26 +72,120 @@ async def health() -> dict:
         # Ears and mouth report mere CONFIGURATION here. A configured key does not mean the
         # upstream is reachable, so /health must never claim "live" on key presence alone.
         "asr_configured": Settings.LIVE_ASR,
-        "asr_engines": {"en": "16k_zh_en", "zh": "16k_zh_en", "bm": "16k_multi_lang"},
+        # Derived from stt.ENGINE_BY_LANGUAGE rather than repeated as literals here, so the
+        # engine reported for a language can never drift from the engine actually opened.
+        # "auto" is the Auto mic pill: Tencent has no single engine covering English +
+        # Chinese + Malay, so Auto picks one of the two rather than making the customer
+        # choose before speaking. See stt.ENGINE_BY_LANGUAGE for which, and why.
+        "asr_engines": {lang: engine_for(lang) for lang in ("en", "zh", "bm", "auto")},
         "asr_reports_confidence": False,   # Tencent realtime ASR has no confidence field
         "tts_configured": Settings.LIVE_TTS,
-        "tts_model": Settings.TTS_MODEL or "sonic-latest",
-        # True when ANY voice id exists; the per-language ones are optional extras, so a
-        # single-voice setup must still report a working mouth.
-        "tts_voice_set": Settings.tts_voice_configured(),
-        "tts_voice_per_language": {
-            "EN": bool(Settings.tts_voice_for("EN")),
-            "ZH": bool(Settings.tts_voice_for("ZH")),
-            "BM": bool(Settings.tts_voice_for("BM")),
+        # ---- WHICH MOUTH IS SPEAKING ----
+        # The provider in force RIGHT NOW. Not necessarily the configured default: the UI's
+        # "TRTC Mode" toggle changes this at runtime via POST /tts/provider.
+        "tts_provider": Settings.tts_provider(),
+        # What the environment asked for, so a runtime switch is distinguishable from the
+        # deployed configuration rather than silently replacing it in the report.
+        "tts_provider_default": Settings.TTS_PROVIDER_DEFAULT,
+        # Is the Tencent toggle the one currently selected? This is the field the UI's
+        # "TRTC Mode" switch reflects.
+        "tts_provider_is_tencent": Settings.tts_provider_is_tencent(),
+        # Can each mouth speak? Reported per provider, because with a fallback in play
+        # "tts_configured" alone no longer says WHICH engine will answer.
+        "tts_providers": {
+            "cartesia": Settings.cartesia_configured(),
+            "tencent": Settings.tencent_configured(),
         },
+        # ---- THE REPORTED FALLBACK ----
+        # True when the selected provider failed and the other one answered instead. The
+        # reason carries the provider's own error text (e.g. "quota_exceeded"). This exists so
+        # a fallback is never silent: a voice that changes without explanation is far more
+        # confusing than one that says why.
+        "tts_fallback_enabled": Settings.TTS_FALLBACK_ENABLED,
+        "tts_fallback_active": Settings.TTS_FALLBACK_ACTIVE,
+        "tts_fallback_reason": Settings.TTS_FALLBACK_REASON or None,
+        # WHO failed and WHO answered. Reported as names rather than left for the reader to
+        # infer, because with three canonical engines "the other one" is not well defined.
+        "tts_fallback_from": Settings.TTS_FALLBACK_FROM or None,
+        "tts_fallback_to": Settings.TTS_FALLBACK_TO or None,
+        # The engine that produced the last line of audio. Differs from tts_provider only
+        # while a fallback is in force, which is exactly when the distinction matters.
+        "tts_served_provider": Settings.tts_served_provider(),
+        # Which mouth actually answered the last synthesis, or None before the first one.
+        # Distinguishes "installed but never exercised" from "actually streaming".
+        "tts_streaming_active": (Settings.TTS_STREAMING_ACTIVE
+                                 if Settings.tts_provider() == "texttospeechsse" else None),
+        # Whether the streaming mouth COULD run: credentials + SdkAppId + a voice id. Shown
+        # even when it is not the selected provider, so an operator can see the option exists.
+        "tts_trtc_sse_configured": Settings.trtc_tts_configured(),
+        # The engine name for whichever provider is active, in the vocabulary dashboards
+        # already match on.
+        "tts_engine": {"cartesia": "cartesia-sonic",
+                       "texttospeechsse": "trtc-texttospeechsse"}.get(
+                           Settings.tts_provider(), "tencent-tts"),
+        # Cartesia's own endpoint/model, reported alongside Tencent's so the report describes
+        # where the audio ACTUALLY came from rather than only where it used to.
+        "tts_cartesia_endpoint": Settings.CARTESIA_ENDPOINT,
+        "tts_cartesia_model": Settings.CARTESIA_MODEL,
+        "tts_cartesia_api_version": Settings.CARTESIA_API_VERSION,
+        "tts_endpoint": Settings.TTS_ENDPOINT,
+        "tts_region": Settings.TTS_REGION,
+        "tts_api_version": Settings.TTS_API_VERSION,
+        # The streaming mouth talks to a DIFFERENT endpoint and service, so reporting the
+        # synchronous one alone would misdescribe where the audio actually came from.
+        "tts_sse_endpoint": Settings.TRTC_TTS_ENDPOINT,
+        "tts_sse_region": Settings.TRTC_TTS_REGION,
+        # The sample rate the browser must decode. Echoed here AND on every /tts response
+        # (X-Audio-Sample-Rate) so the two sides can never drift apart unnoticed.
+        "tts_sample_rate": SAMPLE_RATE,
+        # True when ANY voice id exists for the ACTIVE provider; the per-language ones are
+        # optional extras, so a single-voice setup must still report a working mouth.
+        "tts_voice_set": Settings.tts_provider_is_configured(),
+        "tts_voice_per_language": {
+            "EN": bool(Settings.cartesia_voice_for("EN") if not Settings.tts_provider_is_tencent()
+                       else Settings.tts_voice_for("EN")),
+            "ZH": bool(Settings.cartesia_voice_for("ZH") if not Settings.tts_provider_is_tencent()
+                       else Settings.tts_voice_for("ZH")),
+            "BM": bool(Settings.cartesia_voice_for("BM") if not Settings.tts_provider_is_tencent()
+                       else Settings.tts_voice_for("BM")),
+        },
+        # True when a language has no voice of its OWN and borrows another's. This is now
+        # PROVIDER-DEPENDENT, and that is the whole point of the Cartesia default: Tencent's
+        # international catalogue ships no Malay voice at all, so on the Tencent path BM is
+        # read by a borrowed voice and this is true. Cartesia speaks Malay natively, so on the
+        # Cartesia path it is FALSE. Reported rather than hidden, so nothing claims otherwise.
+        "tts_voice_is_fallback": {
+            "EN": Settings.tts_voice_is_fallback("EN") if Settings.tts_provider_is_tencent()
+                  else Settings.cartesia_voice_is_fallback("EN"),
+            "ZH": Settings.tts_voice_is_fallback("ZH") if Settings.tts_provider_is_tencent()
+                  else Settings.cartesia_voice_is_fallback("ZH"),
+            "BM": Settings.tts_voice_is_fallback("BM") if Settings.tts_provider_is_tencent()
+                  else Settings.cartesia_voice_is_fallback("BM"),
+        },
+        # False (the default) means the ASR and TTS calls go DIRECT and ignore any
+        # HTTP_PROXY/HTTPS_PROXY the host shell exports. Reported because a proxied voice
+        # pipeline fails as a generic connect error, which is easy to misread as bad
+        # credentials; this one field says which of the two it is. See config.py.
+        "use_env_proxy": Settings.USE_ENV_PROXY,
         "agents": ["GUARDRAILS AGENT", "INTENT CLASSIFIER", "PAYMENT AGENT",
                    "INDEPENDENT VALIDATION AGENT", "PERSONALIZATION AGENT"],
         "stages": len(STAGES),
         # The MECE failure map is branches A-H. Counted from SCENARIOS so it can never drift
-        # out of sync with the UI rail (which labels the map "A-H / 20 NODES"). The HAPPY
-        # path is recorded under branch "-", so it is excluded from the A-H total.
-        "branches": f"A-H / {sum(1 for v in SCENARIOS.values() if v.get('branch') in 'ABCDEFGH')} scenarios",
+        # out of sync with the UI rail, which labels the map "BRD §6 · 21 NODES" -- hence
+        # "nodes" here and not "scenarios". The HAPPY path and the six DEMO entries are
+        # recorded under branch "-", so they are excluded from this total.
+        # The membership test is an explicit set, NOT `branch in "ABCDEFGH"`: that substring
+        # form is true for an EMPTY branch ("") as well, so one blank branch would silently
+        # inflate the count and the map would disagree with the rail again.
+        "branches": (f"A-H / "
+                     f"{sum(1 for v in SCENARIOS.values() if v.get('branch') in set('ABCDEFGH'))}"
+                     " nodes"),
         "disclosure": POLICY["disclosure"],
+        # NOTE: no "payment_rail" key. That key reported which rail executes an authorised
+        # payment -- "mock" (the deterministic in-memory ledger) or "dbs" (a real DBS Fund
+        # Transfer request). This build keeps the ledger call inside orchestrator.py stage 15
+        # and does NOT ship rails.py, so there is no rail to report and nothing that could
+        # imply a live bank call.
         "audit_db": Settings.DB_PATH,
     }
 
@@ -91,6 +197,8 @@ async def stages() -> dict:
 
 @app.get("/scenarios")
 async def scenarios() -> dict:
+    # Kept in step with the frontend rail in translations.js BRANCHES. H was missing here,
+    # so the API's branch list stopped at G while the UI drew eight groups.
     branch_labels = {
         "A": "Wrong person or untrusted input",
         "B": "Auntie is misunderstood",
@@ -99,6 +207,7 @@ async def scenarios() -> dict:
         "E": "Auntie does not understand the payment",
         "F": "Wrong, forged or repeated payment executed",
         "G": "Multiple or out-of-shape request",
+        "H": "Auntie cannot cover the amount",
     }
     return {
         # The runnable set: the BRD/demo scenarios AND the folded-in regression pins, both
@@ -272,54 +381,112 @@ async def ws_stt(ws: WebSocket) -> None:
 
 
 # =====================================================================
-# 15. Mouth, text to speech (Cartesia Sonic), proxied so the key stays server-side.
+# 15. Mouth, text to speech (Tencent Cloud TextToVoice), proxied so the SecretKey stays
+#     server-side.
 #
-# The browser POSTs the INTERFACE_LINE text (and language) here; we stream it from
-# Cartesia and return one WAV. The frontend never sees the Cartesia key.
+# The browser POSTs the INTERFACE_LINE text (and language) here; we synthesise it with
+# Tencent and relay the audio. The frontend never sees the Tencent SecretId/SecretKey.
 # =====================================================================
 class TTSRequest(BaseModel):
     text: str
-    language: str = "en"   # EN | ZH | BM  (mapped to a Cartesia code in tts.py)
+    language: str = "en"   # EN | ZH | BM  (mapped to the active provider's voice in tts.py)
+
+
+class TTSProviderRequest(BaseModel):
+    # "cartesia" | "tencent" | "texttovoice" | "texttospeechsse"
+    # "tencent" is the UI's word for the toggle; the backend resolves it to whichever
+    # Tencent mouth is actually usable so the frontend never has to know whether streaming
+    # is configured. An unknown value is a 400, not a silent no-op.
+    provider: str
+
+
+@app.post("/tts/provider")
+async def set_tts_provider(req: TTSProviderRequest) -> dict:
+    """Switch the speaking mouth at runtime. No restart, no redeploy.
+
+    This is what the UI's "TRTC Mode" toggle calls. It changes ONLY which engine turns the
+    already-decided INTERFACE_LINE into sound -- it cannot alter what is said, who authorises
+    a payment, or any control-chain stage. Swapping the voice provider is not a security
+    boundary and must never be treated as one.
+    """
+    try:
+        active = Settings.set_tts_provider(req.provider)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    logging.getLogger("auntiejoy.tts").info("tts provider switched to %s", active)
+    return {
+        "tts_provider": active,
+        # Echo whether the newly selected mouth can actually speak, so the toggle can show a
+        # problem immediately instead of waiting for the next spoken line to fail.
+        "configured": Settings.tts_provider_is_configured(active),
+        "fallback_active": Settings.TTS_FALLBACK_ACTIVE,
+        "fallback_reason": Settings.TTS_FALLBACK_REASON,
+    }
 
 
 @app.post("/tts")
 async def tts(req: TTSRequest) -> StreamingResponse:
-    """Stream Cartesia audio to the browser as it is synthesised.
+    """Stream the active provider's TTS audio to the browser.
 
     The body is raw mono 16-bit signed little-endian PCM at SAMPLE_RATE Hz, no WAV
-    container, so the first byte the browser receives is the first byte of audio it
-    can play. The matching audio parameters are echoed in response headers so the
-    frontend knows what to feed into Web Audio without an out-of-band handshake.
+    container, so the browser can build AudioBuffers directly. The matching audio
+    parameters are echoed in response headers so the frontend knows what to feed into
+    Web Audio without an out-of-band handshake.
+
+    Either provider may be the one that answers: Cartesia is the default, "TRTC Mode" selects
+    Tencent, and a failure on the selected one falls back to the other (reported on /health,
+    never silent). The frontend contract is identical either way.
     """
-    # Gated on the voice for THIS language: a language with no id of its own falls back to
-    # the shared voice, so the mouth only goes quiet when there is no voice at all.
-    if not Settings.LIVE_TTS or not Settings.tts_voice_for(req.language):
-        # Same contract as before, the frontend disables its mouth permanently on 503.
-        from fastapi import HTTPException
+    # Gate on whether ANY mouth in the attempt order can speak, not just the selected one.
+    # Asking only about the selected provider would 503 a request the fallback could have
+    # served -- e.g. Cartesia selected but out of credit, with Tencent standing by.
+    if not Settings.LIVE_TTS or not any(Settings.tts_provider_is_configured(p)
+                                        for p in provider_order()):
+        # The frontend disables its mouth permanently on 503, so this must mean "nothing can
+        # ever speak", not "the first choice is unhappy".
         raise HTTPException(status_code=503, detail="tts not configured")
 
-    async def _pcm_stream():
-        try:
-            async for chunk in synthesize_stream(req.text, req.language):
-                yield chunk
-        except TTSError as exc:
-            # Once the response body has started, headers are already committed; we can't
-            # flip the status code. The browser logs the broken pipe and falls back; logging
-            # the upstream reason here keeps the audit trail honest.
-            import logging
-            logging.getLogger("auntiejoy.tts").warning("stream aborted: %s", exc)
-            return
+    # Synthesise BEFORE the response starts. Tencent's TextToVoice is synchronous, so there
+    # is no streaming to preserve; doing the work first means an upstream failure can still
+    # be reported as a real status code. (Previously the failure surfaced as a 200 with an
+    # empty body, which the browser cannot tell apart from legitimate silence.)
+    try:
+        pcm = await synthesize_pcm(req.text, req.language)
+    except TTSError as exc:
+        logging.getLogger("auntiejoy.tts").warning("synthesis failed: %s", exc)
+        raise HTTPException(status_code=502, detail=f"tts failed: {exc}") from exc
+
+    async def _relay():
+        # Relay the finished clip in small chunks so the browser can start scheduling audio
+        # immediately instead of waiting for one large body to land.
+        for start in range(0, len(pcm), _TTS_RELAY_BYTES):
+            yield pcm[start:start + _TTS_RELAY_BYTES]
 
     return StreamingResponse(
-        _pcm_stream(),
+        _relay(),
         media_type="application/octet-stream",
         headers={
-            # Tell the browser exactly what format to expect, Cartesia's sonic-latest is
-            # always mono 16-bit little-endian PCM at the sample rate we asked for.
+            # Tell the browser exactly what format to expect. We ask Tencent for Codec=pcm,
+            # which is always mono 16-bit little-endian at the sample rate we requested.
+            # The frontend reads this header rather than trusting a compiled-in constant.
             "X-Audio-Sample-Rate": str(SAMPLE_RATE),
             "X-Audio-Channels": "1",
             "X-Audio-Bit-Depth": "16",
             "X-Audio-Encoding": "pcm_s16le",
+            # WHICH ENGINE ACTUALLY SPOKE THIS LINE. Sent on the response rather than polled
+            # from /health, because /health would report the state a moment later and the UI
+            # needs to attribute THIS audio. Values are ASCII by construction: the human-
+            # readable fallback reason is deliberately NOT sent here, because HTTP headers are
+            # latin-1 and a provider error containing a quote or an em dash would raise
+            # UnicodeEncodeError and turn a working fallback into a 500. The UI fetches the
+            # reason from /health (UTF-8 JSON) when the flag says there is one.
+            # The engine that ACTUALLY produced this audio, which is what tts.js labels the
+            # SPEAKING row with. During a fallback this is the engine that answered, not the
+            # one selected -- the selection is reported separately below so a client can
+            # still tell that the toggle is on Cartesia while Tencent is speaking.
+            "X-TTS-Provider": Settings.tts_served_provider(),
+            "X-TTS-Selected": Settings.tts_provider(),
+            "X-TTS-Fallback": "1" if Settings.TTS_FALLBACK_ACTIVE else "0",
             # Disable proxy buffering so the first chunk reaches the browser ASAP.
             "Cache-Control": "no-cache",
             "X-Accel-Buffering": "no",

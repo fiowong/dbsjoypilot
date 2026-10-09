@@ -174,6 +174,11 @@ class SourceAccount(BaseModel):
     display_name: str
     masked: str
     eligible: bool = True
+    # What this account can actually fund right now, in minor units, from the trusted record.
+    # Never taken from the turn, and None means "not known" - the affordability check then stands
+    # down rather than inventing a balance. Kept on the account rather than looked up at the moment
+    # of the check so the resolver reads ONE authoritative record, exactly as it does for a payee.
+    available_minor: Optional[int] = None
 
 
 class Payee(BaseModel):
@@ -182,6 +187,11 @@ class Payee(BaseModel):
     masked: str
     destination_token: str
     verified_saved_payee: bool = True
+    # A beneficiary the BANK has blocked. The record can still exist (the customer saved the payee
+    # before it was blocked), but no payment may ever be prepared to it. Deliberately separate from
+    # `untrusted_note`: that one is a poisoned-record attack read out of the customer's own data,
+    # this one is a bank decision and is authoritative.
+    blocked: bool = False
     untrusted_note: Optional[str] = None       # external, untrusted, never authoritative (§8.3.2)
     # The names the customer actually uses for this person out loud ("mother", "mum", "Ah Girl",
     # "my daughter"). One payee may carry several, and they are matched case-insensitively,

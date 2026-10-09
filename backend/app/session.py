@@ -77,6 +77,14 @@ class Session:
         # The nickname this draft was reached through ("ah girl"), carried to the read-back so Joy
         # can say "I found Ah Girl as Mei Tan", and carried in the audit so the claim is checkable.
         self.nickname_used: Optional[str] = None
+        # A payment the customer has HALF stated and which was refused for one reason - the source
+        # account ("from my fixed deposit"), the destination (a blocked or unverified payee), or the
+        # amount (more than the account holds). No draft exists, correctly: nothing was prepared. But
+        # the fields they DID give are still theirs, and the fix usually arrives in the very next
+        # sentence ("then send from my current account"). Kept here so that sentence can complete the
+        # payment instead of starting from "how much would you like to send?".
+        # {"RECIPIENT", "AMOUNT", "TRANSACTION_TYPE"}, any of which may be None.
+        self.pending_payment: Optional[dict] = None
         self.amount_disambiguated: bool = False
         # The two readings of a materially ambiguous amount ("one fifty" = S$1.50 or S$150.00),
         # held only while the question is open. They are what the ANSWER is matched against, so a

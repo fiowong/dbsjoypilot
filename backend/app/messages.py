@@ -303,6 +303,66 @@ MESSAGES: Dict[str, Dict[str, str]] = {
         "BM": "{name}, saya pause bayaran ini untuk keselamatan. Wang belum dihantar.",
     },
 
+    # ---------- Stage 6: a destination or a source that cannot be used ----------
+    # The fourth answer, alongside resolved / asked / frozen. These exist because the resolver could
+    # only ever say "who should I pay?" or hand back a read-back, so a destination it could RECOGNISE
+    # but not pay was answered with a question the customer had already answered - "Send S$100 to
+    # this new account: 123-456-789" was met with "I don't know who New is".
+    #
+    # Each one names WHAT cannot be done and what to do instead, and each ends by handing the
+    # customer the next step rather than by closing the conversation. None of them accuses anybody:
+    # a fixed deposit is not a crime and a savings balance is not a suspicion.
+    #
+    # A chat cannot register a new payee, so a number typed into the conversation is recognised and
+    # never bound. The verification itself happens on the secure screen, which is why the line
+    # points there instead of offering to do it here.
+    "UNVERIFIED_PAYEE": {
+        "EN": "{name}, this account is not currently a verified saved payee. It must be verified "
+              "before I can prepare a payment.",
+        "ZH": "{name}，这个账户目前不是已验证的收款人。必须先完成验证，我才能准备付款。",
+        "BM": "{name}, akaun ini bukan penerima simpanan yang telah disahkan. Ia perlu disahkan "
+              "dahulu sebelum saya boleh sediakan bayaran.",
+    },
+    "BENEFICIARY_INCOMPLETE": {
+        "EN": "{name}, the beneficiary account information is incomplete. Please select a verified "
+              "payee, or provide complete beneficiary details through the secure screen.",
+        "ZH": "{name}，收款账户的资料不完整。请选择一位已验证的收款人，或通过安全页面提供完整的收款资料。",
+        "BM": "{name}, maklumat akaun penerima tidak lengkap. Sila pilih penerima yang telah "
+              "disahkan, atau berikan maklumat penerima yang lengkap melalui skrin selamat.",
+    },
+    "BLOCKED_BENEFICIARY": {
+        "EN": "{name}, I cannot prepare a payment to a blocked beneficiary. Please choose an "
+              "eligible verified payee.",
+        "ZH": "{name}，我不能准备汇款给已被封锁的收款人。请选择一位合格且已验证的收款人。",
+        "BM": "{name}, saya tidak boleh sediakan bayaran kepada penerima yang telah disekat. Sila "
+              "pilih penerima yang layak dan telah disahkan.",
+    },
+    "SOURCE_ACCOUNT_INELIGIBLE": {
+        "EN": "{name}, your {product} account cannot be used for a direct transfer. Please choose "
+              "an eligible account.",
+        "ZH": "{name}，您的{product}账户不能用来直接转账。请选择一个可用于付款的账户。",
+        "BM": "{name}, akaun {product} anda tidak boleh digunakan untuk pemindahan terus. Sila "
+              "pilih akaun yang layak.",
+    },
+    "INSUFFICIENT_AVAILABLE_FUNDS": {
+        "EN": "{name}, {account} does not have sufficient available funds for {amount}. Please "
+              "enter a lower amount, or select another eligible account.",
+        "ZH": "{name}，{account} 的可用余额不足以支付 {amount}。请输入较少的金额，或选择另一个可用的账户。",
+        "BM": "{name}, {account} tidak mempunyai dana tersedia yang mencukupi untuk {amount}. Sila "
+              "masukkan jumlah yang lebih rendah, atau pilih akaun lain yang layak.",
+    },
+    # An anonymous or untraceable payment. This one IS a refusal rather than a next step: the
+    # customer is asking for the record of the payment to be removed, and the record is the thing
+    # that protects them. BLOCK_OVERRIDE ("I can't change that safety setting") was the right
+    # decision and the wrong sentence - it left the customer unsure what had been refused.
+    "BLOCK_ANONYMOUS": {
+        "EN": "{name}, I cannot help make an anonymous or untraceable payment. No payment has been "
+              "created.",
+        "ZH": "{name}，我不能帮您做匿名或无法追踪的付款。目前没有建立任何付款。",
+        "BM": "{name}, saya tidak boleh membantu membuat bayaran tanpa nama atau yang tidak boleh "
+              "dikesan. Tiada pembayaran dicipta.",
+    },
+
     # ---------- Customer states insufficient funds (empathetic abort, no pressure) ----------
     "INSUFFICIENT_FUNDS": {
         "EN": "{name}, no worries at all. We don't have to send this right now. If you'd like, "
@@ -379,6 +439,37 @@ MESSAGES: Dict[str, Dict[str, str]] = {
         "ZH": "完成了，{name}。{amount} 已经汇给 {payee}，交易编号是 {reference}。",
         "BM": "Selesai, {name}. {amount} telah dihantar kepada {payee}. Nombor rujukan ialah "
               "{reference}.",
+    },
+    # The rail refused to execute. Fail-closed: nothing was sent, no receipt exists, and the
+    # customer hears a reviewed sentence rather than a raw DBS/upstream error string. Two
+    # variants exist because the two causes need different follow-ups from the customer.
+    "RAIL_UNAVAILABLE": {
+        "EN": "Sorry {name}, I can't send this one right now. The bank connection isn't "
+              "available, so nothing has left your account. Please try again in a little "
+              "while.",
+        "ZH": "抱歉 {name}，这笔我现在没法汇出。银行连接暂时不可用，您的账户没有被扣款。"
+              "请稍后再试。",
+        "BM": "Maaf {name}, buat masa ini saya tidak dapat menghantar ini. Sambungan bank "
+              "tidak tersedia, jadi tiada wang keluar dari akaun anda. Sila cuba sebentar lagi.",
+    },
+    "RAIL_CURRENCY_UNSUPPORTED": {
+        "EN": "Sorry {name}, transfers to this account can only be made in Singapore "
+              "dollars, so I haven't sent anything. Would you like to try an SGD account?",
+        "ZH": "抱歉 {name}，这个账户只能以新加坡元转账，所以我没有汇出任何款项。"
+              "您要改用新元账户吗？",
+        "BM": "Maaf {name}, pemindahan ke akaun ini hanya boleh dibuat dalam dolar "
+              "Singapura, jadi saya tidak menghantar apa-apa. Mahu cuba akaun SGD?",
+    },
+    # The DBS limits gate refused it. Says which limit, in plain language, and states plainly
+    # that nothing moved -- the customer must never be left wondering whether it went through.
+    "RAIL_LIMIT_EXCEEDED": {
+        "EN": "Sorry {name}, that amount is over the limit for this transfer, so I haven't "
+              "sent it. Nothing has left your account. You could try a smaller amount.",
+        "ZH": "抱歉 {name}，这个金额超过了这笔转账的上限，所以我没有汇出。您的账户没有被扣款。"
+              "您可以试试较小的金额。",
+        "BM": "Maaf {name}, jumlah itu melebihi had untuk pemindahan ini, jadi saya tidak "
+              "menghantarnya. Tiada wang keluar dari akaun anda. Anda boleh cuba jumlah "
+              "yang lebih kecil.",
     },
     # The future-dated counterpart of EXECUTED. A scheduled payment has NOT moved any money, so it
     # gets its own line: no "has been sent", no reference number, and no receipt card (the receipt

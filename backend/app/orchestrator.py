@@ -22,12 +22,15 @@ from .parsing import (parse_amount, parse_corrected_amount, last_committed_amoun
                        is_schedule_correction, schedule_named_but_unusable,
                        unknown_payee_phrase, colloquial_scale_phrase,
                        open_ended_amount,
+                       beneficiary_account_number, non_transferable_account,
+                       blocked_destination_cue, BENEFICIARY_MIN_DIGITS,
                        lookup_card, lookup_own_account)
 from .agents import (GuardrailsAgent, IntentClassifierAgent, PaymentAgent, ValidationAgent,
                      PersonalizationAgent, CONFIRMATION_BYPASS_RE, LANGUAGE_SWITCH_RE,
                      AFFIRMATION_RE, NEGATION_RE, INSUFFICIENT_FUNDS_RE, SAFETY_HELP_RE,
                      MANDATORY_CONTROL_RE, ROLE_OVERRIDE_RE,
-                     EMERGENCY_NOUN_RE, TRANSFER_WORD_RE, coercion_cue)
+                     EMERGENCY_NOUN_RE, TRANSFER_WORD_RE, coercion_cue,
+                     anonymous_payment_cue)
 from .agent_runtime import AgentUnavailable
 from .llm_client import arm_turn_deadline, disarm_turn_deadline
 # The learned-nickname store. Imported here (not via parsing) because the audit event needs to
@@ -40,8 +43,12 @@ from .controls import (resolve_payee_and_account, closest_saved_payee,
                         evaluate_safety_policy, canonical_payload, payload_hash, sign_payload,
                         Ledger, gateway_verify, GatewayDecision, GatewayResult, ComparatorResult,
                         RiskDecision, RiskOutcome, _not_expired, freeze_message_key,
-                        detect_multiple_recipients, DeterministicResolution)
-from .messages import (say, interface_language, candidate_options, money,
+                        detect_multiple_recipients, DeterministicResolution,
+                        DestinationRefusal, make_refusal)
+# `money` is deliberately NOT re-imported from here. messages.py only re-exports it from
+# .config, so importing it twice bound the same function to two names and left pyflakes (and
+# any reader) asking which one was live. It is imported once, above, from its definition.
+from .messages import (say, interface_language, candidate_options,
                         customer_name, display_phrase, join_options,
                         readback_parts, source_account_phrase, multi_item, readback_multi,
                         readback_multi_lines, multi_first_label, colloquial_confirm,
@@ -221,6 +228,116 @@ def _say_payment_clarification(req: "TurnRequest", session: Session, proposal: P
         say_line("AMOUNT_MISSING", 5, phrase=proposal.recipient_phrase or "?")
         return
     say_line("RECIPIENT_MISSING", 5)
+
+
+# =====================================================================
+# 9b. A destination or a source Joy recognises and cannot use
+#
+# The fourth answer. Until this existed the resolver could only say RESOLVED, "which payee?", or
+# FREEZE, so a destination it could READ but not PAY collapsed into one of two wrong sentences:
+# "Mei Ling, who should I pay?" for a name it had just been given, or a read-back naming an account
+# the customer never chose. Both are answers to a question nobody asked.
+#
+# Everything here is deterministic and reads the SENTENCE, so it fires on the same words whatever
+# the model would have proposed. The record-backed half of the same question (is this payee blocked,
+# can this account fund this amount) lives in controls.py, where the trusted records are read.
+# =====================================================================
+def _refusal_params(refusal: DestinationRefusal) -> dict:
+    """Every placeholder any refusal template may use, always present.
+
+    messages.render() formats the template with exactly the kwargs it is handed, so a template
+    mentioning {product} while the caller passed only {account} would raise. Passing the full set,
+    empty where the reason does not fill it, makes the catalogue safe to edit without the caller
+    having to know which words each line uses.
+    """
+    return {"product": refusal.product or "",
+            "account": refusal.account_masked or "",
+            "amount": refusal.amount or "",
+            "payee": refusal.payee_display or ""}
+
+
+def _half_stated_payment(text: str, customer_id: str) -> Optional[dict]:
+    """The destination and amount a REFUSED turn did state, remembered so a correction can finish it.
+
+    "send S$500 to Mei Tan from my fixed deposit" is refused for ONE reason - the account - and the
+    customer's very next sentence is usually the fix ("then send from my current account"). Without
+    this, that follow-up had nothing to correct: no draft was created (correctly, nothing was
+    prepared) so the S$500 and the payee were gone, and Joy asked for an amount it had been given
+    one turn earlier. The same recogniser the reference policy uses, so the two cannot disagree.
+    """
+    proposal = _instruction_proposal(text, customer_id)
+    if proposal is not None and (proposal.recipient_phrase or proposal.amount_minor is not None):
+        return {"RECIPIENT": proposal.recipient_phrase, "AMOUNT": proposal.amount_minor,
+                "TRANSACTION_TYPE": proposal.transaction_type}
+    amount, _ = parse_amount(instruction_text(text))
+    if amount is None:
+        return None
+    return {"RECIPIENT": None, "AMOUNT": amount, "TRANSACTION_TYPE": None}
+
+
+def _refuse(req, session, refusal: DestinationRefusal, emit, say_line, *,
+            stage: int = 6, text: Optional[str] = None) -> None:
+    """Stop the turn with a NAMED refusal and record why.
+
+    Nothing is prepared: no draft, no confirmation, no signature, and the ledger is never reached.
+    The conversation stays OPEN - every one of these refusals ends by handing the customer the next
+    step, so the state is CLARIFICATION_REQUIRED and not FROZEN. Nothing here accuses anybody: a
+    fixed deposit is not a crime and a savings balance is not a suspicion.
+
+    `text` is the INSTRUCTION the refusal is about. A single-instruction turn is the whole turn; a
+    multi-instruction breath passes the one clause that failed, so what is remembered is that clause
+    and not the whole breath.
+    """
+    session.state, session.outcome = SessionState.CLARIFICATION_REQUIRED, "REFUSED"
+    session.open_clarification_field = None
+    remembered = _half_stated_payment(text or req.text, session.customer_id)
+    if remembered:
+        session.pending_payment = remembered
+    session.note_clarification(refusal.reason)
+    emit("DESTINATION_REFUSED", stage, {
+        "reason": refusal.reason,
+        "message_key": refusal.message_key,
+        "product": refusal.product,
+        "account_masked": refusal.account_masked,
+        "amount": refusal.amount,
+        "payee_display": refusal.payee_display,
+        "canonical_draft": "NOT_CREATED",
+        "confirmation_permitted": False,
+        "ledger_invoked": False,
+        "remembered_payment": remembered,
+        "note": "The destination or the source was understood and cannot be used. No payment was "
+                "prepared, nothing was sent, and the conversation stays open with the next step."})
+    say_line(refusal.message_key, stage, **_refusal_params(refusal))
+
+
+def _destination_guard(text: str, customer_id: str) -> Optional[DestinationRefusal]:
+    """Why the destination or the source THIS SENTENCE names cannot be used, or None.
+
+    Ordered by what is most specific to the sentence:
+      * a destination the customer DESCRIBES as blocked, before anything is bound to it;
+      * a beneficiary account number given in chat, which cannot be registered here;
+      * a source account that is a product no direct transfer can come from.
+
+    Each is a family of cues, not a phrase, because "the blocked account", "my frozen payee" and
+    冻结的账户 are the same situation to the customer and must be the same situation here.
+
+    Takes the SENTENCE rather than the request, so one clause of a multi-instruction breath can be
+    judged on its own words - the clause that names the fixed deposit is the one to refuse, not the
+    whole breath.
+    """
+    if blocked_destination_cue(text):
+        return make_refusal("BLOCKED_BENEFICIARY")
+    digits = beneficiary_account_number(text, customer_id)
+    if digits:
+        if len(digits) < BENEFICIARY_MIN_DIGITS:
+            # A customer who did not finish typing a number, not one naming an account Joy does not
+            # hold. The two need different answers, which is why the digit count decides.
+            return make_refusal("BENEFICIARY_INCOMPLETE")
+        return make_refusal("UNVERIFIED_PAYEE")
+    product = non_transferable_account(text)
+    if product:
+        return make_refusal("SOURCE_ACCOUNT_INELIGIBLE", product=product)
+    return None
 
 
 # =====================================================================
@@ -691,6 +808,39 @@ async def _run_turn(req: TurnRequest) -> TurnResponse:
                                               "verdict reaching the gate was " + previous_decision
                                               + "/" + previous_category})
 
+    # Deterministic ESCALATION (anonymity). The same control as the two above, for the one shape the
+    # live model was most likely to wave through: a customer asking for the payment to leave no
+    # trace. It reads as an ordinary "send X to Y" to a model with a closed rubric, so the turn
+    # reached the payment agent and came back as a read-back for a payment the assistant has no way
+    # to make untraceable.
+    #
+    # Gated on the coercion cue being ABSENT, so the priority is unchanged: a turn that is both a
+    # scam and a request to hide it keeps the scam warning (the customer is the one under attack, and
+    # the pause is the line that helps them). BLOCK is not a downgrade of the verdict it replaces -
+    # a BLOCK is FROZEN with no confirmation and no FaceID override, which is strictly stronger than
+    # the cooling-off a SAFETY_INTERVENTION would have produced - so including SAFETY_INTERVENTION
+    # here replaces a vague sentence with the precise one without weakening anything.
+    if (anonymous_payment_cue(req.text) and coercion_cue(req.text) is None
+            and guardrail.decision in (GuardrailDecision.ALLOW, GuardrailDecision.CLARIFY,
+                                       GuardrailDecision.SAFETY_INTERVENTION)):
+        previous_decision = guardrail.decision.value
+        previous_category = (guardrail.risk_category.value if guardrail.risk_category else "none")
+        guardrail = GuardrailResult(
+            decision=GuardrailDecision.BLOCK, risk_category=RiskCategory.UNSUPPORTED_ACTION,
+            risk_level="HIGH", detected_language=guardrail.detected_language,
+            message_key="BLOCK_ANONYMOUS",
+            developer_reason="Anonymous / untraceable payment escalated by deterministic control: "
+                             "the turn asks for the record of the payment to be removed, which the "
+                             "system cannot do, so no payment field is read and nothing reaches the "
+                             "payment agent.")
+        engine = "deterministic-safeguard"
+        emit("GUARDRAILS_RESULT", 3, {"engine": engine, **guardrail.model_dump(),
+                                      "prompt_version": Settings.PROMPT_VERSION,
+                                      "schema_version": Settings.SCHEMA_VERSION,
+                                      "note": "escalated to BLOCK by deterministic control on an "
+                                              "anonymity cue, the verdict reaching the gate was "
+                                              + previous_decision + "/" + previous_category})
+
     if guardrail.decision == GuardrailDecision.BLOCK:
         # BRD §8.5.7 deterministic routing: BLOCK -> session.state = "FROZEN".
         # The outcome vocabulary keeps the guardrails reason distinct from a validation freeze.
@@ -772,6 +922,11 @@ async def _run_turn(req: TurnRequest) -> TurnResponse:
         "customer_id": session.customer_id,
         "draft": {"payee_phrase": session.payee_phrase,
                   "amount_minor": session.draft.amount_minor if session.draft else None} if session.draft or session.payee_phrase else None,
+        # A payment the customer half stated and which was REFUSED for one reason (a fixed deposit
+        # as the source, a blocked payee, more than the account holds). There is no draft - nothing
+        # was prepared - but a payment IS in progress as far as the customer is concerned, so the
+        # turn that fixes the one bad field is an EDIT_PAYMENT and not a brand-new request.
+        "pending_payment": session.pending_payment,
     })
     if intent.confidence < Settings.INTENT_CONFIDENCE_THRESHOLD:
         intent = IntentResult(intent="UNCLEAR", confidence=intent.confidence,
@@ -1343,6 +1498,23 @@ async def _run_turn(req: TurnRequest) -> TurnResponse:
     if len(instructions) >= 2:
         return await run_multi_turn(req, session, lang, instructions, emit, say_line, finish)
 
+    # ---------- Stage 6 pre-check: a destination or a source that cannot be used ----------
+    # Deterministic, and BEFORE the Payment Agent is consulted, for the same reason the two routing
+    # branches above sit here: the answer comes from the customer's own sentence, so spending a live
+    # call on a proposal that will be thrown away is pure latency. A turn that names a blocked
+    # beneficiary, an account number typed into chat, or a fixed deposit as its funding account is
+    # answered here, with the specific sentence for THAT situation - never the generic "who should I
+    # pay?", which is what all of them used to produce.
+    #
+    # Gated on the intent: a cancel, a safety-help request or an unclear turn has already returned
+    # above, so reaching here with PAYMENT or EDIT_PAYMENT means the customer really is asking for
+    # money to move, and a refusal is an answer to the question they asked.
+    if intent.intent in ("PAYMENT", "EDIT_PAYMENT"):
+        refusal = _destination_guard(req.text, session.customer_id)
+        if refusal is not None:
+            _refuse(req, session, refusal, emit, say_line, stage=6)
+            return await finish()
+
     # ---------- Stage 5 pre-check: an amount the RECOGNISER made ambiguous ----------
     # A recogniser writes numbers as DIGITS, so "one fifty" reaches us as "150" - and so does "one
     # hundred and fifty". The first is two amounts (S$1.50 or S$150.00), the second is one, and the
@@ -1436,35 +1608,54 @@ async def _run_turn(req: TurnRequest) -> TurnResponse:
     # even when it names someone unknown ("no, it's Jane"), and the payee resolution below still
     # reports that name as not found. This is the same carry-forward a date-only correction already
     # relies on, widened from "only WHEN it runs" to "whatever the turn left unsaid".
-    if (intent.intent == "EDIT_PAYMENT" and session.draft is not None
-            and not date_correction):
-        carried = []
-        if proposal.amount_minor is None and session.draft.amount_minor is not None:
-            proposal.amount_minor = session.draft.amount_minor
-            carried.append("AMOUNT")
-        if not proposal.recipient_phrase and session.draft.payee_display:
-            proposal.recipient_phrase = session.draft.payee_display
-            carried.append("RECIPIENT")
-        if not proposal.transaction_type:
-            proposal.transaction_type = session.draft.transaction_type
-            carried.append("TRANSACTION_TYPE")
-        if carried:
-            # The payment is whole again, so a clarification the model raised only because its own
-            # sentence was short is no longer true and must not be asked.
-            if (proposal.status != "PROPOSAL_READY"
-                    and proposal.amount_minor is not None and proposal.recipient_phrase):
-                proposal.status = "PROPOSAL_READY"
-                proposal.clarification_field = None
-                proposal.clarification_question = None
-            if "RECIPIENT" in carried and not payee_confirmed_this_turn:
-                session.payee_phrase = proposal.recipient_phrase
-            emit("EDIT_FIELDS_CARRIED_FORWARD", 5, {
-                "carried": carried,
-                "from_draft_version": session.current_draft_version,
-                "proposal_status": proposal.status,
-                "note": "An EDIT_PAYMENT turn changes one field. Every field this turn did not "
-                        "restate was carried forward from the payment already on screen, so a "
-                        "correction cannot discard what the customer has already told us."})
+    if intent.intent == "EDIT_PAYMENT" and not date_correction:
+        # WHERE the unsaid fields come from. Normally the draft on screen. But after a REFUSAL there
+        # is no draft - correctly, nothing was prepared - while the customer's payment is still
+        # half-stated ("S$500 to Mei Tan", minus a usable account). session.pending_payment is that
+        # half-stated payment, remembered by the refusal that stopped it, so the sentence that fixes
+        # the one bad field ("then send from my current account") completes the payment instead of
+        # restarting it at "how much would you like to send?".
+        carried_from: Optional[dict] = None
+        carried_origin = "draft"
+        if session.draft is not None:
+            carried_from = {"AMOUNT": session.draft.amount_minor,
+                            "RECIPIENT": session.draft.payee_display,
+                            "TRANSACTION_TYPE": session.draft.transaction_type}
+        elif session.pending_payment:
+            carried_from, carried_origin = dict(session.pending_payment), "refused_payment"
+        if carried_from is not None:
+            carried = []
+            if proposal.amount_minor is None and carried_from.get("AMOUNT") is not None:
+                proposal.amount_minor = carried_from["AMOUNT"]
+                carried.append("AMOUNT")
+            if not proposal.recipient_phrase and carried_from.get("RECIPIENT"):
+                proposal.recipient_phrase = carried_from["RECIPIENT"]
+                carried.append("RECIPIENT")
+            if not proposal.transaction_type and carried_from.get("TRANSACTION_TYPE"):
+                proposal.transaction_type = carried_from["TRANSACTION_TYPE"]
+                carried.append("TRANSACTION_TYPE")
+            if carried:
+                # The payment is whole again, so a clarification the model raised only because its own
+                # sentence was short is no longer true and must not be asked.
+                if (proposal.status != "PROPOSAL_READY"
+                        and proposal.amount_minor is not None and proposal.recipient_phrase):
+                    proposal.status = "PROPOSAL_READY"
+                    proposal.clarification_field = None
+                    proposal.clarification_question = None
+                if "RECIPIENT" in carried and not payee_confirmed_this_turn:
+                    session.payee_phrase = proposal.recipient_phrase
+                emit("EDIT_FIELDS_CARRIED_FORWARD", 5, {
+                    "carried": carried,
+                    "source": carried_origin,
+                    "from_draft_version": session.current_draft_version,
+                    "proposal_status": proposal.status,
+                    "note": "An EDIT_PAYMENT turn changes one field. Every field this turn did not "
+                            "restate was carried forward from the payment already on screen, so a "
+                            "correction cannot discard what the customer has already told us."
+                            + (" No draft exists here - the payment was refused, not prepared - so "
+                               "the fields come from the payment the customer half stated, which "
+                               "the refusal remembered." if carried_origin == "refused_payment"
+                               else "")})
 
     # Deterministic safeguard (live AMOUNT over-trigger). The live Payment Agent sometimes fails
     # to copy an amount out of a turn that states it plainly and reports amount_minor=None:
@@ -1813,6 +2004,13 @@ async def _run_turn(req: TurnRequest) -> TurnResponse:
                     + (" A nickname supplied the lookup key only; the destination came from the "
                        "trusted repository." if matched_via == "nickname" else "")})
 
+    if resolution.outcome == "REFUSED":
+        # Recognised, and not payable: a blocked payee, an unverified one, or an amount the source
+        # account cannot fund. Checked BEFORE the FREEZE branch because the two are opposites - a
+        # freeze says something is suspicious, this says nothing is, the destination simply cannot
+        # be used - and the customer is owed the difference.
+        _refuse(req, session, resolution.refusal, emit, say_line, stage=6)
+        return await finish()
     if resolution.outcome == "FREEZE":
         session.state, session.frozen, session.outcome = SessionState.FROZEN, True, "FREEZE"
         emit("TRANSACTION_FROZEN", 6, {
@@ -1866,6 +2064,9 @@ async def _run_turn(req: TurnRequest) -> TurnResponse:
                                f"Singapore time")
     session.draft = draft
     session.draft_versions.append(draft.version)
+    # The half-stated payment has now BECOME a payment, so the memory of it is spent. Left set, a
+    # later correction would be filled from a payment the customer has already moved on from.
+    session.pending_payment = None
     session.state = SessionState.DRAFT_READY
     emit("CANONICAL_DRAFT_CREATED", 7, {
         "draft": draft.model_dump(), "schema_validation": "PASS",
@@ -2261,7 +2462,17 @@ async def run_multi_turn(req: TurnRequest, session, lang: str, instructions: Lis
                  destination=destination or "")
         return await finish()
 
+    refused: Optional[DestinationRefusal] = None
+    refused_text: Optional[str] = None
     for text in instructions:
+        guard = _destination_guard(text, session.customer_id)
+        if guard is not None:
+            # Judged on THIS clause's words, so the clause that names the fixed deposit is the one
+            # refused rather than the whole breath. The record-backed half of the same question is
+            # raised by resolve_payee_and_account below.
+            if refused is None:
+                refused, refused_text = guard, text
+            continue
         proposal = _instruction_proposal(text, session.customer_id,
                                          session.settled_amount_minor,
                                          session.pending_amount_payee)
@@ -2269,6 +2480,15 @@ async def run_multi_turn(req: TurnRequest, session, lang: str, instructions: Lis
             continue
         resolution = resolve_payee_and_account(session.customer_id, proposal,
                                                proposal.recipient_phrase)
+        if resolution.outcome == "REFUSED":
+            # One clause of the breath names a destination that cannot be used. The whole breath is
+            # refused rather than the good clause being prepared alone: half a request, silently
+            # dropped, is how "pay my StarHub bill and send S$50 to Ah Girl" became one payment with
+            # no explanation. The first refusal is the one spoken; the reason is the same kind of
+            # answer for any of them.
+            if refused is None:
+                refused, refused_text = resolution.refusal, text
+            continue
         if resolution.outcome != "RESOLVED" or resolution.draft is None:
             continue
         draft = resolution.draft
@@ -2324,6 +2544,12 @@ async def run_multi_turn(req: TurnRequest, session, lang: str, instructions: Lis
         if (not source_stated
                 and draft.transaction_type in ("OWN_ACCOUNT_TRANSFER", "SAVED_PAYEE_TRANSFER")):
             open_questions.append("SOURCE_ACCOUNT")
+
+    if refused is not None:
+        # Said before the "nothing splittable" line below, which would otherwise report a request
+        # that was understood perfectly well as one Joy could not understand at all.
+        _refuse(req, session, refused, emit, say_line, stage=5, text=refused_text)
+        return await finish()
 
     if len(drafts) < 2:
         # Nothing safely splittable after resolution, say so rather than silently dropping one.
@@ -2510,7 +2736,14 @@ async def run_multi_merge(req: TurnRequest, session, lang: str,
 
     updated, appended = 0, 0
     changed = None
+    refused: Optional[DestinationRefusal] = None
+    refused_text: Optional[str] = None
     for text in new_instrs:
+        guard = _destination_guard(text, session.customer_id)
+        if guard is not None:
+            if refused is None:
+                refused, refused_text = guard, text
+            continue
         proposal = _instruction_proposal(text, session.customer_id,
                                          session.settled_amount_minor,
                                          session.pending_amount_payee)
@@ -2518,6 +2751,12 @@ async def run_multi_merge(req: TurnRequest, session, lang: str,
             continue
         resolution = resolve_payee_and_account(session.customer_id, proposal,
                                                proposal.recipient_phrase)
+        if resolution.outcome == "REFUSED":
+            # An amendment that names a destination which cannot be used. Reported, never applied:
+            # the queued payment keeps the fields the customer already set.
+            if refused is None:
+                refused, refused_text = resolution.refusal, text
+            continue
         if resolution.outcome != "RESOLVED" or resolution.draft is None:
             continue
         new_draft = resolution.draft
@@ -2606,6 +2845,15 @@ async def run_multi_merge(req: TurnRequest, session, lang: str,
             appended += 1
             if changed is None:
                 changed = new_draft
+
+    # A refused amendment, with nothing else in the turn to merge: the queue is untouched and the
+    # customer is told which clause cannot be used, rather than the review silently continuing as
+    # though they had said nothing. When the same turn ALSO merged something, the review carries on
+    # (the queued payments are what the customer is looking at) and the refused clause is simply not
+    # applied - the same treatment an unresolvable amendment has always had here.
+    if refused is not None and not (updated or appended):
+        _refuse(req, session, refused, emit, say_line, stage=5, text=refused_text)
+        return await finish()
 
     # The open draft keeps its identity, so the confirm card on screen is updated in place rather
     # than duplicated, and the spoken "yes" that may have led this turn executed nothing.
@@ -2925,6 +3173,11 @@ async def run_confirmation(req: ConfirmRequest) -> TurnResponse:
         say_line("SCHEDULED", 15, amount=money(draft.amount_minor), payee=payee_phrase,
                  when=draft.scheduled_for)
     else:
+        # ---------- Stage 15: restricted mock payment capability ----------
+        # The chain authorises here and only here, and the ledger is called DIRECTLY: this build
+        # does not ship rails.py, so there is no pluggable rail seam and no "dbs" execution path.
+        # A "mock" rail that simply forwarded to Ledger.execute would be the same call behind an
+        # extra indirection, so the indirection was dropped rather than carried as dead weight.
         txn_id, count, created = Ledger.execute(payload["idempotency_key"], ledger_request)
         session.execution = {"transaction_id": txn_id, "status": "RECORDED",
                              "amount_minor": draft.amount_minor, "currency": draft.currency,

@@ -4,8 +4,13 @@
    and drops the landing intro card into the chat. It does NOT implement any payment
    logic, that is owned by the five files above (translations/ui/personalization/
    scenarios/live) and by the backend. Everything it touches is a global already defined
-   by those files: MASCOT, money(), chatEl, scroll(), resetRun(), popup(), liveFreeTurn(),
-   mic. Loaded after live.js so all of those exist. */
+   by those files: MASCOT, money(), chatEl, scroll(), resetRun(), audit(), popup(),
+   liveFreeTurn(), mic. Loaded after live.js so all of those exist.
+
+   It also owns the top bar's one ACTION button, #resetBtn (see resetDemo below). Joy's
+   mascot beside the phone is NOT switched here: it is shown by `#studio.appmode .joymascot`
+   in styles.css, and `appmode` is exactly the "not in the chat yet" state this file already
+   maintains for the inspector. One class, two consequences, no extra state to keep in sync. */
 
 /* ---------- element refs ---------- */
 const studioEl  = $('studio');
@@ -295,7 +300,7 @@ function introCard(){
        <div class="ibody">
          <div class="ihi">Welcome back! How can Joy help?</div>
          <div class="itxt">Tell me who you'd like to pay and how much.
-           You'll review and authorize before any money moves.</div>
+           You'll review and authorise before any money moves.</div>
          <div class="cmdlabel">SAMPLE VOICE COMMANDS</div>
          <div class="chips">
            <button class="chip" type="button" data-say="Pay Mei Tan 50 dollars">&ldquo;Pay Mei Tan $50 tomorrow&rdquo;</button>
@@ -415,17 +420,29 @@ document.querySelectorAll('#tabnav .tab').forEach(b=>{
 const joyBack = $('joyBack');
 if(joyBack) joyBack.addEventListener('click', ev=>{ ev.preventDefault(); showHome(); });
 
-const restartBtn = $('restartBtn');
-if(restartBtn) restartBtn.addEventListener('click', ev=>{ ev.preventDefault(); showHome(); });
+/* RESET. Replaces the old "DBS app" button, which only did what the phone's own back arrow
+   already does. This is the action a presenter actually reaches for mid-demo: clear the run and
+   get back to a known-good state in one click.
+   Context-aware on purpose:
+     - inside the Joy chat, restart the conversation IN PLACE (new intro card, cleared panels),
+       so a demo that has gone sideways recovers without a walk back through the app;
+     - anywhere else, return to the digibank home with everything cleared.
+   resetRun() is the same call the scenario runner uses between runs, so a reset cannot leave a
+   half-resolved popup or a stale panel behind. */
+function resetDemo(){
+  const joy = $('scrJoy');
+  resetRun();
+  if(joy && joy.classList.contains('on')) showJoy(true);
+  else                                    showHome();
+  audit('DEMO_RESET · operator restarted the run', 'warn');
+}
+const resetBtn = $('resetBtn');
+if(resetBtn) resetBtn.addEventListener('click', ev=>{ ev.preventDefault(); resetDemo(); });
 
-/* The MECE A-H rail is a BACKUP, kept for the BRD walkthrough and judge Q&A. It is
-   hidden by default so the landing experience is the DBS app, not a scenario picker. */
-const railEl = $('rail'), railToggle = $('railToggle');
-if(railToggle && railEl) railToggle.addEventListener('click', ev=>{
-  ev.preventDefault();
-  railEl.hidden = !railEl.hidden;
-  railToggle.textContent = railEl.hidden ? 'Scenarios' : 'Hide scenarios';
-});
+/* The A-H rail is a BACKUP, kept for the BRD walkthrough and judge Q&A. It no longer has a
+   top-bar toggle or a strip of its own: it lives on page 3 of the explainer overlay, which is
+   opened from either status chip. scenarios.js still wires its `.sbtn` buttons by class, so the
+   rail works wherever it is placed. */
 
 /* Boot: open straight on the User ID / PIN form, matching iggy. The launchpad (Jewel/Changi
    hero + 6 tiles) is still in the DOM and reachable via the form's back arrow, but the form

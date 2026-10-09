@@ -55,6 +55,7 @@ _SCHEMA = (
         display_name TEXT NOT NULL,
         masked TEXT NOT NULL,
         eligible INTEGER NOT NULL,
+        available_minor INTEGER,
         position INTEGER NOT NULL
     )""",
     """CREATE TABLE IF NOT EXISTS payees (
@@ -64,6 +65,7 @@ _SCHEMA = (
         masked TEXT NOT NULL,
         destination_token TEXT NOT NULL,
         verified_saved_payee INTEGER NOT NULL DEFAULT 1,
+        blocked INTEGER NOT NULL DEFAULT 0,
         untrusted_note TEXT,
         nicknames TEXT,
         position INTEGER NOT NULL
@@ -105,6 +107,15 @@ _INDEXES = (
 
 # Children before parents, so a reseed never fights a primary key.
 _TABLES = ("accounts", "payees", "billers", "cards", "own_accounts", "customers")
+
+# Columns added to a table that already exists in a developer's file. `CREATE TABLE IF NOT EXISTS`
+# does nothing to a table that is already there, so a new column on an existing database would be
+# missing and every read of it would raise - which is exactly how a "small" schema change breaks a
+# running demo. Each is applied only when absent, so this is idempotent and safe to run every boot.
+_COLUMN_ADDITIONS = (
+    ("accounts", "available_minor", "INTEGER"),
+    ("payees", "blocked", "INTEGER NOT NULL DEFAULT 0"),
+)
 
 
 def _json_list(raw: Optional[str]) -> List[str]:
@@ -153,6 +164,20 @@ class Repository:
                 conn.execute(statement)
             for statement in _INDEXES:
                 conn.execute(statement)
+            self._migrate(conn)
+
+    @staticmethod
+    def _migrate(conn: sqlite3.Connection) -> None:
+        """Add a column that a pre-existing table is missing, and nothing else.
+
+        Only ADD COLUMN, never a rewrite: the row values already there are the customer's own
+        record, and a migration that rebuilt the table could silently drop one. PRAGMA table_info
+        is the presence test, so this costs one cheap query per column per boot.
+        """
+        for table, column, declaration in _COLUMN_ADDITIONS:
+            present = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+            if column not in present:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {declaration}")
 
     def seed(self) -> None:
         """Fill in any row that is missing from data.py.
@@ -172,10 +197,22 @@ class Repository:
                 for position, account in enumerate(record.get("accounts", [])):
                     conn.execute(
                         "INSERT OR IGNORE INTO accounts "
-                        "(account_id, customer_id, display_name, masked, eligible, position) "
-                        "VALUES (?, ?, ?, ?, ?, ?)",
+                        "(account_id, customer_id, display_name, masked, eligible, "
+                        " available_minor, position) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?)",
                         (account.account_id, customer_id, account.display_name,
-                         account.masked, int(account.eligible), position),
+                         account.masked, int(account.eligible),
+                         account.available_minor, position),
+                    )
+                    # A row that predates the available_minor column has NULL there, and INSERT OR
+                    # IGNORE will not touch it. A NULL balance is not "unknown" here, it is a stale
+                    # seed - and the affordability check would then stand down for that account and
+                    # let an unaffordable payment through. Filled only where it is still NULL, so a
+                    # value that exists is never overwritten (see the module docstring).
+                    conn.execute(
+                        "UPDATE accounts SET available_minor = ? "
+                        "WHERE account_id = ? AND available_minor IS NULL",
+                        (account.available_minor, account.account_id),
                     )
 
             for customer_id, payees in seed_data.SAVED_PAYEES.items():
@@ -183,11 +220,12 @@ class Repository:
                     conn.execute(
                         "INSERT OR IGNORE INTO payees "
                         "(beneficiary_id, customer_id, display_name, masked, destination_token, "
-                        " verified_saved_payee, untrusted_note, nicknames, position) "
-                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        " verified_saved_payee, blocked, untrusted_note, nicknames, position) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                         (payee.beneficiary_id, customer_id, payee.display_name, payee.masked,
                          payee.destination_token, int(payee.verified_saved_payee),
-                         payee.untrusted_note, json.dumps(payee.nicknames), position),
+                         int(payee.blocked), payee.untrusted_note,
+                         json.dumps(payee.nicknames), position),
                     )
 
             for customer_id, billers in seed_data.BILLERS.items():
@@ -246,6 +284,7 @@ class Repository:
                     display_name=r["display_name"],
                     masked=r["masked"],
                     eligible=bool(r["eligible"]),
+                    available_minor=r["available_minor"],
                 )
                 for r in conn.execute(
                     "SELECT * FROM accounts WHERE customer_id = ? ORDER BY position",
@@ -273,6 +312,7 @@ class Repository:
                     masked=r["masked"],
                     destination_token=r["destination_token"],
                     verified_saved_payee=bool(r["verified_saved_payee"]),
+                    blocked=bool(r["blocked"]),
                     untrusted_note=r["untrusted_note"],
                     nicknames=_json_list(r["nicknames"]),
                 )

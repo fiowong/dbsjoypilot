@@ -19,6 +19,7 @@ async function play(steps, my){
       case 'outcome':  outcome(s.v,s.c); break;
       case 'audit':    audit(s.v,s.c); break;
       case 'hit':      hit(s.b,s.n); break;
+      case 'req':      reqHit(s.n); break;
       case 'review':   { const r=await fieldReview(s.lang,s.d); if(my!==RUN||r.cancelled)return; s.out=r; } break;
       case 'popup':    { lastAct=await popup(s.cfg); if(my!==RUN)return; } break;
       case 'receipt':  receiptCard(s.o, s.lang); break;
@@ -36,9 +37,17 @@ function resetPanels(){
   agentsEl.innerHTML='<div class="placeholder">Awaiting the first committed turn…</div>';
   agentCards = {};   // drop any "thinking" placeholders from a previous run
   auditEl.innerHTML='<div class="placeholder">No events yet.</div>';
+  auditReset();   // back to three visible rows and a hidden disclosure button
   agentCalls=0; $('acnt').textContent='0 calls';
   STAGES.forEach((_,i)=>stage(i,''));
-  BRANCHES.forEach(b=>{ $('br'+b[0]).classList.remove('hit'); b[2].forEach(n=>$('nd'+n).classList.remove('hit')); });
+  // The visible failure map is gone, so the br*/nd* lookups below find nothing. They are
+  // guarded rather than deleted because BRANCHES still drives the hidden scenario rail, and an
+  // unguarded null here would throw and take the whole inspector down with it.
+  BRANCHES.forEach(b=>{
+    const br=$('br'+b[0]); if(br) br.classList.remove('hit');
+    b[2].forEach(n=>{ const nd=$('nd'+n); if(nd) nd.classList.remove('hit'); });
+  });
+  reqReset();   // clear the requirements-coverage highlights from the previous run
   state('IDLE'); draft('-'); ledger('NOT_INVOKED'); sig('NONE'); outcome('-');
   closePopup('cancelled');   // never leave a script blocked on a stale popup
   closeDraftCard('cancelled');   // ...or on a draft card the customer never acted on
@@ -800,7 +809,13 @@ SC.H1 = () => [
      3. default: the host this page was served from, port 8078
    The default deliberately uses the PAGE's own hostname instead of a hardcoded 127.0.0.1:
    when the app is opened from a phone on the same Wi-Fi, 127.0.0.1 would mean the phone
-   itself, not the laptop running the backend. */
+   itself, not the laptop running the backend.
+
+   The HTTPS exception: a DEPLOYED page is served by the same vhost that proxies the backend,
+   so ":8078" is both the wrong port and a mixed-content violation. A page counts as deployed
+   when it is served on a standard web port -- https anywhere, or http on port 80 -- because
+   that is how Nginx exposes it (with or without a domain, so this works on a bare IP too).
+   Local development runs on :8098 and keeps the :8078 default. */
 const API_BASE = (() => {
   const clean = u => String(u).replace(/\/+$/, '');
   if (window.AUNTIEJOY_API_BASE) return clean(window.AUNTIEJOY_API_BASE);
@@ -808,6 +823,10 @@ const API_BASE = (() => {
     const q = new URLSearchParams(window.location.search).get('api');
     if (q) return clean(q);
   } catch (_) { /* no URLSearchParams: fall through to the default */ }
+  const proto = window.location.protocol;
+  const port = String(window.location.port || '');
+  const deployed = proto === 'https:' || (proto === 'http:' && (port === '' || port === '80'));
+  if (deployed) return clean(window.location.origin);
   return `http://${window.location.hostname || '127.0.0.1'}:8078`;
 })();
 
@@ -876,7 +895,19 @@ function finalStateSteps(s){
   if(s.signature) steps.push({t:'sig', v: s.signature});
   if(s.ledger) steps.push({t:'ledger', v: s.ledger});
   if(s.outcome){
-    const cls = /ACCEPT|RECORD/.test(s.outcome) ? 'ok' : /REJECT|BLOCK|FROZEN/.test(s.outcome) ? 'stop' : 'warn';
+    // Outcome -> badge colour. Spelled out rather than left to inference: an outcome matching
+    // nothing falls to the final branch, so it would LOOK deliberate while being an accident.
+    // Two amber outcomes are named here for exactly that reason.
+    //   REFUSED     - the fourth resolver outcome. Nothing is suspicious and nothing moved; the
+    //                 field the customer gave simply cannot be used (a blocked payee, an
+    //                 unverified account number). It stays CLARIFICATION_REQUIRED, so it must
+    //                 NOT read as a freeze -- hence amber, never red.
+    //   COOLING_OFF - a deliberate pause, never an accusation (§A.7 D3).
+    // 'warn' is the deliberate default: the customer's attention is needed and nothing has
+    // moved. Anything that HAS moved ('ok') or been stopped ('stop') is matched above it.
+    const cls = /ACCEPT|RECORD/.test(s.outcome) ? 'ok'
+              : /REJECT|BLOCK|FROZEN/.test(s.outcome) ? 'stop'
+              : 'warn';   // incl. REFUSED, COOLING_OFF, CLARIFY, EDIT_REQUESTED
     steps.push({t:'outcome', v: s.outcome, c: cls});
   }
   return steps;
@@ -902,7 +933,7 @@ function scenarioToSteps(resp){
 
   steps.push(...finalStateSteps(resp.session || {}));
 
-  // Highlight the MECE branch/node this scenario demonstrates (HAPPY has no branch).
+  // Highlight the failure branch/node this scenario demonstrates (HAPPY has no branch).
   if(resp.branch && resp.branch!=='-'){
     steps.push({t:'hit', b: resp.branch, n: resp.scenario_id});
   }
@@ -939,6 +970,13 @@ async function runScenario(id){
       {t:'audit',v:'LIVE BACKEND UNREACHABLE ('+err.message+') · showing scripted fallback',c:'warn'}
     ].concat(SC[id]?SC[id]():[]);
   }
+  // Light the requirements-coverage rows this scenario is evidence for, BEFORE the first step
+  // plays so the panel updates the moment the presenter clicks. Pushed here rather than inside
+  // scenarioToSteps() so the scripted fallback path lights them too, and keyed on the scenario
+  // id rather than the failure branch because the happy path has no branch but is the primary
+  // evidence for multi-intent parsing and for the biometric approval.
+  steps.unshift({t:'req', n: REQ_FOR_SCENARIO[id] || []});
+
   await play(steps, my);
   if(my!==RUN) return;
   BUSY=false;

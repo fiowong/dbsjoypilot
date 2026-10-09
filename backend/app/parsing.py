@@ -1422,6 +1422,158 @@ def open_ended_amount(text: str) -> bool:
     return _OPEN_ENDED_AMOUNT_RE.search(instruction) is not None
 
 
+# =====================================================================
+# A destination or a source Joy cannot use.
+#
+# Every detector below reads the SENTENCE, and every one of them exists for the same reason: the
+# resolver could only ever answer RESOLVED, "which payee?", or FREEZE, so a destination it could
+# recognise but not pay collapsed into the generic "Mei Ling, who should I pay?" - the one answer
+# that helps nobody. A customer who typed an account number, or named a fixed deposit as the
+# funding account, was told Joy did not know who they meant, which is not what happened.
+#
+# Each detector is a FAMILY, not a phrase. "the blocked account I used last time" and "my frozen
+# payee" and "冻结的账户" are the same situation to a customer, so they are the same situation here.
+# =====================================================================
+
+# The shared gate. Each of these is a REFUSAL, so each must be sure the customer is actually trying
+# to move money: a guard that fired on "why is my account blocked?" would answer a question nobody
+# asked, with a refusal to a payment nobody requested.
+_MOVE_MONEY_RE = re.compile(
+    r"\b(send|sends|sending|transfer|transfers|transferring|remit|pay|pays|paying|"
+    r"move|moves|moving|hantar|kirim|pindah|bayar)\b"
+    r"|汇款|转账|转钱|汇钱|付给|转给|打钱", re.IGNORECASE)
+
+
+def asks_to_move_money(text: str) -> bool:
+    """True when the turn is asking for money to move: a payment verb, or an amount.
+
+    The gate for every destination refusal below. Deliberately generous about the VERB - "move",
+    "pay", "hantar", "转给" are all the same request - because a refusal that never fires is the
+    bug being fixed, while a refusal that fires on a non-payment is caught here.
+    """
+    if not text:
+        return False
+    return _MOVE_MONEY_RE.search(text) is not None or parse_amount(text)[0] is not None
+
+
+# ---------------------------------------------------------------------------
+# A beneficiary ACCOUNT NUMBER given in chat.
+#
+# DBS chat cannot register a new payee, so a number here is a destination Joy can recognise but
+# must never bind: the destination for every payment comes from the trusted saved-payee record, and
+# nothing in the turn may introduce one. Two shapes count as a number, and only two:
+#   * an "account" word in front of it - "account 123", "this new account: 123-456-789";
+#   * a number written in GROUPS - "123-456-789", "456 789 012". No amount is ever written with a
+#     dash, so a grouped run is unambiguous, while a bare "1000" is an amount and never matches.
+# ---------------------------------------------------------------------------
+_ACCOUNT_WORD = r"(?:account|acct|a/c|akaun|户口|账户|帐号|账号)"
+_NUMBER_WORD = r"(?:number|no\.?|nombor|号码|號碼)"
+_DIGIT_RUN = r"\d(?:[\d\-\s]{0,20}\d)?"
+
+_ACCOUNT_NUMBER_RE = re.compile(
+    rf"{_ACCOUNT_WORD}\s*(?:{_NUMBER_WORD})?\s*[:#\-]?\s*({_DIGIT_RUN})", re.IGNORECASE)
+_GROUPED_NUMBER_RE = re.compile(r"(?<![\d,.])(\d{2,6}(?:[\-\s]\d{2,6}){1,4})(?![\d,.])")
+
+# How many digits a real beneficiary account has. Fewer than this is an INCOMPLETE reference rather
+# than an unverified one, and the two get different answers: "account 123" is a customer who did not
+# finish typing, while "123-456-789" is a customer naming an account Joy does not hold.
+BENEFICIARY_MIN_DIGITS = 6
+
+
+def _digits_only(raw: str) -> str:
+    return re.sub(r"\D", "", raw or "")
+
+
+def beneficiary_account_number(text: str, customer_id: Optional[str] = None) -> Optional[str]:
+    """The beneficiary account number the customer gave in chat, as bare digits, or None.
+
+    A number that matches one of the customer's OWN saved payees' masked endings is not a new
+    destination, it is how they identified somebody they already hold, so it is left to the
+    ordinary resolver rather than refused here.
+    """
+    if not text or not asks_to_move_money(text):
+        return None
+    match = _ACCOUNT_NUMBER_RE.search(text) or _GROUPED_NUMBER_RE.search(text)
+    if not match:
+        return None
+    digits = _digits_only(match.group(1))
+    if not digits:
+        return None
+    if customer_id:
+        for payee in get_repository().get_saved_payees(customer_id):
+            if digits and digits == _digits_only(payee.masked):
+                return None
+    return digits
+
+
+# ---------------------------------------------------------------------------
+# A source account that cannot fund a direct transfer.
+#
+# The customer is not wrong to hold these - a fixed deposit, a unit trust, CPF. The payment simply
+# cannot come from there. Silently substituting Savings (what used to happen, because the account
+# lookup only searches ELIGIBLE accounts and falls back to the first one) put a read-back in front of
+# the customer naming an account they never chose, which is the one thing a read-back must not do.
+# ---------------------------------------------------------------------------
+_NON_TRANSFERABLE_PRODUCT = (
+    r"fixed\s+deposit|time\s+deposit|fd|unit\s+trusts?|investment\s+account|investments?|"
+    r"shares?|stocks?|equit(?:y|ies)|cpf|srs|supplementary\s+retirement|retirement\s+account|"
+    r"insurance|endowment|savings\s+bond|ssb|treasury|t-?bills?|bonds?"
+    r"|定期存款|定存|基金|信托|投资账户|公积金|保险"
+)
+# Anchored on a SOURCE cue, never on the product name alone. "transfer to my fixed deposit" is a
+# DESTINATION the customer is asking for, not a funding account; refusing it as a source would be
+# answering a question they did not ask.
+_SOURCE_CUE = r"(?:from|out\s+of|using|use|via|dari|dgn|dengan|从|用|拿)"
+_POSSESSIVE = r"(?:(?:my|our|the|saya|我(?:的)?)\s*)?"
+_NON_TRANSFERABLE_RE = re.compile(
+    rf"{_SOURCE_CUE}\s+{_POSSESSIVE}({_NON_TRANSFERABLE_PRODUCT})", re.IGNORECASE)
+
+
+def non_transferable_account(text: str) -> Optional[str]:
+    """The non-transferable product the customer named as the SOURCE, or None.
+
+    Returns the product in the customer's own words ("fixed deposit"), so the refusal can name what
+    they actually said rather than a generic "that account".
+    """
+    if not text or not asks_to_move_money(text):
+        return None
+    match = _NON_TRANSFERABLE_RE.search(text)
+    if not match:
+        return None
+    return re.sub(r"\s+", " ", match.group(1).strip().lower())
+
+
+# ---------------------------------------------------------------------------
+# A destination the customer describes as BLOCKED.
+#
+# The customer does not have to name it; "the blocked account I used last time" is how somebody
+# refers to a payee whose name they cannot recall. A blocked payee may still exist on the record -
+# they saved it before the bank blocked it - so the record is checked too (controls.py), and this
+# catches the customer who describes it instead of naming it.
+#
+# Cue AND destination noun, within a short window, so a stray "frozen" somewhere else in a long
+# sentence cannot refuse an ordinary payment. Two patterns because `\b` is meaningless around CJK.
+# ---------------------------------------------------------------------------
+_BLOCKED_CUE = (r"(?:blocked|block|blacklist(?:ed)?|frozen|freeze|suspend(?:ed)?|banned|"
+                r"restricted|disallowed|disekat|sekat|dibekukan|beku|diharamkan)")
+_DEST_NOUN = r"(?:account|payee|beneficiary|recipient|person|contact|akaun|penerima|orang)"
+_BLOCKED_CJK = r"(?:冻结|黑名单|封禁|禁止|封锁)"
+_DEST_NOUN_CJK = r"(?:账户|户口|账号|收款人|对方|这个人)"
+
+_BLOCKED_DESTINATION_RE = re.compile(
+    rf"\b{_BLOCKED_CUE}\b[^.!?]{{0,30}}?\b{_DEST_NOUN}\b"
+    rf"|\b{_DEST_NOUN}\b[^.!?]{{0,30}}?\b{_BLOCKED_CUE}\b"
+    rf"|{_BLOCKED_CJK}[^。！？]{{0,20}}?{_DEST_NOUN_CJK}"
+    rf"|{_DEST_NOUN_CJK}[^。！？]{{0,20}}?{_BLOCKED_CJK}", re.IGNORECASE)
+
+
+def blocked_destination_cue(text: str) -> bool:
+    """True when the turn describes the destination it wants to pay as blocked or frozen."""
+    if not text or not asks_to_move_money(text):
+        return False
+    return _BLOCKED_DESTINATION_RE.search(text) is not None
+
+
 # ---------------------------------------------------------------------------
 # Multiple independent instructions in one breath (IN-10)
 # Split a single turn such as

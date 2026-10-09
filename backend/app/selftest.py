@@ -375,6 +375,40 @@ def _test_personalization() -> int:
             print(f"        -> expected personalize={expected_personalize}, reason={expected_reason}")
     return failures
 
+
+# =====================================================================
+# 14b. Over-trigger guards. These are NOT customer-facing scenarios: they carry no node on the
+# MECE failure map, so shipping them in SCENARIOS made the rail (21 nodes) and the scenario list
+# (22) disagree. They are still safety-relevant, so they are asserted here instead.
+#
+# (text, expected state, expected outcome)
+# =====================================================================
+OVER_TRIGGER_CASES = [
+    # "sekarang" ("now") is urgency, not coercion. Before the guard existed the family-emergency
+    # rule keyed on urgency alone, so this ordinary Malay transfer was answered with the scam
+    # pause and the happy path froze on a judge saying "sekarang". It must reach confirmation.
+    ("Hantar lima puluh dolar kepada Mei sekarang.", "CONFIRMATION_READY", "ALLOW"),
+]
+
+
+async def _test_over_trigger() -> int:
+    from .orchestrator import TurnRequest, run_turn
+    failures = 0
+    for index, (text, expected_state, expected_outcome) in enumerate(OVER_TRIGGER_CASES):
+        req = TurnRequest(session_id=f"sess_overtrigger_{index}", text=text,
+                          via_voice=True, asr_confidence=0.97,
+                          asr_confidence_source="engine_stability")
+        resp = await run_turn(req)
+        state = resp.session["state"]
+        outcome = resp.session["outcome"]
+        ok = state == expected_state and outcome == expected_outcome
+        failures += not ok
+        print(f"{'PASS' if ok else 'FAIL'} over-trigger  {text!r} "
+              f"-> state={state} outcome={outcome}")
+        if not ok:
+            print(f"        -> expected state={expected_state}, outcome={expected_outcome}")
+    return failures
+
 # 14. Self-test, every scenario, asserting the BRD's own acceptance rules (§A.12)
 #
 # Every row states the scenario's expected END STATE (state / outcome / ledger). A scenario may
@@ -411,9 +445,8 @@ EXPECTED = {
     "B1":    {"state": "CONFIRMATION_READY", "outcome": "ALLOW", "ledger": "NOT_INVOKED"},
     "B2":    {"state": "CONFIRMATION_READY", "outcome": "ALLOW", "ledger": "NOT_INVOKED"},
     "B3":    {"state": "FROZEN", "outcome": "FREEZE", "ledger": "NOT_INVOKED"},
-    # B4: haste is not a scam. "sekarang" ("now") used to trip the family-emergency rule, so this
-    # ordinary Malay transfer was answered with the scam pause. It must reach confirmation.
-    "B4":    {"state": "CONFIRMATION_READY", "outcome": "ALLOW", "ledger": "NOT_INVOKED"},
+    # There is no B4: the over-trigger guard for the family-emergency rule is a backend
+    # regression check, not a customer-facing scenario. See OVER_TRIGGER_CASES below.
     "C1":    {"state": "FROZEN", "outcome": "BLOCK", "ledger": "NOT_INVOKED"},
     "C2":    {"state": "FROZEN", "outcome": "FREEZE", "ledger": "NOT_INVOKED"},
     "C3":    {"state": "FROZEN", "outcome": "BLOCK", "ledger": "NOT_INVOKED"},
@@ -751,6 +784,107 @@ EXPECTED = {
                            "last": {"events": ["CONFIRMATION_REFUSED"]},
                            "event_field": [{"event": "CONFIRMATION_REFUSED",
                                             "field": "status_code", "equals": 409}]},
+
+    # ---- a destination or a source Joy recognises and cannot use --------------------------------
+    # Every row below asserts THREE things, and the third is the one that matters most:
+    #   * the RIGHT refusal is spoken (the key), not the generic "who should I pay?";
+    #   * the generic questions are NOT spoken (absent_keys) - the defect was answering a question
+    #     the customer had already answered, and a state-only check cannot see that;
+    #   * nothing was prepared (no_draft) and the ledger was never reached, so a refusal can never
+    #     leave a payment on screen behind it.
+    "IN-DEST-UNVERIFIED": {"state": "CLARIFICATION_REQUIRED", "outcome": "REFUSED",
+                           "ledger": "NOT_INVOKED", "no_draft": True,
+                           "events": ["DESTINATION_REFUSED"],
+                           "keys": ["UNVERIFIED_PAYEE"],
+                           "absent_keys": ["RECIPIENT_MISSING", "NICKNAME_UNKNOWN",
+                                           "PAYEE_NOT_FOUND", "PAYEE_DID_YOU_MEAN"],
+                           "says": ["not currently a verified saved payee",
+                                    "must be verified"]},
+    "IN-DEST-INCOMPLETE": {"state": "CLARIFICATION_REQUIRED", "outcome": "REFUSED",
+                           "ledger": "NOT_INVOKED", "no_draft": True,
+                           "events": ["DESTINATION_REFUSED"],
+                           "keys": ["BENEFICIARY_INCOMPLETE"],
+                           "absent_keys": ["UNVERIFIED_PAYEE", "RECIPIENT_MISSING",
+                                           "NICKNAME_UNKNOWN"],
+                           "says": ["beneficiary account information is incomplete",
+                                    "secure screen"]},
+    "IN-DEST-BLOCKED": {"state": "CLARIFICATION_REQUIRED", "outcome": "REFUSED",
+                        "ledger": "NOT_INVOKED", "no_draft": True,
+                        "events": ["DESTINATION_REFUSED"],
+                        "keys": ["BLOCKED_BENEFICIARY"],
+                        "absent_keys": ["RECIPIENT_MISSING", "NICKNAME_UNKNOWN"],
+                        "says": ["blocked beneficiary"]},
+    # The same three situations in DIFFERENT words, one turn each: a unit trust instead of a fixed
+    # deposit, "my frozen beneficiary" instead of "the blocked account", and Bahasa Melayu instead
+    # of English. Pinned per turn, because the row's whole point is that each wording is CAUGHT.
+    # Turn 3 asserts the KEY only: the reply is spoken in the session's language (EN here), so what
+    # the Malay turn proves is that the detector read Malay, not what the sentence sounded like.
+    # The Malay sentence itself is pinned by IN-DEST-BM, where the session starts in Malay.
+    "IN-DEST-SIMILAR": {"state": "CLARIFICATION_REQUIRED", "outcome": "REFUSED",
+                        "ledger": "NOT_INVOKED", "no_draft": True,
+                        "events": ["DESTINATION_REFUSED"],
+                        "at_turn": [
+                            {"turn": 1, "keys": ["SOURCE_ACCOUNT_INELIGIBLE"],
+                             "says": ["unit trust account cannot be used"]},
+                            {"turn": 2, "keys": ["BLOCKED_BENEFICIARY"],
+                             "says": ["blocked beneficiary"]},
+                            {"turn": 3, "keys": ["BLOCKED_BENEFICIARY"]}]},
+    # The Malay sentence, in a session that STARTS in Malay, so the reply is Malay too. Without this
+    # row the BM catalogue entry is never spoken: the language sticks once chosen, so a Malay turn
+    # mid-English-conversation is answered in English by design.
+    "IN-DEST-BM": {"state": "CLARIFICATION_REQUIRED", "outcome": "REFUSED",
+                   "ledger": "NOT_INVOKED", "no_draft": True,
+                   "events": ["DESTINATION_REFUSED"],
+                   "keys": ["BLOCKED_BENEFICIARY"],
+                   "absent_keys": ["RECIPIENT_MISSING", "NICKNAME_UNKNOWN"],
+                   "says": ["penerima yang telah disekat"]},
+    # A multi-instruction breath with ONE bad clause: the whole breath is refused, rather than the
+    # good clause being prepared alone. Half a request, silently dropped, is the defect the whole
+    # row exists to prevent.
+    "IN-DEST-MULTI": {"state": "CLARIFICATION_REQUIRED", "outcome": "REFUSED",
+                      "ledger": "NOT_INVOKED", "no_draft": True,
+                      "events": ["DESTINATION_REFUSED"],
+                      "keys": ["SOURCE_ACCOUNT_INELIGIBLE"],
+                      "absent_events": ["MULTI_INSTRUCTION_DETECTED", "CANONICAL_DRAFT_CREATED"],
+                      "says": ["fixed deposit account cannot be used"]},
+    # An anonymous payment: the DECISION was already right (BLOCK) and the sentence was wrong, so
+    # the assertion is that the specific line replaced the generic one.
+    "IN-DEST-ANON": {"state": "FROZEN", "outcome": "BLOCK", "ledger": "NOT_INVOKED",
+                     "no_draft": True,
+                     "keys": ["BLOCK_ANONYMOUS"], "absent_keys": ["BLOCK_OVERRIDE"],
+                     "says": ["anonymous or untraceable payment",
+                              "No payment has been created"]},
+    # The affordability check reads the balance off the account record and names BOTH the account
+    # and the amount, so the customer can see which account and how far short it falls.
+    "IN-FUNDS-SHORT": {"state": "CLARIFICATION_REQUIRED", "outcome": "REFUSED",
+                       "ledger": "NOT_INVOKED", "no_draft": True,
+                       "events": ["DESTINATION_REFUSED"],
+                       "keys": ["INSUFFICIENT_AVAILABLE_FUNDS"],
+                       "absent_keys": ["COOLING_OFF_SCAM", "PAUSE_SCAM", "FROZEN_RISK"],
+                       "says": ["DBS Savings ending 1234", "S$15,000.00",
+                                "sufficient available funds", "lower amount"]},
+    # The turn AFTER the refusal. Turn 1 refuses the source account; turn 2 supplies a usable one and
+    # the payment is completed from the remembered half - S$500, Mei Tan, and NOW the account the
+    # customer chose. Pinned per turn, because the whole point is that turn 2 did not restart.
+    # Turn 2 carries a PAYMENT stub that reports the amount and the recipient as missing, which is
+    # what the live agent does for a sentence naming only an account. That is deliberate: the
+    # carry-forward is the thing under test, and with the reference policy running the mock fills
+    # both fields from the committed evidence, so the safeguard would never fire and the row would
+    # go green without exercising anything. The stub makes EDIT_FIELDS_CARRIED_FORWARD the only
+    # thing that can supply S$500 and Mei Tan, and the draft assertion below proves it did.
+    "IN-SRC-FIXED": {"state": "CONFIRMATION_READY", "outcome": "ALLOW",
+                     "ledger": "NOT_INVOKED",
+                     "events": ["DESTINATION_REFUSED", "EDIT_FIELDS_CARRIED_FORWARD"],
+                     "draft": {"amount_minor": 50000, "payee_display": "Mei Tan",
+                               "source_account_display": "DBS Current Account"},
+                     "at_turn": [
+                         {"turn": 1, "state": "CLARIFICATION_REQUIRED", "outcome": "REFUSED",
+                          "no_draft": True, "keys": ["SOURCE_ACCOUNT_INELIGIBLE"],
+                          "absent_keys": ["RECIPIENT_MISSING", "AMOUNT_MISSING"],
+                          "says": ["fixed deposit account cannot be used"]},
+                         {"turn": 2, "events": ["EDIT_FIELDS_CARRIED_FORWARD"],
+                          "keys": ["INITIATION_READBACK"],
+                          "says": ["S$500.00", "DBS Current Account", "Mei Tan"]}]},
 }
 
 
@@ -955,8 +1089,11 @@ async def selftest() -> int:
     parser_failures = _test_parsers()
     failures += parser_failures
 
+    over_trigger_failures = await _test_over_trigger()
+    failures += over_trigger_failures
+
     scenario_failures = (failures - personalization_failures - schedule_failures
-                         - repository_failures - parser_failures)
+                         - repository_failures - over_trigger_failures - parser_failures)
     # Reported per table, so "how many scenarios?" has an answer that names which set it means.
     acc_failed = sum(1 for i in failed_ids if i in SCENARIOS)
     reg_failed = sum(1 for i in failed_ids if i in REGRESSIONS)
@@ -968,6 +1105,8 @@ async def selftest() -> int:
     print(f"{len(SCHEDULE_CASES) - schedule_failures}/{len(SCHEDULE_CASES)} schedule cases passed.")
     print(f"{repository_total - repository_failures}/{repository_total} "
           "repository parity checks passed.")
+    print(f"{len(OVER_TRIGGER_CASES) - over_trigger_failures}/{len(OVER_TRIGGER_CASES)} "
+          "over-trigger guard cases passed.")
     print(f"{len(PARSER_CASES) - parser_failures}/{len(PARSER_CASES)} parser cases passed.")
     print("Ledger invocations across all scenarios: "
           f"{sum(1 for s in ('HAPPY', 'E2', 'F3'))} expected, "

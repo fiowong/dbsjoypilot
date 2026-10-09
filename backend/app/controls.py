@@ -9,7 +9,7 @@ from typing import Dict, List, Literal, Optional, Tuple
 from pydantic import BaseModel, Field
 from .config import Settings, money
 from .models import (Draft, Confirmation, PaymentProposal, ValidationResult, GuardrailResult,
-                      REQUIRED_VALIDATION_FIELDS, SourceAccount)
+                      RiskCategory, REQUIRED_VALIDATION_FIELDS, SourceAccount, Payee)
 from .data import POLICY
 from .repository import get_repository
 from .parsing import PAYEE_ALIASES
@@ -17,8 +17,86 @@ from . import nicknames
 
 # 7. Deterministic controls, the half that is allowed to move money
 # =====================================================================
+class DestinationRefusal(BaseModel):
+    """A destination or a source the resolver can RECOGNISE but must not use.
+
+    A fourth outcome, deliberately not folded into any of the other three. It is not a
+    clarification (the customer omitted nothing - the field they gave cannot be used), it is not a
+    freeze (nothing here is suspicious; a fixed deposit is simply not a funding account, and a
+    savings balance is simply not enough), and it is certainly not a resolution.
+
+    What it is, is a NAMED refusal: the customer is told which thing cannot be done and what to do
+    instead. Before this existed, every one of these collapsed into "Mei Ling, who should I pay?"
+    or into a read-back naming an account the customer never chose, because the resolver had no way
+    to say "I understood you, and I cannot do that".
+    """
+    reason: str
+    message_key: str
+    # The customer's OWN words for the thing that cannot be used, so the refusal names it rather
+    # than saying "that account". Only the field the reason needs is filled.
+    product: Optional[str] = None            # "fixed deposit"
+    account_masked: Optional[str] = None     # "DBS Savings ending 1234"
+    amount: Optional[str] = None             # the rendered amount, "S$15,000.00"
+    payee_display: Optional[str] = None
+
+
+# Reason -> the catalogue key that explains it. Kept here because this module owns the reason
+# vocabulary; messages.py owns the wording.
+REFUSAL_MESSAGE_KEYS = {
+    "INSUFFICIENT_FUNDS": "INSUFFICIENT_AVAILABLE_FUNDS",
+    "SOURCE_ACCOUNT_INELIGIBLE": "SOURCE_ACCOUNT_INELIGIBLE",
+    "BLOCKED_BENEFICIARY": "BLOCKED_BENEFICIARY",
+    "UNVERIFIED_PAYEE": "UNVERIFIED_PAYEE",
+    "BENEFICIARY_INCOMPLETE": "BENEFICIARY_INCOMPLETE",
+}
+
+
+def make_refusal(reason: str, **fields) -> DestinationRefusal:
+    """Build a refusal, taking its message key from the one table so the two cannot drift."""
+    return DestinationRefusal(reason=reason, message_key=REFUSAL_MESSAGE_KEYS[reason], **fields)
+
+
+def _payee_refusal(payee: Payee) -> Optional[DestinationRefusal]:
+    """Why this saved payee may not be paid, or None.
+
+    Checked in this order because a blocked payee may ALSO be unverified, and "the bank has blocked
+    this beneficiary" is the more useful thing to tell the customer than "this payee is not
+    verified".
+    """
+    if payee.blocked:
+        return make_refusal("BLOCKED_BENEFICIARY", payee_display=payee.display_name)
+    if not payee.verified_saved_payee:
+        return make_refusal("UNVERIFIED_PAYEE", payee_display=payee.display_name)
+    return None
+
+
+def _source_refusal(account: SourceAccount,
+                    amount_minor: Optional[int]) -> Optional[DestinationRefusal]:
+    """Why this source account cannot fund this amount, or None.
+
+    An unknown balance (None) stands the check down rather than assuming one: refusing a payment
+    because a record was incomplete would be worse than allowing it, and the record is authoritative
+    master data that either has the number or does not.
+    """
+    if (account.available_minor is not None and amount_minor is not None
+            and amount_minor > account.available_minor):
+        return make_refusal("INSUFFICIENT_FUNDS",
+                            account_masked=f"{account.display_name} {account.masked}".strip(),
+                            amount=money(amount_minor))
+    return None
+
+
+def _refused(refusal: Optional[DestinationRefusal],
+             payee_display: Optional[str] = None) -> Optional[DeterministicResolution]:
+    """Wrap a refusal into the resolution the caller returns, or None when there is nothing to say."""
+    if refusal is None:
+        return None
+    return DeterministicResolution(outcome="REFUSED", refusal=refusal,
+                                   payee_display=payee_display or refusal.payee_display)
+
+
 class DeterministicResolution(BaseModel):
-    outcome: Literal["RESOLVED", "NEEDS_CLARIFICATION", "FREEZE"]
+    outcome: Literal["RESOLVED", "NEEDS_CLARIFICATION", "FREEZE", "REFUSED"]
     draft: Optional[Draft] = None
     clarification_field: Optional[str] = None
     # A message_key, not a sentence. Deterministic code says WHAT is unclear and hands over
@@ -29,6 +107,8 @@ class DeterministicResolution(BaseModel):
     reason: Optional[str] = None
     # Set on the FREEZE path so the customer can be told *which* record was suspicious.
     payee_display: Optional[str] = None
+    # Set on the REFUSED path: what cannot be used, and the catalogue key that says so.
+    refusal: Optional[DestinationRefusal] = None
     # "display_name" or "nickname", how the payee was bound. Audited on PAYEE_RESOLUTION so the
     # inspector can show that a nickname pointed at a trusted beneficiary, and that the nickname
     # itself never supplied the destination.
@@ -171,6 +251,11 @@ def resolve_payee_and_account(customer_id: str, proposal: PaymentProposal,
         account = next((a for a in eligible if want and want in a.display_name.lower()), None)
         if account is None:
             account = eligible[0]
+        refused = _refused(_source_refusal(account,
+                                           proposal.amount_minor or biller.latest_amount_minor),
+                           payee_display=biller.display_name)
+        if refused:
+            return refused
         return DeterministicResolution(outcome="RESOLVED", draft=Draft(
             draft_id="dr_pending", version=1,
             transaction_type="BILL_PAYMENT",
@@ -202,6 +287,11 @@ def resolve_payee_and_account(customer_id: str, proposal: PaymentProposal,
         account = next((a for a in eligible if want and want in a.display_name.lower()), None)
         if account is None:
             account = eligible[0]
+        refused = _refused(_source_refusal(account,
+                                           proposal.amount_minor or card.latest_balance_minor),
+                           payee_display=card.display_name)
+        if refused:
+            return refused
         return DeterministicResolution(outcome="RESOLVED", draft=Draft(
             draft_id="dr_pending", version=1,
             transaction_type="CREDIT_CARD_PAYMENT",
@@ -232,6 +322,10 @@ def resolve_payee_and_account(customer_id: str, proposal: PaymentProposal,
         account = next((a for a in eligible if want and want in a.display_name.lower()), None)
         if account is None:
             account = eligible[0]
+        refused = _refused(_source_refusal(account, proposal.amount_minor or 0),
+                           payee_display=oa.display_name)
+        if refused:
+            return refused
         return DeterministicResolution(outcome="RESOLVED", draft=Draft(
             draft_id="dr_pending", version=1,
             transaction_type="OWN_ACCOUNT_TRANSFER",
@@ -301,6 +395,15 @@ def resolve_payee_and_account(customer_id: str, proposal: PaymentProposal,
     account = next((a for a in eligible if want and want in a.display_name.lower()), None)
     if account is None:
         account = eligible[0]
+
+    # Recognised, and not payable. Checked BEFORE the draft is built, so nothing is created and
+    # nothing is read back: a refusal must never leave a payment on screen behind it. The payee
+    # check comes first because "this beneficiary is blocked" is more useful than "the balance is
+    # short" when both are true.
+    refused = _refused(_payee_refusal(payee) or _source_refusal(account, proposal.amount_minor),
+                       payee_display=payee.display_name)
+    if refused:
+        return refused
 
     return DeterministicResolution(outcome="RESOLVED", draft=Draft(
         draft_id="dr_pending", version=1,

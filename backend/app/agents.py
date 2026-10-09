@@ -247,6 +247,32 @@ MANDATORY_CONTROL_RE = re.compile(
     r"\b(remove|increase|raise|change|buang|naikkan|ubah)\b.{0,24}"
     r"\b(limit|had|kyc|audit)\b", re.IGNORECASE)
 
+# An anonymous or untraceable payment: the customer asks for the RECORD of the payment to be
+# removed, and the record is the thing that protects them. A control the assistant does not have,
+# not a payment it declines - so it is a BLOCK, like the control-change rule above.
+#
+# It carries its OWN message key because BLOCK_OVERRIDE ("I can't change that safety setting") was
+# the right decision and the wrong sentence: it never named what had been refused, and somebody who
+# has just asked to be untraceable needs to hear those words back. A FAMILY of cues, not a phrase:
+# "anonymously", "so nobody can trace it", "don't put my name", "off the books", 匿名 and 不留痕迹
+# are one request to a customer. Shared by the mock and the orchestrator's escalator, so live and
+# mock cannot disagree about what counts.
+ANONYMOUS_PAYMENT_RE = re.compile(
+    r"\b(anonym(?:ous|ously)|untraceable|un-?traceable|untracked|"
+    r"no\s+trace|without\s+a\s+trace|trace(?:d)?\s+back|"
+    r"off\s+the\s+books|off\s+the\s+record|off-?record|"
+    r"hide\s+(?:my|the)\s+(?:name|identity|payment|transfer|transaction)|"
+    r"(?:don'?t|do\s+not)\s+(?:show|put|record|log)\s+my\s+name|"
+    r"without\s+my\s+name|nameless|"
+    r"so\s+(?:that\s+)?(?:nobody|no\s+one)\s+(?:can\s+|will\s+|would\s+)?"
+    r"(?:know|see|trace|find|track|tell))\b"
+    r"|匿名|无法追踪|不留痕迹|查不到|不留名|不显示我的名字", re.IGNORECASE)
+
+
+def anonymous_payment_cue(text: str) -> bool:
+    """True when the turn asks for the payment to leave no trace."""
+    return bool(text) and ANONYMOUS_PAYMENT_RE.search(text) is not None
+
 # =====================================================================
 # 6. The four bounded agents, each a typed call, live or mock
 # =====================================================================
@@ -265,7 +291,8 @@ Return only a JSON object with exactly these keys:
   risk_level        one of LOW, MEDIUM, HIGH, CRITICAL
   detected_language one of EN, ZH, BM, MIXED
   message_key       a short template key the application will render, use ONLY one of: CONTINUE,
-                    BLOCK_BYPASS, BLOCK_OVERRIDE, BLOCK_INJECTION, PAUSE_SCAM, CLARIFY_INPUT
+                    BLOCK_BYPASS, BLOCK_OVERRIDE, BLOCK_INJECTION, BLOCK_ANONYMOUS, PAUSE_SCAM,
+                    CLARIFY_INPUT
   developer_reason  one short sentence for the audit log, never shown to the customer
 
 Decide using this rubric, in strict precedence order:
@@ -328,6 +355,13 @@ Decide using this rubric, in strict precedence order:
    limit, daily limit, KYC tier, or audit rule, or is clearly illegal / socially harmful (e.g.
    facilitating fraud or violence). message_key = BLOCK_OVERRIDE. Ordinary banking or payment questions
    are NOT unsupported; they fall to rule 7.
+   ALSO BLOCK + UNSUPPORTED_ACTION (risk HIGH), with message_key = BLOCK_ANONYMOUS, when the turn asks
+   for an ANONYMOUS or UNTRACEABLE payment: "send it anonymously", "so nobody can trace it", "don't put
+   my name on it", "off the books", "without a trace", 匿名, 不留痕迹. The payment record is what protects
+   the customer and there is no way to remove it, so this is a control the system does not have - not a
+   payment you decline. Do NOT use this for a customer who simply wants privacy about WHO they are
+   paying ("don't tell my family"): that is secrecy coercion under rule 2 when it pressures them, and
+   an ordinary request otherwise.
 6. CLARIFY + UNUSABLE_INPUT (risk LOW) ONLY when the turn is materially unusable: under 2 characters after
    stripping, or pure punctuation / noise. message_key = CLARIFY_INPUT.
 7. Otherwise ALLOW + SAFE_PAYMENT_REQUEST (risk LOW), message_key = CONTINUE.
@@ -371,6 +405,11 @@ Definitions and examples:
   EDIT_PAYMENT keeps the same payment and changes only the field the customer states. The fields
   they do NOT mention are unchanged, so a correction that names one field must never be answered
   as though the others were never given.
+  A payment can also be one the customer HALF STATED and which was refused for a single reason - a
+  fixed deposit named as the source account, a blocked payee, an amount above the balance. There is
+  no draft (nothing was prepared), but the payment is still in progress as far as the customer is
+  concerned, so the sentence that fixes that one field ("then send from my current account") is an
+  EDIT_PAYMENT of it, NOT a new PAYMENT.
 
 - PAYMENT_CLARIFICATION: the customer asks to SEE / PRESENT the current review again (often in a
   different language), OR answers an open clarification question. Does NOT change any field value.
@@ -519,6 +558,15 @@ class GuardrailsAgent:
                           "BLOCK_INJECTION",
                           "System-message injection: the turn tries to change the assistant's "
                           "role or the rules it follows.")
+        # An anonymous or untraceable payment: a control the assistant does not have, so a BLOCK,
+        # with its own key so the customer is told WHAT was refused. Placed below the injection rule
+        # (an attempt to replace the assistant's rulebook is the more serious reading) and above the
+        # control-change rule (which shares its category but is far more general).
+        if anonymous_payment_cue(text):
+            return result(GuardrailDecision.BLOCK, RiskCategory.UNSUPPORTED_ACTION, "HIGH",
+                          "BLOCK_ANONYMOUS",
+                          "The request asks for an anonymous or untraceable payment, which the "
+                          "assistant cannot make.")
         if MANDATORY_CONTROL_RE.search(text):
             return result(GuardrailDecision.BLOCK, RiskCategory.UNSUPPORTED_ACTION, "HIGH",
                           "BLOCK_OVERRIDE",
@@ -578,7 +626,13 @@ class IntentClassifierAgent:
         # customer nothing had been sent while silently ignoring the account they had just named.
         # Gated on the turn naming no new recipient and no amount, so a genuine NEW payment that
         # happens to name an account ("send 50 from current to Alice") is still a PAYMENT.
-        if (draft and parse_source_account_phrase(turn)
+        #
+        # A payment IN PROGRESS is normally the draft on screen. It can also be one the customer
+        # half stated and which was REFUSED - "send S$500 to Mei Tan from my fixed deposit" leaves no
+        # draft (correctly: nothing was prepared) but is still a payment they are assembling, and
+        # "then send from my current account" is the fix for it, not a brand new request. Hence
+        # pending_payment as well as draft.
+        if ((draft or ctx.get("pending_payment")) and parse_source_account_phrase(turn)
                 and parse_amount(turn)[0] is None
                 and not parse_payee_phrase(turn, ctx.get("customer_id"))
                 and not parse_biller_phrase(turn, ctx.get("customer_id"))

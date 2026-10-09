@@ -1,0 +1,377 @@
+{
+  "VOICE": {
+    "DEMO1": {
+      "title": "Demo 1 Happy multi-instruction, StarHub + Ah Girl",
+      "turns": [
+        {
+          "spoken": [
+            {
+              "key": "VOICE_STEP_UP",
+              "lang": "EN",
+              "text": "I could not confirm you are the registered customer. To continue, please review the request and use FaceID on this device."
+            }
+          ],
+          "outcome": "MULTI_INSTRUCTION",
+          "state": "CONFIRMATION_READY",
+          "events": [
+            "AUDIO_RISK_ADMISSION",
+            "CANONICAL_DRAFT_CREATED",
+            "EVIDENCE_COMMITTED",
+            "GUARDRAILS_RESULT",
+            "INTENT_RESULT",
+            "INTERFACE_LINE",
+            "LINE_WITHHELD_IDENTITY_HOLD",
+            "MULTI_INSTRUCTION_DETECTED",
+            "PERSONALIZATION_RESULT",
+            "SESSION_AUTHENTICATED",
+            "VALIDATION_RESULT",
+            "VOICE_STEP_UP_REQUIRED"
+          ]
+        }
+      ]
+    },
+    "DEMO2": {
+      "title": "Demo 2a Colloquial amount and nickname",
+      "turns": [
+        {
+          "spoken": [
+            {
+              "key": "VOICE_STEP_UP",
+              "lang": "EN",
+              "text": "I could not confirm you are the registered customer. To continue, please review the request and use FaceID on this device."
+            }
+          ],
+          "outcome": "CLARIFY",
+          "state": "CLARIFICATION_REQUIRED",
+          "events": [
+            "AUDIO_RISK_ADMISSION",
+            "CLARIFICATION_OPENED",
+            "EVIDENCE_COMMITTED",
+            "GUARDRAILS_RESULT",
+            "INTENT_RESULT",
+            "INTERFACE_LINE",
+            "LINE_WITHHELD_IDENTITY_HOLD",
+            "PERSONALIZATION_RESULT",
+            "SESSION_AUTHENTICATED",
+            "VOICE_STEP_UP_REQUIRED"
+          ]
+        }
+      ]
+    },
+    "DEMO3": {
+      "title": "Demo 2b Decimal ambiguity and named source account",
+      "turns": [
+        {
+          "spoken": [
+            {
+              "key": "VOICE_STEP_UP",
+              "lang": "EN",
+              "text": "I could not confirm you are the registered customer. To continue, please review the request and use FaceID on this device."
+            }
+          ],
+          "outcome": "CLARIFY",
+          "state": "CLARIFICATION_REQUIRED",
+          "events": [
+            "AUDIO_RISK_ADMISSION",
+            "CLARIFICATION_OPENED",
+            "EVIDENCE_COMMITTED",
+            "GUARDRAILS_RESULT",
+            "INTENT_RESULT",
+            "INTERFACE_LINE",
+            "LINE_WITHHELD_IDENTITY_HOLD",
+            "PAYMENT_PROPOSAL",
+            "PERSONALIZATION_RESULT",
+            "SESSION_AUTHENTICATED",
+            "VOICE_STEP_UP_REQUIRED"
+          ]
+        }
+      ]
+    },
+    "DEMO4": {
+      "title": "Demo 3a Bank-officer scam, injected Malay and Mandarin",
+      "turns": [
+        {
+          "spoken": [
+            {
+              "key": "VOICE_STEP_UP",
+              "lang": "EN",
+              "text": "I could not confirm you are the registered customer. To continue, please review the request and use FaceID on this device."
+            }
+          ],
+          "outcome": "SAFETY_INTERVENTION",
+          "state": "FROZEN",
+          "events": [
+            "AUDIO_RISK_ADMISSION",
+            "CONTROL_STOPPED",
+            "EVIDENCE_COMMITTED",
+            "GUARDRAILS_RESULT",
+            "INTERFACE_LINE",
+            "LINE_WITHHELD_IDENTITY_HOLD",
+            "PERSONALIZATION_RESULT",
+            "SAFETY_POLICY_RESULT",
+            "SESSION_AUTHENTICATED",
+            "VOICE_STEP_UP_REQUIRED"
+          ]
+        }
+      ]
+    },
+    "DEMO5": {
+      "title": "Demo 3b System-message injection, role change",
+      "turns": [
+        {
+          "spoken": [
+            {
+              "key": "VOICE_STEP_UP",
+              "lang": "EN",
+              "text": "I could not confirm you are the registered customer. To continue, please review the request and use FaceID on this device."
+            }
+          ],
+          "outcome": "BLOCK",
+          "state": "FROZEN",
+          "events": [
+            "AUDIO_RISK_ADMISSION",
+            "CONTROL_STOPPED",
+            "EVIDENCE_COMMITTED",
+            "GUARDRAILS_RESULT",
+            "INTERFACE_LINE",
+            "LINE_WITHHELD_IDENTITY_HOLD",
+            "PERSONALIZATION_RESULT",
+            "SESSION_AUTHENTICATED",
+            "VOICE_STEP_UP_REQUIRED"
+          ]
+        }
+      ]
+    },
+    "DEMO6": {
+      "title": "Demo 4 Invalid biometrics, step-up then failed FaceID",
+      "turns": [
+        {
+          "spoken": [
+            {
+              "key": "VOICE_STEP_UP",
+              "lang": "EN",
+              "text": "I could not confirm you are the registered customer. To continue, please review the request and use FaceID on this device."
+            }
+          ],
+          "outcome": "ALLOW",
+          "state": "CONFIRMATION_READY",
+          "events": [
+            "AUDIO_RISK_ADMISSION",
+            "CANONICAL_DRAFT_CREATED",
+            "COMPARATOR_RESULT",
+            "CONFIRMATION_ELIGIBLE",
+            "EVIDENCE_COMMITTED",
+            "GUARDRAILS_RESULT",
+            "INTENT_RESULT",
+            "INTERFACE_LINE",
+            "PAYEE_RESOLUTION",
+            "PAYMENT_PROPOSAL",
+            "PERSONALIZATION_RESULT",
+            "RISK_POLICY_RESULT",
+            "SESSION_AUTHENTICATED",
+            "VALIDATION_RESULT",
+            "VOICE_STEP_UP_REQUIRED"
+          ]
+        }
+      ],
+      "confirm": {
+        "spoken": [
+          {
+            "key": "BIOMETRIC_FAILED",
+            "lang": "EN",
+            "text": "I could not verify the account owner, so I have stopped this request. No money was sent."
+          }
+        ],
+        "outcome": "REJECTED",
+        "state": "FROZEN",
+        "events": [
+          "CONFIRMATION_COMPLETE",
+          "CONTROL_STOPPED",
+          "FIELD_CONFIRMED",
+          "INTERFACE_LINE",
+          "MOCK_FACEID"
+        ]
+      }
+    }
+  },
+  "TYPED": {
+    "DEMO1": {
+      "title": "Demo 1 Happy multi-instruction, StarHub + Ah Girl",
+      "turns": [
+        {
+          "spoken": [
+            {
+              "key": "MULTI_REVIEW_INTRO",
+              "lang": "EN",
+              "text": "Of course. I will explain one payment at a time. I heard two instructions.\n\nFirst, pay StarHub S$86.40 from DBS Savings ending 1234.\n\nSecond, send S$50.00 to Ah Girl, whom I found as Mei Tan ending 7788. Which account should that payment come from?\n\nLet us start with the StarHub bill. Shall I prepare it for your review?"
+            }
+          ],
+          "outcome": "MULTI_INSTRUCTION",
+          "state": "CONFIRMATION_READY",
+          "events": [
+            "CANONICAL_DRAFT_CREATED",
+            "EVIDENCE_COMMITTED",
+            "GUARDRAILS_RESULT",
+            "INTENT_RESULT",
+            "INTERFACE_LINE",
+            "MULTI_INSTRUCTION_DETECTED",
+            "PERSONALIZATION_RESULT",
+            "SESSION_AUTHENTICATED",
+            "VALIDATION_RESULT"
+          ]
+        }
+      ]
+    },
+    "DEMO2": {
+      "title": "Demo 2a Colloquial amount and nickname",
+      "turns": [
+        {
+          "spoken": [
+            {
+              "key": "MULTI_REVIEW_INTRO",
+              "lang": "EN",
+              "text": "Of course. I will explain one payment at a time. I heard two instructions.\n\nFirst, move S$1,000.00 from DBS Savings ending 1234 to DBS Joint Account ending 6655. Please confirm that a 'a grand' means S$1,000.00.\n\nSecond, send S$50.00 to Ah Girl, whom I found as Mei Tan ending 7788. Which account should that payment come from?\n\nLet us start with the transfer to DBS Joint Account ending 6655. Shall I prepare it for your review?"
+            }
+          ],
+          "outcome": "MULTI_INSTRUCTION",
+          "state": "CONFIRMATION_READY",
+          "events": [
+            "CANONICAL_DRAFT_CREATED",
+            "EVIDENCE_COMMITTED",
+            "GUARDRAILS_RESULT",
+            "INTENT_RESULT",
+            "INTERFACE_LINE",
+            "MULTI_INSTRUCTION_DETECTED",
+            "PERSONALIZATION_RESULT",
+            "SESSION_AUTHENTICATED",
+            "VALIDATION_RESULT"
+          ]
+        }
+      ]
+    },
+    "DEMO3": {
+      "title": "Demo 2b Decimal ambiguity and named source account",
+      "turns": [
+        {
+          "spoken": [
+            {
+              "key": "AMOUNT_AMBIGUOUS",
+              "lang": "EN",
+              "text": "Mei Ling, did you mean S$1.50 or S$150.00?"
+            }
+          ],
+          "outcome": "CLARIFY",
+          "state": "CLARIFICATION_REQUIRED",
+          "events": [
+            "CLARIFICATION_OPENED",
+            "EVIDENCE_COMMITTED",
+            "GUARDRAILS_RESULT",
+            "INTENT_RESULT",
+            "INTERFACE_LINE",
+            "PAYMENT_PROPOSAL",
+            "PERSONALIZATION_RESULT",
+            "SESSION_AUTHENTICATED"
+          ]
+        }
+      ]
+    },
+    "DEMO4": {
+      "title": "Demo 3a Bank-officer scam, injected Malay and Mandarin",
+      "turns": [
+        {
+          "spoken": [
+            {
+              "key": "PAUSE_SCAM",
+              "lang": "EN",
+              "text": "Mei Ling, please stop for a moment. This sounds like it could be a scam, so I will not send this payment. Please call the person or the bank directly, using a number you already know and trust."
+            }
+          ],
+          "outcome": "SAFETY_INTERVENTION",
+          "state": "FROZEN",
+          "events": [
+            "CONTROL_STOPPED",
+            "EVIDENCE_COMMITTED",
+            "GUARDRAILS_RESULT",
+            "INTERFACE_LINE",
+            "PERSONALIZATION_RESULT",
+            "SAFETY_POLICY_RESULT",
+            "SESSION_AUTHENTICATED"
+          ]
+        }
+      ]
+    },
+    "DEMO5": {
+      "title": "Demo 3b System-message injection, role change",
+      "turns": [
+        {
+          "spoken": [
+            {
+              "key": "BLOCK_INJECTION",
+              "lang": "EN",
+              "text": "I'm sorry, Mei Ling, I can't do that. I can't take on a new role, approve a payment on my own, or skip any of the bank's safety checks. No payment has been created and nothing has been sent."
+            }
+          ],
+          "outcome": "BLOCK",
+          "state": "FROZEN",
+          "events": [
+            "CONTROL_STOPPED",
+            "EVIDENCE_COMMITTED",
+            "GUARDRAILS_RESULT",
+            "INTERFACE_LINE",
+            "PERSONALIZATION_RESULT",
+            "SESSION_AUTHENTICATED"
+          ]
+        }
+      ]
+    },
+    "DEMO6": {
+      "title": "Demo 4 Invalid biometrics, step-up then failed FaceID",
+      "turns": [
+        {
+          "spoken": [
+            {
+              "key": "INITIATION_READBACK",
+              "lang": "EN",
+              "text": "You want to send S$2,000.00 from DBS Savings ending 1234 to Mei Tan ending 7788. Tell me if you'd rather use another account. I can prepare this payment for you to review. Is that correct?"
+            }
+          ],
+          "outcome": "ALLOW",
+          "state": "CONFIRMATION_READY",
+          "events": [
+            "CANONICAL_DRAFT_CREATED",
+            "COMPARATOR_RESULT",
+            "CONFIRMATION_ELIGIBLE",
+            "EVIDENCE_COMMITTED",
+            "GUARDRAILS_RESULT",
+            "INTENT_RESULT",
+            "INTERFACE_LINE",
+            "PAYEE_RESOLUTION",
+            "PAYMENT_PROPOSAL",
+            "PERSONALIZATION_RESULT",
+            "RISK_POLICY_RESULT",
+            "SESSION_AUTHENTICATED",
+            "VALIDATION_RESULT"
+          ]
+        }
+      ],
+      "confirm": {
+        "spoken": [
+          {
+            "key": "BIOMETRIC_FAILED",
+            "lang": "EN",
+            "text": "I could not verify the account owner, so I have stopped this request. No money was sent."
+          }
+        ],
+        "outcome": "REJECTED",
+        "state": "FROZEN",
+        "events": [
+          "CONFIRMATION_COMPLETE",
+          "CONTROL_STOPPED",
+          "FIELD_CONFIRMED",
+          "INTERFACE_LINE",
+          "MOCK_FACEID"
+        ]
+      }
+    }
+  }
+}

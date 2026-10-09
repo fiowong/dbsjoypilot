@@ -73,7 +73,14 @@ const ev = code => window.eval(code);
 console.log('\n=== 1. LANDING IS THE DBS LOGIN (nothing auto-runs) ===');
 ok('login screen is active', scrOn('scrLogin'));
 ok('chat transcript is empty at boot', chat.children.length === 0, chat.children.length + ' children');
-ok('scenario rail is hidden (backup only)', $('rail').hidden === true);
+// The A-H rail is a BACKUP and must never be on the main screen. It no longer has a top-bar
+// toggle or a full-width strip of its own: it now lives on page 3 of the explainer overlay,
+// which is hidden at boot. The buttons themselves are unchanged and scenarios.js still wires
+// them by class, so what this guards is that the rail is (a) still present and (b) not visible
+// until someone asks for it.
+ok('the A-H rail is off the main screen (page 3 of the hidden explainer overlay)',
+   !!$('rail') && !!$('explain') && $('explain').hidden === true &&
+   $('explain').contains($('rail')));
 ok('no backend call was made at boot', fetchCalls === 0, fetchCalls + ' calls');
 
 console.log('\n=== 2. DEVICE MOCKUP ===');
@@ -147,8 +154,11 @@ ok('transcript contains ONLY the intro card', chat.children.length === 1, chat.c
 // invent one, addressing the customer as "Auntie" would read like the assistant talking to
 // itself. The body states the safety contract plainly instead, and carries no name slot.
 const greet = () => (chat.querySelector('.intro .itxt')?.textContent || '').replace(/\s+/g, ' ').trim();
-ok('intro states the review-and-authorize safety contract',
-   /review and authorize before any money moves/.test(greet()), greet());
+// British spelling is the house style for user-visible prose (see MEGA-IMPLEMENTATION-SPEC §4.8):
+// authorisation, authorise, personalisation, recognised. This assertion tracks the copy, so it
+// moved from "authorize" to "authorise" with it.
+ok('intro states the review-and-authorise safety contract',
+   /review and authorise before any money moves/.test(greet()), greet());
 ok('intro never invents the customer name', !/Auntie|Mei Ling/.test(greet()), greet());
 
 console.log('\n=== 4. RESET: resetPanels() KEEPS THE TRANSCRIPT, resetRun() CLEARS IT ===');
@@ -355,6 +365,180 @@ console.log('\n=== 9c. VOICE MODE IS DISCREET (nothing announces it) ===');
      /DISCREET BY DESIGN|silent/i.test(ui));
   toggle.checked = false;
   toggle.dispatchEvent(new window.MouseEvent('change', { bubbles:true }));
+})();
+
+/* ==========================================================================
+   9d. THE RE-LAYOUT: TOP BAR, TWO PANELS, HERO PAIR, EXPLAINER OVERLAY
+   Every check here guards a DELIBERATE move rather than an accident, and the
+   recurring theme is "taken off the screen" vs "deleted". The state readout, the
+   audit timeline, the requirements list and the A-H rail were all RELOCATED. A
+   later tidy-up that genuinely deletes one of them has to fail here, because on
+   the screen the two look identical.
+   ========================================================================== */
+console.log('\n=== 9d. TOP BAR, TWO PANELS, HERO PAIR, EXPLAINER OVERLAY ===');
+(function(){
+  const uiSrc    = fs.readFileSync(path.join(dir,'ui.js'),'utf8');
+  const shellSrc = fs.readFileSync(path.join(dir,'shell.js'),'utf8');
+
+  // ---- the top bar ----
+  ok('the dead "DBS · DCTA · SCENARIO 1" chip is gone', !/DBS · DCTA · SCENARIO 1/.test(html));
+  ok('the Scenarios button is gone', !$('railToggle'));
+  ok('the old "DBS app" button is gone', !$('restartBtn'));
+  ok('the Personalisation button is gone', !$('personalizeBadge'));
+  ok('a Reset button replaces it', !!$('resetBtn'));
+  ok('Reset is wired to resetDemo(), not to a bare navigation',
+     /resetBtn\.addEventListener\('click'[\s\S]{0,80}resetDemo\(\)/.test(shellSrc));
+  ok('resetDemo() clears the run BEFORE it navigates',
+     /function resetDemo\(\)\{[\s\S]{0,120}resetRun\(\)/.test(shellSrc));
+  ok('resetDemo() restarts the chat in place when the chat is the current screen',
+     /classList\.contains\('on'\)[\s\S]{0,40}showJoy\(true\)/.test(shellSrc));
+  ok('the demo-status chip is a BUTTON that opens its own explainer',
+     !!$('demoBadge') && $('demoBadge').tagName === 'BUTTON' &&
+     $('demoBadge').dataset.explain === 'demo');
+  ok('the agents chip is a BUTTON that opens its own explainer',
+     !!$('agentsBadge') && $('agentsBadge').tagName === 'BUTTON' &&
+     $('agentsBadge').dataset.explain === 'agents');
+
+  // ---- the inspector is two panels, not four ----
+  const panels = doc.querySelectorAll('.ins > .panel');
+  ok('the inspector is exactly two panels', panels.length === 2, panels.length + ' panels');
+  ok('panel 1 is the control chain',
+     /END-TO-END CONTROL CHAIN/.test(panels[0].querySelector('h3').textContent));
+  ok('panel 2 is the typed agent contracts',
+     /TYPED AGENT CONTRACTS/.test(panels[1].querySelector('h3').textContent));
+  // Checked against the panel HEADINGS, not the raw HTML: the old name is still mentioned in
+  // the comments that explain where the block went, and a substring match over the whole file
+  // would fail on its own documentation.
+  ok('no panel is headed STATE · OUTCOME · EVIDENCE any more',
+     ![...doc.querySelectorAll('.panel h3')]
+        .some(h => /STATE · OUTCOME · EVIDENCE/.test(h.textContent)));
+
+  // ---- relocated, NOT deleted ----
+  ok('the audit timeline is still on screen, now inside the control-chain panel',
+     panels[0].contains($('audit')) && !!$('auditCnt') && !!$('auditMore'));
+  ok('every live state readout survived the move',
+     ['stState','stDraft','stOut','stLedger','stSig','stLang','stHeard','stPers',
+      'vengRow','vengVal','ttsProvRow','ttsProvVal'].every(id => !!$(id)));
+  ok('the SPEAKING row is still visible on the main screen', panels[1].contains($('ttsProvRow')));
+  ok('the requirements-coverage list still exists, one click away',
+     !!$('reqs') && !!$('explain') && $('explain').contains($('reqs')));
+  ok('and it still uses the challenge wording verbatim, not a paraphrase',
+     /Zero-UI Multi-Intent Transaction Parsing/.test(uiSrc) &&
+     /Deterministic Human-in-the-Loop Biometric Authorization/.test(uiSrc));
+
+  // ---- the hero pair ----
+  const pair = doc.querySelector('.heropair');
+  ok('the device sits inside a hero pair', !!pair && pair.contains($('device')));
+  ok('the Joy mascot is in the pair', !!pair && !!pair.querySelector('.joymascot'));
+  ok('the mascot ships WebP with a PNG fallback',
+     !!doc.querySelector('.joymascot source[srcset$="joy-mascot.webp"]') &&
+     !!doc.querySelector('.joymascot img[src$="joy-mascot-560.png"]'));
+  ok('the mascot assets are actually on disk',
+     fs.existsSync(path.join(dir,'assets','joy-mascot.webp')) &&
+     fs.existsSync(path.join(dir,'assets','joy-mascot-560.png')) &&
+     fs.existsSync(path.join(dir,'assets','joy-mascot.png')));
+  ok('the mascot is shown only while the inspector is hidden (#studio.appmode)',
+     /#studio\.appmode \.joymascot\{display:block\}/.test(css) &&
+     /^\.joymascot\{display:none/m.test(css));
+  ok('the device is no longer centred by its own auto margins (that would split it from Joy)',
+     !/\.stage \.device\{margin-inline:auto\}/.test(css));
+  // Below 900px the page stops being viewport-height-bound, so the hero pair's height becomes
+  // indefinite - and a percentage inside min() is then invalid at used-value time, silently
+  // falling back to the image's own 720px intrinsic height. Measured: Joy rendered TALLER than
+  // the phone. The small-screen rule must therefore use a unit that always resolves.
+  ok('the small-screen mascot height is definite (vw), not an unresolvable percentage',
+     /@media\(max-width:900px\)\{[\s\S]*?\.joymascot\{height:min\(32vw,250px\)\}/.test(css));
+  ok('the mascot also carries a hard max-height cap as a backstop',
+     /\.joymascot\{[^}]*max-height:360px/.test(css));
+  // A state with no label falls through to the RAW enum, and at 14px monospace in a
+  // third-of-a-panel box "CONFIRMATION_READY" breaks mid-word as "CONFIRMATION_RE / ADY".
+  //
+  // The enum is read from the DECLARATION in models.py, NOT from a list of names copied into
+  // this file. The earlier version scanned every backend file for a hardcoded set of fourteen
+  // names, so it could only ever find states already on that list -- seven real ones
+  // (EVIDENCE_COMMITTED, DRAFTING, DRAFT_READY, COOLING_OFF, CONFIRMATION_COMPLETE, SCHEDULED,
+  // CANCELLED) were invisible to it, rendered as raw enums, and this check stayed green.
+  // Reading the declaration is what makes "adding a state fails here" true rather than claimed.
+  const modelsPath = path.join(dir, '..', 'backend', 'app', 'models.py');
+  const stateNames = new Set();
+  if (fs.existsSync(modelsPath)) {
+    const modelsSrc = fs.readFileSync(modelsPath, 'utf8');
+    const enumSrc = modelsSrc.match(/class SessionState\([\s\S]*?(?=\nclass )/);
+    for (const m of (enumSrc ? enumSrc[0] : '').matchAll(/^\s{4}([A-Z][A-Z0-9_]*)\s*=/gm)) {
+      stateNames.add(m[1]);
+    }
+  }
+  ok('the SessionState enum was read out of models.py', stateNames.size >= 10,
+     'found ' + stateNames.size + ' states');
+  const labelBlock = (uiSrc.match(/STATE_LABEL = \{([\s\S]*?)\n\};/) || ['', ''])[1];
+  const labelled = new Set([...labelBlock.matchAll(/([A-Z_]+):/g)].map(m => m[1]));
+  const unlabelled = [...stateNames].filter(s => !labelled.has(s));
+  ok('every backend session state has a human label in STATE_LABEL',
+     unlabelled.length === 0,
+     'found ' + stateNames.size + ' states; unlabelled: ' + unlabelled.join(', '));
+
+  // ---- the phone got bigger ----
+  ok('the phone renders its contents at full size (--phone-zoom 1, was .88)',
+     /--phone-zoom:1;/.test(css));
+  ok('the inspector is one full-height row, not a 2x2 grid',
+     /\.ins\{display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr;/.test(css));
+  // The second section is sized by its OWN content and must not be shrunk by the list above it.
+  // The name of this check was always right; the value it pinned was not. `flex:0 1 auto` gave
+  // the section flex-shrink:1, so it competed with the agent list for the deficit and lost:
+  // measured in Chrome, the right panel's DETERMINISTIC OUTCOME block needed 197px and was
+  // squeezed to 85px, cutting the whole verdict off the bottom of the panel. So this now READS
+  // the shorthand and asserts the shrink factor, instead of matching a string that can drift.
+  const psplitRule = (css.match(/\.psplit\{([^}]*)\}/) || ['', ''])[1];
+  const psplitFlex = ((psplitRule.match(/flex:([^;}]*)/) || ['', ''])[1] || '').trim().split(/\s+/);
+  ok('the second section is content-sized and NOT shrinkable by the list above',
+     psplitFlex[0] === '0' && psplitFlex[1] === '0' && /max-height:/.test(psplitRule),
+     'flex:' + psplitFlex.join(' '));
+
+  // ---- the explainer overlay ----
+  ok('the overlay starts hidden', !!$('explain') && $('explain').hidden === true);
+  const pages = doc.querySelectorAll('#explain .expage');
+  ok('the overlay has three pages', pages.length === 3, pages.length + ' pages');
+  ok('every page has a tab that selects it',
+     [...pages].every(p => !!doc.querySelector('#exTabs .extab[data-page="' + p.dataset.page + '"]')));
+  ok('the demo page carries the requirements-coverage list',
+     doc.querySelector('.expage[data-page="demo"]').contains($('reqs')));
+  ok('the branches page carries the A-H rail',
+     doc.querySelector('.expage[data-page="branches"]').contains($('rail')));
+  ok('the agents page has a mount for the agents and one for the controls',
+     !!$('exAgentList') && !!$('exCtlList'));
+  ok('the agents page lists all five agents',
+     doc.querySelectorAll('#exAgentList .exagent').length === 5,
+     doc.querySelectorAll('#exAgentList .exagent').length + ' cards');
+  // The control list is rendered from the SAME STAGES array the live chain uses, so this is
+  // really a check that the explainer cannot drift out of step with the main screen.
+  ok('the controls list renders all sixteen stages',
+     doc.querySelectorAll('#exCtlList .exct').length === 16,
+     doc.querySelectorAll('#exCtlList .exct').length + ' controls');
+  ok('exactly four stages are marked as model stages',
+     doc.querySelectorAll('#exCtlList .exct.llm').length === 4,
+     doc.querySelectorAll('#exCtlList .exct.llm').length + ' marked');
+  ok('and they are stages 03, 04, 05 and 08',
+     [...doc.querySelectorAll('#exCtlList .exct.llm .exctn')].map(n => n.textContent).join(',') ===
+       '03,04,05,08',
+     [...doc.querySelectorAll('#exCtlList .exct.llm .exctn')].map(n => n.textContent).join(','));
+  ok('Escape closes the overlay', /ev\.key === 'Escape'/.test(uiSrc));
+  ok('the overlay has a close button', !!$('exClose'));
+
+  // ---- and it actually opens, switches page and closes ----
+  const wasHidden = $('explain').hidden;
+  ev("openExplainer('agents')");
+  const openedOnAgents = $('explain').hidden === false &&
+    doc.querySelector('.expage[data-page="agents"]').hidden === false &&
+    doc.querySelector('.expage[data-page="demo"]').hidden === true;
+  const tabOn = doc.querySelector('#exTabs .extab[data-page="agents"]').classList.contains('on');
+  ev("showExplainerPage('branches')");
+  const switched = doc.querySelector('.expage[data-page="branches"]').hidden === false &&
+                   doc.querySelector('.expage[data-page="agents"]').hidden === true;
+  ev("closeExplainer()");
+  ok('openExplainer() reveals the overlay on the requested page', wasHidden && openedOnAgents);
+  ok('the matching tab is marked as selected', tabOn);
+  ok('showExplainerPage() switches to another page and hides the first', switched);
+  ok('closeExplainer() hides the overlay again', $('explain').hidden === true);
 })();
 
 console.log('\n=== 10. NO STRAY ERRORS ===');

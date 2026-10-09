@@ -763,12 +763,15 @@ document.querySelectorAll('#langtog .lt').forEach(b=>{
 
 /* Tencent has no single engine that covers English + Chinese + Malay, so the language
    toggle picks the ENGINE, not just a hint: EN and ZH share 16k_zh_en (which auto-detects
-   between them), while BM needs 16k_multi_lang. */
+   between them), while BM needs 16k_multi_lang.
+   This build has THREE pills (EN / ZH / BM) and no Auto pill, so nothing here has to sacrifice
+   a language. The backend still accepts "auto" and resolves it to 16k_zh_en, so a client that
+   sends it keeps working. See backend/app/stt.py ENGINE_BY_LANGUAGE, which is the authority
+   for this mapping. */
 function sttLanguage(){
   const l = document.querySelector('#langtog .lt.on')?.dataset.l || 'EN';
   if(l === 'BM') return 'bm';
   if(l === 'ZH') return 'zh';
-  if(l === 'AUTO') return 'multilingual';   // 16k_multi_lang: English + Malay, no need to pick one
   return 'en';
 }
 
