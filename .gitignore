@@ -22,3 +22,5 @@ frontend/*.log
 # editor folders (optional, remove if you use these deliberately in the repo)
 .vscode/
 .idea/
+
+.integration-backup/
