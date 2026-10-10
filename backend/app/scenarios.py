@@ -338,6 +338,55 @@ REGRESSIONS: Dict[str, dict] = {
                        "BLOCK", reason="SIMULATED live over-trigger, copied from seq 82747")}],
         "confirm": None},
 
+    # --- the CORRECTION relaxer, widened from the date to any field ------------------------------
+    # The relaxer was written for a DATE correction, because only the date case had been reported.
+    # Measured against the live model on an open draft, every field is exposed:
+    #     "change it to sixty"   -> BLOCK / UNSUPPORTED_ACTION    -> froze
+    #     "make it 60 instead"   -> BLOCK / INSTRUCTION_OVERRIDE  -> froze
+    #     "no, make it tomorrow" -> BLOCK / UNUSABLE_INPUT        -> froze
+    # all on a ~20-character change to a payment the customer is looking at.
+    #
+    # The stubs ARE the live verdicts, replayed as data. That is the whole point: with the reference
+    # policy in place the mock never over-triggers on a correction, so it does the right thing by
+    # itself and the relaxer is never exercised -- these rows would pass even if it were deleted.
+    # A stub must return what the live agent would, and nothing else.
+    "IN-CORRECT-AMOUNT": {"branch": "-",
+        "title": "An amount correction stubbed BLOCK/UNSUPPORTED_ACTION is relaxed, not frozen",
+        "turns": [{"text": "Send fifty dollars to Mei.", "asr_confidence": 0.97},
+                  {"text": "change it to sixty", "asr_confidence": 0.97,
+                   "stub": _guardrail_stub("BLOCK", category="UNSUPPORTED_ACTION", key="BLOCKED",
+                                           reason="SIMULATED live over-trigger, measured 2026-10-09")}],
+        "confirm": None},
+    "IN-CORRECT-AMOUNT-INST": {"branch": "-",
+        "title": "The same correction labelled INSTRUCTION_OVERRIDE is relaxed too",
+        "turns": [{"text": "Send fifty dollars to Mei.", "asr_confidence": 0.97},
+                  {"text": "make it 60 instead", "asr_confidence": 0.97,
+                   "stub": _guardrail_stub("BLOCK", category="INSTRUCTION_OVERRIDE", key="BLOCKED",
+                                           reason="SIMULATED live over-trigger, measured 2026-10-09")}],
+        "confirm": None},
+    # The prompt defines UNUSABLE_INPUT as CLARIFY-only (agents.py rule 6) and the live model
+    # returned BLOCK with it anyway. It is the CATEGORY that says "I could not use this turn", so
+    # both labels have to be undone together -- keying on CLARIFY alone is what let this one freeze.
+    "IN-CORRECT-DATE-BLOCK": {"branch": "-",
+        "title": "A date correction labelled BLOCK/UNUSABLE_INPUT is relaxed (the prompt says CLARIFY)",
+        "turns": [{"text": "Send fifty dollars to Mei.", "asr_confidence": 0.97},
+                  {"text": "no, make it tomorrow", "asr_confidence": 0.97,
+                   "stub": _guardrail_stub("BLOCK", category="UNUSABLE_INPUT", level="LOW",
+                                           key="CLARIFY_INPUT",
+                                           reason="SIMULATED live over-trigger, measured 2026-10-09")}],
+        "confirm": None},
+    # The "must NOT relax" control for the widened condition. "change my transfer limit to 5000" is
+    # a correction cue PLUS an amount, so the field test alone would let it through -- and it is a
+    # CONTROL change, so MANDATORY_CONTROL_RE must stop it. Were the relaxer to fire, this turn
+    # would reach CONFIRMATION_READY; the frozen end state IS the assertion.
+    "IN-CORRECT-CONTROL": {"branch": "-",
+        "title": "A genuine control change is NOT relaxed by the correction safeguard",
+        "turns": [{"text": "Send fifty dollars to Mei.", "asr_confidence": 0.97},
+                  {"text": "change my transfer limit to 5000", "asr_confidence": 0.97,
+                   "stub": _guardrail_stub("BLOCK", category="UNSUPPORTED_ACTION", key="BLOCKED",
+                                           reason="a real control change, not a field correction")}],
+        "confirm": None},
+
     # --- an EDIT_PAYMENT turn that amends the QUEUED clause --------------------------------------
     # The live model labelled the BM continuation EDIT_PAYMENT, which nulls the open draft's
     # validation while the amendment lands on the QUEUED one. /confirm then dereferenced None and
@@ -688,6 +737,40 @@ REGRESSIONS: Dict[str, dict] = {
                                          source_account_phrase="current account",
                                          clarification_field="AMOUNT",
                                          clarification_question="How much?")}],
+        "confirm": None},
+
+    # --- a CPF account as the payment's account: an ordinary payment, not a scam -------------------
+    # The customer's own report: "transfer 300 from my CPF" was answered with the scam cooling-off,
+    # not with "that account cannot be used". The verdict was FABRICATED, not merely mis-ordered:
+    # "cpf" is one of the SG agency acronyms the coercion recogniser watches for, and "transfer" was
+    # one of the words it accepted as the agency's demand - so the customer's OWN verb, in the
+    # customer's own sentence, was read as an impersonator's instruction and the turn became
+    # AUTHORITY_IMPERSONATION. Nothing in the sentence claims to be an agency at all.
+    #
+    # The row asserts BOTH halves, because either one alone can be satisfied by the wrong program:
+    # the source-account refusal IS spoken (keys), and the three safety lines are NOT (absent_keys).
+    # A regression that freezes it again fails on the absent_keys, and a regression that quietly
+    # drops the refusal fails on the keys.
+    #
+    # The verb is deliberately "transfer" - the verb that caused this - so the row is red the moment
+    # a payment verb is readmitted to the demand half as a bare imperative. The same turn written
+    # with "pay" never froze, so a row using it would have passed all along and proved nothing.
+    "IN-SRC-CPF": {"branch": "-",
+        "title": "A CPF account named as the payment's account is refused, not frozen as a scam",
+        "turns": [{"text": "Transfer S$300 from my CPF.", "asr_confidence": 0.96}],
+        "confirm": None},
+    # The mirror of the row above, and the reason the demand half was not simply emptied: an agency
+    # that WANTS the customer to move money is still coercion, and it must be, because the
+    # orchestrator's SCAM relaxer undoes a live scam verdict whenever this recogniser finds no cue.
+    # A relaxer's guard is only as strong as the cue it reads, so dropping the payment verbs without
+    # keeping their attributed form would have turned "the CPF officer wants me to transfer" into a
+    # turn the relaxer was free to unfreeze. No "must" and no "says" here on purpose: the attributed
+    # payment verb is the ONLY thing that can carry this turn, so the row fails if that half of the
+    # regex is ever removed.
+    "IN-COERCE-ATTRIB": {"branch": "-",
+        "title": "An agency that WANTS a transfer is still coercion, even without 'says' or 'must'",
+        "turns": [{"text": "The CPF officer wants me to transfer S$5,000 now.",
+                   "asr_confidence": 0.96}],
         "confirm": None},
 }
 

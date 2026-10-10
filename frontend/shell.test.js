@@ -493,6 +493,17 @@ console.log('\n=== 9d. TOP BAR, TWO PANELS, HERO PAIR, EXPLAINER OVERLAY ===');
   ok('the second section is content-sized and NOT shrinkable by the list above',
      psplitFlex[0] === '0' && psplitFlex[1] === '0' && /max-height:/.test(psplitRule),
      'flex:' + psplitFlex.join(' '));
+  // ...and the cap must carry a px FLOOR, not just a percentage. A bare `44%` is a share of the
+  // panel, so on a SHORT panel it can come out SMALLER than the block it caps: measured at
+  // 1280x640 the panel offered 160px for a 197px verdict, so the decision row itself was clipped
+  // (fine at 1280x720). `max(44%,215px)` lets the percentage rule on tall panels and guarantees
+  // the block its height on short ones. Asserted structurally so the number can be re-tuned
+  // without editing this check, but the floor itself cannot be dropped.
+  const psplitCap = ((psplitRule.match(/max-height:([^;}]*)/) || ['', ''])[1] || '').trim();
+  const capFloor = (psplitCap.match(/max\(([^)]*)\)/) || ['', ''])[1] || '';
+  ok('the max-height cap has a px floor, so a short panel cannot clip the verdict',
+     /%/.test(capFloor) && /\d+px/.test(capFloor),
+     'max-height:' + psplitCap);
 
   // ---- the explainer overlay ----
   ok('the overlay starts hidden', !!$('explain') && $('explain').hidden === true);

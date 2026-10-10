@@ -31,12 +31,18 @@ ROOT="$(pwd)"
 BACKEND="$ROOT/backend"
 VENV_PY="$BACKEND/.venv/bin/python"
 
-# 83 scenarios = 28 acceptance (the customer-facing BRD/demo set) + 55 regression pins.
+# 89 scenarios = 28 acceptance (the customer-facing BRD/demo set) + 61 regression pins.
 # B4 is deliberately NOT in the acceptance set: it has no node on the MECE failure map, so
 # it lives in selftest.py as the dedicated over-trigger guard rather than in the UI rail.
-EXPECT_ALL='83/83 scenarios passed (28/28 acceptance, 55/55 regression pins)'
-# The lines worth echoing on every run, whatever their values.
-SUMMARY_LINES='^(83/83|6/6|8/8|11/11|1/1|62/62)'
+# 55 -> 59 on 2026-10-09: the four IN-CORRECT-* rows pinning the correction relaxer (see
+# scenarios.py). 59 -> 61 on 2026-10-09: IN-SRC-CPF (a CPF account is refused, not frozen as a
+# scam) and IN-COERCE-ATTRIB (an agency that WANTS a transfer still freezes - the cue the SCAM
+# relaxer reads). This line and EXPECT_ALL are the only place the shape is declared; update them
+# together, never the individual greps.
+EXPECT_ALL='89/89 scenarios passed (28/28 acceptance, 61/61 regression pins)'
+# The lines worth echoing on every run, whatever their values. The schedule count moved 8 -> 9
+# with the "next friday" row that pins the DATE, not only the weekday.
+SUMMARY_LINES='^(89/89|6/6|9/9|11/11|1/1|62/62)'
 
 # Managed node first, then whatever is on PATH.
 #

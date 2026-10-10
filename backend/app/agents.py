@@ -162,11 +162,25 @@ COERCION_AUTHORITY_RE = re.compile(
     r"\b(safe account|bank officer|police|government|authority|officials?|officer|"
     r"ica|spf|cpf|iras|hdb|msf|mha|immigration|customs|summons|warrant|deport|deported)\b"
     r"|移民局|警察局|政府部门|海关|税务局", re.IGNORECASE)
-# The demand half, UNCHANGED from the mock rule it replaces ("must", "says", "told me",
-# "instructed", "transfer", "move"): an agency NAME alone is not coercion, an agency name plus an
-# instruction to move money is. Kept identical so nothing that froze before stops freezing.
+# The demand half: an agency NAME alone is not coercion, an agency name plus a DEMAND is. What
+# counts as a demand is the agency SPEAKING or WANTING - "must", "says", "told me", "instructed" -
+# never the bare payment verb.
+#
+# The bare verbs ("transfer", "move") used to be in this list, and they were the one thing in it a
+# CUSTOMER says about their own payment. So "transfer 300 from my CPF" read as an agency name plus
+# an agency demand, the turn became AUTHORITY_IMPERSONATION, and a payment whose source account
+# simply cannot fund a transfer was answered with a scam freeze instead of the source-account
+# refusal. The verb was the customer's instruction to the assistant, not a scammer's instruction to
+# the customer, and only the ATTRIBUTION tells the two apart.
+#
+# So the payment verbs are kept, but only in an attributed shape ("wants me to transfer", "asks me
+# to move"). Every shape the bare list caught is still caught - "the bank officer says move it to a
+# safe account now" and "ICA says I must pay" both keep their own speech verb - so nothing that
+# froze before stops freezing, and the customer's own imperative stops freezing.
 COERCION_AUTHORITY_DEMAND_RE = re.compile(
-    r"\b(must|says|said|told me|instructed|transfer|move)\b", re.IGNORECASE)
+    r"\b(must|says|said|told me|instructed)\b"
+    r"|\b(wants?|asks?|tells?|demands?|requires?)\s+(?:me|us)\s+to\s+"
+    r"(transfer|move|pay|send)\b", re.IGNORECASE)
 # Secrecy. "Do not tell your family or the bank" has no benign reading next to a transfer, and it
 # is the most reliable tell in the set, so it is checked on its own once a money-move is present.
 COERCION_SECRECY_RE = re.compile(

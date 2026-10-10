@@ -23,33 +23,50 @@ from .models import PersonalizationSignals
 # The schedule extractor, unit-tested against a frozen clock the same way the Personalization
 # Agent is. A date is the one field a demo cannot fake, so "which day did she mean" is checked
 # here rather than left to whichever scenario happens to mention a weekday.
-# (text, expected relative phrase) with TODAY frozen to Tuesday 29 September 2026.
+# (text, expected relative phrase, expected absolute date or None) with TODAY frozen to
+# Tuesday 29 September 2026.
+#
+# The third element is what pins WHEN, not just WHICH day. The relative phrase alone could not see
+# the defect that made it necessary: "next monday" produced the right WORDS and a date 13 days out,
+# because "next" added a flat +7 on top of the coming Monday instead of naming it. From a Tuesday
+# the coming Monday is 6 days away, and that is what "next monday" means - the current week's Monday
+# has already gone. The rows below pin both readings for the two weekdays that bracket the week.
 SCHEDULE_TODAY = date(2026, 9, 29)
 SCHEDULE_CASES = [
     # The parked case: two weekdays, the first is the one being REPLACED.
-    ("instead of monday make it tuesday", "tuesday"),
-    ("make it tuesday instead of monday", "tuesday"),
-    ("rather than wednesday make it thursday", "thursday"),
-    ("next monday instead of friday", "next monday"),
-    # A single weekday is untouched, the extractor must not start second-guessing it.
-    ("send it on monday", "monday"),
-    ("on monday instead", "monday"),
+    ("instead of monday make it tuesday", "tuesday", None),
+    ("make it tuesday instead of monday", "tuesday", None),
+    ("rather than wednesday make it thursday", "thursday", None),
+    ("next monday instead of friday", "next monday", "05 October 2026"),
+    # The other side of the same week: from a Tuesday the coming Friday is 3 days out, so a flat +7
+    # would have put it 10 days out. Pinned because the row above cannot see a +7 that lands on a
+    # different weekday.
+    ("pay starhub next friday", "next friday", "02 October 2026"),
+    # A single weekday is untouched, the extractor must not start second-guessing it. "next monday"
+    # and "monday" must agree on the DATE - only the words the customer hears back differ.
+    ("send it on monday", "monday", "05 October 2026"),
+    ("on monday instead", "monday", None),
     # Two weekdays with no cue at all: unchanged, the first one named.
-    ("pay on monday and tuesday", "monday"),
-    ("tomorrow", "tomorrow"),
+    ("pay on monday and tuesday", "monday", None),
+    ("tomorrow", "tomorrow", "30 September 2026"),
 ]
 
 
 def _test_schedule() -> int:
     failures = 0
-    for text, expected in SCHEDULE_CASES:
+    for text, expected, expected_date in SCHEDULE_CASES:
         result = parse_schedule(text, today=SCHEDULE_TODAY)
         actual = result["relative"] if result else None
+        actual_date = result["absolute"] if result else None
         ok = actual == expected
+        if expected_date is not None:
+            ok = ok and actual_date == expected_date
         failures += not ok
-        print(f"{'PASS' if ok else 'FAIL'} schedule  {text!r} -> {actual!r}")
+        shown = f"{actual!r}" + (f" on {actual_date}" if expected_date is not None else "")
+        print(f"{'PASS' if ok else 'FAIL'} schedule  {text!r} -> {shown}")
         if not ok:
-            print(f"        -> expected {expected!r}")
+            print(f"        -> expected {expected!r}"
+                  + (f" on {expected_date!r}" if expected_date is not None else ""))
     return failures
 
 
@@ -590,6 +607,36 @@ EXPECTED = {
                      "event_field": [{"event": "GUARDRAILS_RESULT", "field": "note",
                                       "contains": "SCAM_OR_COERCION relaxed to ALLOW"}]},
 
+    # ---- the correction relaxer, widened from the date to any field -----------------------------
+    # Each stub is the live verdict, so these rows FAIL if the relaxer is narrowed back to the date
+    # or deleted. Two halves are pinned on purpose:
+    #   * the end state is CONFIRMATION_READY, not FROZEN -- a freeze is the defect; and
+    #   * the corrected amount actually reaches the draft. "Not frozen" alone would be satisfied by
+    #     a relaxer that let the turn through and then dropped the correction on the floor, which
+    #     is exactly the class of bug this row exists to catch.
+    "IN-CORRECT-AMOUNT": {"state": "CONFIRMATION_READY", "outcome": "ALLOW",
+                          "ledger": "NOT_INVOKED",
+                          "draft": {"amount_minor": 6000},
+                          "absent_keys": ["BLOCK_OVERRIDE"],
+                          "event_field": [{"event": "GUARDRAILS_RESULT", "field": "note",
+                                           "contains": "corrects a field of the payment on screen"}]},
+    "IN-CORRECT-AMOUNT-INST": {"state": "CONFIRMATION_READY", "outcome": "ALLOW",
+                               "ledger": "NOT_INVOKED",
+                               "draft": {"amount_minor": 6000},
+                               "absent_keys": ["BLOCK_OVERRIDE"],
+                               "event_field": [{"event": "GUARDRAILS_RESULT", "field": "note",
+                                                "contains": "corrects a field of the payment on screen"}]},
+    "IN-CORRECT-DATE-BLOCK": {"state": "CONFIRMATION_READY", "outcome": "ALLOW",
+                              "ledger": "NOT_INVOKED",
+                              "absent_keys": ["BLOCK_OVERRIDE"],
+                              "event_field": [{"event": "GUARDRAILS_RESULT", "field": "note",
+                                               "contains": "UNUSABLE_INPUT relaxed to ALLOW"}]},
+    # The control guard. No note assertion here: the relaxer must NOT have fired at all, so the
+    # absence of a proposal on the LAST turn is what proves the block still held. It is scoped to
+    # the last turn on purpose -- turn 1 is an ordinary payment and legitimately proposes one.
+    "IN-CORRECT-CONTROL": {"state": "FROZEN", "outcome": "BLOCK", "ledger": "NOT_INVOKED",
+                           "last": {"absent_events": ["PAYMENT_PROPOSAL"]}},
+
     # ---- an EDIT_PAYMENT continuation, and the /confirm backstop --------------------------------
     # EDIT_INVALIDATION / MULTI_ITEM_UPDATED are turn 2's; the confirm (the last turn) must then
     # EXECUTE clause 1 and advance to clause 2 - the 500 that made BM FaceID look broken.
@@ -885,6 +932,25 @@ EXPECTED = {
                          {"turn": 2, "events": ["EDIT_FIELDS_CARRIED_FORWARD"],
                           "keys": ["INITIATION_READBACK"],
                           "says": ["S$500.00", "DBS Current Account", "Mei Tan"]}]},
+    # A CPF account named as the payment's account: the source-account refusal, NOT a scam pause.
+    # Both halves are asserted - the refusal is spoken, and all three safety lines are banned - so
+    # neither a re-freeze nor a silently dropped refusal can pass. The `says` phrase is
+    # casing-neutral on purpose: the product is echoed in the customer's own words, and the reply
+    # would otherwise pin the lower-cased "cpf" as correct.
+    "IN-SRC-CPF": {"state": "CLARIFICATION_REQUIRED", "outcome": "REFUSED",
+                   "ledger": "NOT_INVOKED", "no_draft": True,
+                   "events": ["DESTINATION_REFUSED"],
+                   "keys": ["SOURCE_ACCOUNT_INELIGIBLE"],
+                   "absent_keys": ["COOLING_OFF_SCAM", "PAUSE_SCAM", "FROZEN_RISK"],
+                   "says": ["account cannot be used for a direct transfer"]},
+    # The mirror: an agency that WANTS a transfer still freezes. This is the cue the orchestrator's
+    # SCAM relaxer reads, so a green row here is what keeps a live scam verdict from being relaxed
+    # away. No "must" and no "says" in the sentence, so only the attributed payment verb can carry it.
+    "IN-COERCE-ATTRIB": {"state": "COOLING_OFF", "outcome": "COOLING_OFF",
+                         "ledger": "NOT_INVOKED", "no_draft": True,
+                         "keys": ["COOLING_OFF_SCAM"],
+                         "absent_keys": ["RECIPIENT_MISSING", "AMOUNT_MISSING",
+                                         "SOURCE_ACCOUNT_INELIGIBLE"]},
 }
 
 

@@ -1229,10 +1229,14 @@ def compute_schedule(spec: Optional[dict], today: Optional[date] = None) -> Opti
         index = spec.get("weekday")
         if isinstance(index, bool) or not isinstance(index, int) or not 0 <= index <= 6:
             return None
+        # The COMING occurrence, 1-7 days out (7 when the named day is today). That is also the
+        # day "next <weekday>" means: the current week's copy of the day has already gone, so the
+        # next one IS next week's. Adding a flat +7 on top of it - which this did - skipped a whole
+        # week: "next Monday" said on a Tuesday landed 13 days out instead of 6, and "next Friday"
+        # said on a Friday landed a fortnight out instead of 7 days. The word "next" still changes
+        # the RELATIVE phrase below, because that is what the customer hears back.
         ahead = (index - base.weekday()) % 7 or 7
         is_next = bool(spec.get("next"))
-        if is_next:
-            ahead += 7
         target = base + timedelta(days=ahead)
         name = _WEEKDAY_NAMES[index]
         relative = f"next {name}" if is_next else name
@@ -1377,6 +1381,40 @@ def is_schedule_correction(text: str) -> bool:
     if parse_amount(text)[0] is not None:
         return False
     return parse_payee_phrase(mask_dates(text)) is None
+
+
+def is_field_correction(text: str) -> bool:
+    """True when a turn is correcting a FIELD of the payment already on screen.
+
+    The wider sibling of is_schedule_correction, and it exists for the same reason: the live
+    Guardrails model reads the bare correction verb as an attack on a mandatory control. It is not
+    fussy about which field is named, either. Measured against the live model on an open draft:
+
+        "change it to sixty"          -> BLOCK / UNSUPPORTED_ACTION    -> froze
+        "make it 60 instead"          -> BLOCK / INSTRUCTION_OVERRIDE  -> froze
+        "no, make it tomorrow"        -> BLOCK / UNUSABLE_INPUT        -> froze
+
+    all on a ~20-character change to a payment the customer is looking at. Only the DATE case had a
+    relaxer, because only the date case had been reported.
+
+    Requires a correction cue AND at least one field the parser can actually read: an amount, a
+    date phrase, or a payee. The second half is what keeps it honest -- a bare "no" names no field,
+    so it is not a correction and takes the ordinary path. The caller pairs this with
+    MANDATORY_CONTROL_RE, so "change my transfer limit to 5000" (a cue plus an amount, but a
+    CONTROL) is still excluded there and the block stands.
+
+    Deliberately does NOT require the value to resolve. A correction that cannot be resolved
+    ("the 3rd of this month", said on the 26th) still has to REACH intent routing, which asks about
+    it -- see schedule_named_but_unusable. A relaxer decides whether a turn gets processed; it never
+    decides what is done with it.
+    """
+    if not _SCHEDULE_CORRECTION_CUE_RE.search(text):
+        return False
+    if parse_amount(text)[0] is not None:
+        return True
+    if schedule_spec_from_text(text) is not None:
+        return True
+    return parse_payee_phrase(mask_dates(text)) is not None
 
 
 # ---------------------------------------------------------------------------

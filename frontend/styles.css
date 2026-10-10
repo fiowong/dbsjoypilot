@@ -836,9 +836,16 @@ button{font-family:inherit}
    fault because its inner `.audit` is itself a scroller and degrades to scrolling; the right
    panel's `.statewrap` rows are `flex:0 0 auto` with no scroller, so they were simply clipped.
    With shrink at 0 the list above absorbs the whole deficit -- it is the one that CAN, having
-   `overflow-y:auto` -- and this section keeps its content height, capped by `max-height:44%` so
-   an expanded audit trail can never starve the list. Sized by its own content, as the name says. */
-.psplit{display:flex;flex-direction:column;flex:0 0 auto;min-height:0;max-height:44%;
+   `overflow-y:auto` -- and this section keeps its content height, capped by `max-height` so an
+   expanded audit trail can never starve the list. Sized by its own content, as the name says.
+
+   THE CAP HAS A FLOOR, and that is not decoration. A bare `44%` is a percentage of the panel, so
+   on a SHORT panel it becomes smaller than the block it is capping: measured at 1280x640 the panel
+   gives it 160px while the verdict needs 197px, so the bottom row (the decision itself) was clipped
+   -- fine at 1280x720, broken on a 640-tall screen. `max(44%,215px)` keeps the percentage doing its
+   job on tall panels, where 44% is the larger number, and guarantees the block its measured height
+   on short ones. 215px = 197px of content + the heading and rule above it, rounded up. */
+.psplit{display:flex;flex-direction:column;flex:0 0 auto;min-height:0;max-height:max(44%,215px);
   margin-top:9px;padding-top:9px;border-top:1px solid var(--studio-line)}
 .psplit>h3{flex:0 0 auto;margin-bottom:7px}
 .psplit .audit{flex:1 1 auto;min-height:0}

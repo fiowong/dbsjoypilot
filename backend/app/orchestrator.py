@@ -19,7 +19,7 @@ from .parsing import (parse_amount, parse_corrected_amount, last_committed_amoun
                        parse_schedule, parse_currency, parse_biller_phrase,
                        parse_source_account_phrase, split_instructions, lookup_biller,
                        schedule_from_hint,
-                       is_schedule_correction, schedule_named_but_unusable,
+                       is_schedule_correction, is_field_correction, schedule_named_but_unusable,
                        unknown_payee_phrase, colloquial_scale_phrase,
                        open_ended_amount,
                        beneficiary_account_number, non_transferable_account,
@@ -565,6 +565,12 @@ async def _run_turn(req: TurnRequest) -> TurnResponse:
                          and not session.cancelled and is_schedule_correction(req.text))
     date_correction = date_edit_attempt and parse_schedule(req.text) is not None
 
+    # The same question asked about ANY field rather than only the date, for the relaxer below. It is
+    # a strict SUPERSET of date_edit_attempt -- a schedule correction always names a date -- so the
+    # date relaxer's behaviour is contained in this rather than replaced by it.
+    field_edit_attempt = (session.draft is not None and not session.frozen
+                          and not session.cancelled and is_field_correction(req.text))
+
     # Deterministic safeguard (mirrors GuardrailsAgent.mock): a BLOCK/CONFIRMATION_BYPASS that does
     # NOT actually contain explicit skip / ignore / bypass language is a false positive, the live
     # model over-triggers on words like "confirm". Relaxing it to ALLOW means an ordinary confirmation
@@ -616,7 +622,15 @@ async def _run_turn(req: TurnRequest) -> TurnResponse:
     # date. This can only ever UNDO an over-trigger, never create one: a genuinely unusable turn
     # still has nothing to strip, so it keeps its CLARIFY. Mirrors the mock's own rule
     # (IntentClassifierAgent.mock / GuardrailsAgent.mock both gate on len(turn.strip()) < 2).
-    if (guardrail.decision == GuardrailDecision.CLARIFY
+    #
+    # BLOCK is accepted alongside CLARIFY because the prompt defines this category as CLARIFY-only
+    # (agents.py rule 6) and the live model returned BLOCK with it anyway: "no, make it tomorrow" is
+    # a 20-character correction of the date on screen and it came back BLOCK / UNUSABLE_INPUT, which
+    # FROZE the session. It is the CATEGORY, not the decision label, that says "I could not use this
+    # turn", so a verdict carrying it on a usable turn is off-contract under either label and both
+    # are undone together. Relaxing to ALLOW cannot authorise anything -- it only lets the turn reach
+    # intent routing, which asks its own question if the turn really is unclear.
+    if (guardrail.decision in (GuardrailDecision.CLARIFY, GuardrailDecision.BLOCK)
             and guardrail.risk_category == RiskCategory.UNUSABLE_INPUT
             and len(req.text.strip()) >= 2):
         guardrail = GuardrailResult(
@@ -669,17 +683,23 @@ async def _run_turn(req: TurnRequest) -> TurnResponse:
                                       "note": "live SCAM_OR_COERCION relaxed to ALLOW, the turn "
                                               "carries no scam cue"})
 
-    # Deterministic safeguard (date-correction over-trigger): the live Guardrails model reads the bare
+    # Deterministic safeguard (correction over-trigger): the live Guardrails model reads the bare
     # verb "change" as rule 5, ask to change a mandatory control, so "change to this monday instead"
     # came back BLOCK / UNSUPPORTED_ACTION and Auntie answered "I can't change that safety setting.
     # It stays on to protect you." on a 26-character DATE correction, freezing the session. The mock is
     # narrower: it requires the verb AND a nearby control noun, which is why the same turn is ALLOW in
-    # mock mode and the date correction works there. This relaxes the live verdict back to the mock's,
-    # and ONLY for a turn that is a date-only correction of the payment on screen.
+    # mock mode and the date correction works there. This relaxes the live verdict back to the mock's.
+    #
+    # It was WRITTEN for the date and is now keyed on any field, because the same over-trigger was
+    # measured on the others and only the date had been reported. Against the live model, on an open
+    # draft: "change it to sixty" -> BLOCK / UNSUPPORTED_ACTION and "make it 60 instead" -> BLOCK /
+    # INSTRUCTION_OVERRIDE, both freezing a 20-character change to an AMOUNT the customer is looking
+    # at. So the condition is field_edit_attempt, not date_correction. The date case is contained in
+    # it -- a schedule correction always names a date -- so nothing that used to be relaxed is lost.
+    #
     # It can never weaken the control:
     #   * a genuine control change names the control ("change my transfer limit to 5000"), so
     #     MANDATORY_CONTROL_RE matches and the block stands, verified on all four control phrasings;
-    #   * it carries no date, so date_correction is False anyway and the relaxer does not fire;
     #   * the turn must also have an open, unfrozen draft to correct, so it cannot act on a first turn;
     #   * INSTRUCTION_OVERRIDE is included because the same over-trigger happens on a denial word
     #     ("no, change it to friday"), but SCAM / coercion is a SAFETY_INTERVENTION, a different
@@ -687,21 +707,21 @@ async def _run_turn(req: TurnRequest) -> TurnResponse:
     if (guardrail.decision == GuardrailDecision.BLOCK
             and guardrail.risk_category in (RiskCategory.UNSUPPORTED_ACTION,
                                             RiskCategory.INSTRUCTION_OVERRIDE)
-            and date_correction
+            and field_edit_attempt
             and not MANDATORY_CONTROL_RE.search(req.text)):
         guardrail = GuardrailResult(
             decision=GuardrailDecision.ALLOW, risk_category=RiskCategory.SAFE_PAYMENT_REQUEST,
             risk_level="LOW", detected_language=guardrail.detected_language,
             message_key="CONTINUE",
             developer_reason="UNSUPPORTED_ACTION relaxed to ALLOW by deterministic safeguard "
-                             "(the turn is a date-only correction, not a control change).")
+                             "(the turn corrects a field of the payment on screen, not a control).")
         engine = "deterministic-safeguard"
         emit("GUARDRAILS_RESULT", 3, {"engine": engine, **guardrail.model_dump(),
                                       "prompt_version": Settings.PROMPT_VERSION,
                                       "schema_version": Settings.SCHEMA_VERSION,
                                       "note": "live guardrails relaxed to ALLOW, the turn only "
-                                              "changes WHEN the payment runs, so the over-trigger "
-                                              "is undone"})
+                                              "corrects a field of the payment on screen, so the "
+                                              "over-trigger is undone"})
 
     # Deterministic safeguard (affordability / insufficient funds, branch H): a customer who
     # volunteers they cannot cover the amount (e.g. "I don't have enough", "tak cukup duit",
