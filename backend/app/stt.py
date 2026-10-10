@@ -93,6 +93,19 @@ HOTWORD_ENGINES = {
     "16k_en", "8k_en", "8k_zh_large", "16k_en_large", "16k_ca", "16k_ja",
 }
 
+# ``convert_num_mode`` decides whether the engine rewrites spoken numbers as digits. Tencent's
+# default (1) does, and that throws away the one thing that tells two amounts apart: "one fifty"
+# (S$1.50 or S$150?) and "one hundred and fifty" (S$150, nothing to ask) BOTH arrive as "150". The
+# chat bubble then shows a number the customer never said, and the backend has to ask about every
+# spoken "150" because it cannot know which one it was (parsing.spoken_digit_ambiguity_pair).
+# 0 keeps the words, which parsing.parse_amount reads in English, Mandarin and Malay.
+#
+# Sent only to the Mandarin-family engines, which are the ones Tencent documents the parameter
+# for. 16k_multi_lang (Malay) is left on the default until a live handshake shows it accepts the
+# parameter: an unsupported parameter can REJECT the handshake (see HOTWORD_ENGINES), and a
+# Malay turn that arrives as digits is still handled safely by the digit-ambiguity question.
+NUMBERS_AS_WORDS_ENGINES = {"16k_zh_en", "16k_zh", "16k_zh_large"}
+
 SAMPLE_RATE = 16000          # Tencent accepts 8k or 16k; 16k is what we capture
 VOICE_FORMAT_PCM = 1         # voice_format=1 -> raw PCM
 CHUNK_MS = 200               # doc recommends ~200ms of audio per frame, sent 1:1 realtime
@@ -227,6 +240,8 @@ class TencentRealtimeASR:
         # is the sole basis for our confidence proxy.
         if self.engine in WORD_INFO_ENGINES:
             params["word_info"] = "1"
+        if Settings.ASR_NUMBERS_AS_WORDS and self.engine in NUMBERS_AS_WORDS_ENGINES:
+            params["convert_num_mode"] = "0"
 
         # Bias the engine toward the customer's own payee names / nicknames (see build_hotword_list),
         # so a misheard name arrives correctly spelled. The value is percent-encoded in the URL by

@@ -41,8 +41,9 @@ VENV_PY="$BACKEND/.venv/bin/python"
 # together, never the individual greps.
 EXPECT_ALL='89/89 scenarios passed (28/28 acceptance, 61/61 regression pins)'
 # The lines worth echoing on every run, whatever their values. The schedule count moved 8 -> 9
-# with the "next friday" row that pins the DATE, not only the weekday.
-SUMMARY_LINES='^(89/89|6/6|9/9|11/11|1/1|62/62)'
+# with the "next friday" row that pins the DATE, not only the weekday. Parser 62 -> 76 on
+# 2026-10-10: compound spoken numbers in EN / ZH / BM ("one hundred fifty", 一百五十).
+SUMMARY_LINES='^(89/89|6/6|9/9|11/11|1/1|76/76)'
 
 # Managed node first, then whatever is on PATH.
 #

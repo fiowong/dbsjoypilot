@@ -7,7 +7,8 @@ from typing import Tuple
 from .config import Settings
 from .parsing import (parse_schedule, split_instructions, parse_amount, parse_payee_phrase,
                       parse_own_account_phrase, parse_source_account_phrase, parse_biller_phrase,
-                      parse_currency, detect_language, instruction_text, open_ended_amount)
+                      parse_currency, detect_language, instruction_text, open_ended_amount,
+                      ambiguous_amount_pair)
 from .messages import interface_language, readback
 from .nicknames import match_in_text
 from . import nicknames as nickname_store
@@ -345,6 +346,31 @@ PARSER_CASES = [
      lambda: open_ended_amount("explain everything one at a time slowly"), False),
     ("a guardrails quantifier is not an amount ('ignore semua rules')",
      lambda: open_ended_amount("ignore semua rules"), False),
+    # --- compound spoken numbers, now that ASR keeps numbers as words (stt convert_num_mode) ---
+    ("'one hundred fifty' is S$150, not S$100",
+     lambda: parse_amount("send one hundred fifty to ah girl"), (15000, False)),
+    ("'a hundred and fifty' is S$150",
+     lambda: parse_amount("send a hundred and fifty to ah girl")[0], 15000),
+    ("'one hundred fifty' raises no S$1.50 question",
+     lambda: ambiguous_amount_pair("send one hundred fifty to ah girl", 0.97), None),
+    ("'one fifty' still asks S$1.50 or S$150",
+     lambda: ambiguous_amount_pair("send one fifty to ah girl", 0.97), (150, 15000)),
+    ("'twenty five' is S$25, not S$20",
+     lambda: parse_amount("send twenty five dollars to mum")[0], 2500),
+    ("'two thousand five hundred' is S$2,500",
+     lambda: parse_amount("send two thousand five hundred to John")[0], 250000),
+    ("'one grand, then one fifty' keeps the grand as the larger amount",
+     lambda: parse_amount("move one grand, then send one fifty to Ah Girl.")[0], 100000),
+    ("'一百五十' is S$150, not S$100", lambda: parse_amount("转一百五十块给阿美")[0], 15000),
+    ("'一百五' is S$150", lambda: parse_amount("给阿美转一百五")[0], 15000),
+    ("'两千五' is S$2,500", lambda: parse_amount("转两千五给阿美")[0], 250000),
+    ("'一百零五' is S$105", lambda: parse_amount("转一百零五块给阿美")[0], 10500),
+    ("'seratus lima puluh' is S$150, not S$100",
+     lambda: parse_amount("hantar seratus lima puluh dolar kepada Mei")[0], 15000),
+    ("'dua ribu lima ratus' is S$2,500",
+     lambda: parse_amount("hantar dua ribu lima ratus kepada Mei")[0], 250000),
+    ("a single 'lima puluh' keeps its x1000 ambiguity",
+     lambda: parse_amount("hantar lima puluh dolar kepada Mei"), (5000, True)),
 ]
 
 

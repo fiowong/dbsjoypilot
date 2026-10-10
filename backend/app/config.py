@@ -119,6 +119,10 @@ class Settings:
     ASR_APPID = os.getenv("TENCENTCLOUD_APPID", "")
     ASR_REGION = os.getenv("TENCENTCLOUD_REGION", "ap-singapore")
     ASR_LANGUAGE = os.getenv("AUNTIEJOY_ASR_LANGUAGE", "en")   # en | zh | bm
+    # Keep spoken numbers as WORDS in the transcript ("one fifty", "一百五十") instead of letting the
+    # engine rewrite them as digits ("150"), see stt.NUMBERS_AS_WORDS_ENGINES. Set to 0 to restore
+    # Tencent's default digit conversion.
+    ASR_NUMBERS_AS_WORDS = os.getenv("AUNTIEJOY_ASR_NUMBERS_AS_WORDS", "1").strip() != "0"
     LIVE_ASR = bool(ASR_SECRET_ID and ASR_SECRET_KEY and ASR_APPID)
 
     # ---- outbound proxy handling for the voice providers ----
