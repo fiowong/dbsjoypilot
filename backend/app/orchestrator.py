@@ -11,7 +11,8 @@ from .models import (SessionState, Draft, Confirmation, ValidationResult, Guardr
                       REQUIRED_VALIDATION_FIELDS)
 from .data import POLICY
 from .repository import get_repository
-from .parsing import (parse_amount, parse_corrected_amount, last_committed_amount,
+from .parsing import (unknown_recipient_instruction, parse_amount, parse_corrected_amount,
+                      last_committed_amount,
                        parse_payee_phrase, parse_reference, detect_language, instruction_text,
                        ambiguous_amount_pair, decimal_ambiguity_pair, resolve_amount_choice,
                        spoken_digit_ambiguity_pair,
@@ -125,7 +126,7 @@ def _settled_amount_fact(session: Session, draft: Draft) -> dict:
     """
     if session.settled_amount_minor is None:
         return {}
-    if (session.pending_amount_payee
+    if (session.pending_amount_payee and not _amount_scope_unknown(session)
             and draft.payee_display.lower() != session.pending_amount_payee.lower()):
         return {}
     return {"amount_settled": session.settled_amount_minor}
@@ -145,9 +146,21 @@ def _settled_for(session: Session, payee: Optional[str]) -> bool:
     """
     if session.settled_amount_minor is None:
         return False
-    if payee is None or not session.pending_amount_payee:
+    if payee is None or not session.pending_amount_payee or _amount_scope_unknown(session):
         return True
     return payee.lower() == session.pending_amount_payee.lower()
+
+
+def _amount_scope_unknown(session: Session) -> bool:
+    """True when the settled amount is scoped to a name the customer holds nobody by.
+
+    "send one fifty to arel" - the recogniser misheard "Ah Girl". The customer answers the amount
+    question, then tells Joy who they meant. The amount was never about "arel": it belongs to the
+    payment being clarified, and must follow it to the name the customer gives, instead of being
+    dropped because "Mei Tan" is not "arel" (which made Joy ask "how much?" a second time).
+    """
+    scope = session.pending_amount_payee
+    return bool(scope) and not _names_payment_target(scope, session.customer_id)
 
 
 def _spoken_amount_ambiguity(text: str, req: "TurnRequest", session: Session,
@@ -1296,6 +1309,7 @@ async def _run_turn(req: TurnRequest) -> TurnResponse:
         session.open_clarification_field = None
         session.pending_payee_suggestion = None
         session.pending_nickname = None
+        session.pending_recipient = None
         emit("PAYMENT_CANCELLED", 4, {"draft_discarded": bool(session.draft),
                                       "confirmation_invalidated": True,
                                       "signature_invalidated": bool(session._signature),
@@ -1323,6 +1337,49 @@ async def _run_turn(req: TurnRequest) -> TurnResponse:
         say_line("SAFETY_HELP", 4)
         return await finish()
 
+    # ---------- Answering "who is <unknown name>?" for a held multi-instruction breath ----------
+    # The answer names the person ("ah girl", "Mei Tan", "pay ah girl"). The unknown name is
+    # replaced by the customer's own word for them and the breath is split again, so BOTH payments
+    # are prepared and the amount already chosen for this one is kept. Exactly one saved payee must
+    # be named; anything else asks again. The destination still comes only from the saved-payee
+    # record when the draft is built.
+    if session.pending_recipient:
+        held = session.pending_recipient
+        named = _payees_named_in(req.text, session.customer_id)
+        if len(named) != 1:
+            session.state, session.outcome = SessionState.CLARIFICATION_REQUIRED, "CLARIFY"
+            session.open_clarification_field = "RECIPIENT"
+            session.note_clarification("MULTI_RECIPIENT_UNKNOWN")
+            emit("CLARIFICATION_REPEATED", 5, {
+                "clarification_key": "MULTI_RECIPIENT_UNKNOWN", "phrase": held["phrase"],
+                "payees_named": [p.display_name for p in named],
+                "canonical_draft": "NOT_CREATED",
+                "note": "The answer did not name exactly one saved payee, so the question is "
+                        "asked again. No payee is guessed at."})
+            say_line("MULTI_RECIPIENT_UNKNOWN", 5, phrase=held["phrase"],
+                     options=candidate_options(_saved_payee_options(session.customer_id), lang))
+            return await finish()
+        payee = named[0]
+        spoken_nick = nickname_match(session.customer_id, req.text)
+        word = (spoken_nick[0] if spoken_nick and spoken_nick[1].beneficiary_id
+                == payee.beneficiary_id else payee.display_name)
+        breath = re.sub(rf"\b{re.escape(held['phrase'])}\b", word, held["breath"], flags=re.I)
+        session.pending_recipient = None
+        session.open_clarification_field = None
+        if (session.pending_amount_payee
+                and session.pending_amount_payee.lower() == held["phrase"].lower()):
+            session.pending_amount_payee = payee.display_name
+        emit("RECIPIENT_SETTLED", 5, {
+            "unknown_phrase": held["phrase"], "recipient_phrase": word,
+            "beneficiary_id": payee.beneficiary_id,
+            "source": "the customer's answer to 'who is this?'",
+            "note": "The name the customer could not be matched on was replaced by the payee they "
+                    "named, and the held instructions were split again. The destination is bound "
+                    "from the saved-payee record when each draft is built."})
+        resumed = split_instructions(breath, session.customer_id)
+        if len(resumed) >= 2:
+            return await run_multi_turn(req, session, lang, resumed, emit, say_line, finish)
+
     # ---------- Answering an open "S$1.50 or S$150.00?" question ----------
     # An amount that is ambiguous in the WORDS ("one fifty") cannot be recovered from them: the
     # reading the customer picked is not in the sentence, and parse_amount reads a THIRD value out
@@ -1331,6 +1388,7 @@ async def _run_turn(req: TurnRequest) -> TurnResponse:
     # validation as a verified session fact. The alternative, re-deriving an amount from the same
     # ambiguous words, is what used to reject a correct answer with "the amount does not match what
     # you said" on the very payment the customer had just clarified.
+    amount_answered_this_turn = False
     if session.pending_amount_choices:
         offered = list(session.pending_amount_choices)
         chosen = resolve_amount_choice(req.text, offered)
@@ -1359,6 +1417,7 @@ async def _run_turn(req: TurnRequest) -> TurnResponse:
                         "ambiguity question; the old readings are discarded."})
         else:
             session.settled_amount_minor = chosen
+            amount_answered_this_turn = True
             session.amount_disambiguated = True
             session.pending_amount_choices = None
             session.open_clarification_field = None
@@ -1729,6 +1788,48 @@ async def _run_turn(req: TurnRequest) -> TurnResponse:
                                        "clarification_question": None})
                     proposal = proposal.model_copy(update=_patch)
 
+    # Deterministic safeguard (an answered amount question must not be asked twice). The customer
+    # chose "S$150.00" for a payment whose name Joy could not match ("send one fifty to arel"), was
+    # asked who they meant, and answered "pay ah girl". The Payment Agent only sees that sentence,
+    # so it proposes no amount and Joy asked "how much would you like to send to Mei Tan?" for a
+    # figure the customer gave one turn earlier. The settled amount is the customer's own answer,
+    # so it is supplied here, only when the turn names a destination and states no amount of its
+    # own, and only for the payment it was settled for (see _settled_for).
+    if (proposal.amount_minor is None and session.settled_amount_minor is not None
+            and proposal.recipient_phrase
+            and _names_payment_target(req.text, session.customer_id)
+            and _settled_for(session, display_phrase(proposal.recipient_phrase))):
+        emit("AMOUNT_CARRIED_FORWARD", 5, {
+            "amount_minor": session.settled_amount_minor,
+            "source": "the customer's own answer to the amount question",
+            "llm_proposal_overridden": True,
+            "note": "The model proposed no amount. The customer already chose this amount when "
+                    "asked, so it was carried to the payee they have now named."})
+        _patch = {"amount_minor": session.settled_amount_minor}
+        if proposal.clarification_field in (None, "AMOUNT"):
+            _patch.update({"status": "PROPOSAL_READY", "clarification_field": None,
+                           "clarification_question": None})
+        proposal = proposal.model_copy(update=_patch)
+    elif (amount_answered_this_turn and not proposal.recipient_phrase
+          and session.pending_amount_payee and not _amount_scope_unknown(session)
+          and not _names_payment_target(req.text, session.customer_id)):
+        # The turn IS the answer ("one hundred and fifty"), so it names nobody, and the live agent
+        # reading only this sentence asked "who should I pay?" about a payee the customer named one
+        # turn earlier ("send one fifty to Mei Tan"). The question was about that payment, so both
+        # of its fields are already known: the payee it was asked for, and the amount just chosen.
+        emit("RECIPIENT_CARRIED_FORWARD", 5, {
+            "recipient_phrase": session.pending_amount_payee,
+            "amount_minor": session.settled_amount_minor,
+            "source": "the payment the amount question was asked about",
+            "llm_proposal_overridden": True,
+            "note": "This turn answered the amount question, so the payee is the one that question "
+                    "named. The destination is still bound from the saved-payee record."})
+        proposal = proposal.model_copy(update={
+            "status": "PROPOSAL_READY", "recipient_phrase": session.pending_amount_payee,
+            "amount_minor": session.settled_amount_minor,
+            "clarification_field": None, "clarification_question": None})
+        session.payee_phrase = session.pending_amount_payee
+
     # The customer has just CONFIRMED a payee ("did you mean Mei Tan?" -> "yes"), so the recipient
     # field is already settled. The Payment Agent cannot know that: it re-reads the turn, and the
     # turn is a bare "yes" whose committed evidence still holds the phrase the ASR misheard, so it
@@ -1996,6 +2097,12 @@ async def _run_turn(req: TurnRequest) -> TurnResponse:
                     "are the ones already resolved and shown to the customer."})
     else:
         resolution = resolve_payee_and_account(session.customer_id, proposal, session.payee_phrase)
+        if (resolution.outcome == "RESOLVED" and resolution.draft is not None
+                and _amount_scope_unknown(session)
+                and resolution.draft.amount_minor == session.settled_amount_minor):
+            # The settled amount has found its payment: scope it to that payee from now on, so it
+            # can never also answer a later, unrelated payment in the same conversation.
+            session.pending_amount_payee = resolution.draft.payee_display
         # Attribute the match honestly. parse_payee_phrase resolves a nickname to its display name
         # BEFORE the resolver sees it, so the resolver reports "display_name" even when the
         # customer never said that name. If a nickname they DID say points at this same payee,
@@ -2455,7 +2562,8 @@ async def run_multi_turn(req: TurnRequest, session, lang: str, instructions: Lis
     # Previously this path queued "one fifty" as S$50 with no question at all, which is how a green
     # selftest hid a silently changed amount (the IN-AF row never asserted the figure).
     for text in instructions:
-        destination = _instruction_destination(text, session.customer_id)
+        destination = (_instruction_destination(text, session.customer_id)
+                       or unknown_recipient_instruction(text, session.customer_id))
         # _spoken_amount_ambiguity covers BOTH kinds of ambiguity and the "already settled for
         # this payee" case, so a fresh ambiguous instruction to somebody else still asks.
         ambiguous = _spoken_amount_ambiguity(text, req, session, destination)
@@ -2480,6 +2588,30 @@ async def run_multi_turn(req: TurnRequest, session, lang: str, instructions: Lis
         say_line("AMOUNT_AMBIGUOUS_MULTI", 5,
                  option_a=money(ambiguous[0]), option_b=money(ambiguous[1]),
                  destination=destination or "")
+        return await finish()
+
+    # A payment addressed to a name the customer holds nobody by ("send one fifty to arel") holds
+    # the whole breath, exactly as an ambiguous amount does. Preparing the other payments alone
+    # would drop this one without a word, which is what used to happen. The customer is asked who
+    # they meant, and the breath is split again with their answer (see the handler in _run_turn).
+    for text in instructions:
+        unknown = unknown_recipient_instruction(text, session.customer_id)
+        if unknown is None:
+            continue
+        session.pending_recipient = {"breath": " then ".join(instructions), "phrase": unknown}
+        session.state, session.outcome = SessionState.CLARIFICATION_REQUIRED, "CLARIFY"
+        session.open_clarification_field = "RECIPIENT"
+        session.note_clarification("MULTI_RECIPIENT_UNKNOWN")
+        emit("CLARIFICATION_OPENED", 5, {
+            "clarification_field": "RECIPIENT",
+            "clarification_key": "MULTI_RECIPIENT_UNKNOWN",
+            "phrase": unknown, "instructions_held": len(instructions),
+            "canonical_draft": "NOT_CREATED",
+            "note": "One payment in the breath is addressed to a name that matches no saved payee. "
+                    "Nothing is prepared until the customer says who they meant, so no payment "
+                    "is silently dropped."})
+        say_line("MULTI_RECIPIENT_UNKNOWN", 5, phrase=unknown,
+                 options=candidate_options(_saved_payee_options(session.customer_id), lang))
         return await finish()
 
     refused: Optional[DestinationRefusal] = None

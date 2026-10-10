@@ -74,6 +74,11 @@ class Session:
         # "spoken"}`. A fuzzy hit is only ever a SUGGESTION, nothing is bound until the customer
         # answers, and the destination still comes from the trusted saved-payee repository.
         self.pending_payee_suggestion: Optional[dict] = None
+        # A multi-instruction breath held because one of its payments is addressed to a name the
+        # customer holds nobody by ("send one fifty to arel" - usually a misheard saved name).
+        # {"breath": the instructions, "phrase": the unknown name}. Nothing is prepared while it is
+        # open; the customer's answer replaces the name and the breath is split again.
+        self.pending_recipient: Optional[dict] = None
         # The nickname this draft was reached through ("ah girl"), carried to the read-back so Joy
         # can say "I found Ah Girl as Mei Tan", and carried in the audit so the claim is checkable.
         self.nickname_used: Optional[str] = None
