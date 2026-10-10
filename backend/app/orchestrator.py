@@ -39,6 +39,7 @@ from .llm_client import arm_turn_deadline, disarm_turn_deadline
 # sees it, so only the store can say "the customer said a nickname, and it was this one". `teach`
 # is the single write path, and it refuses any beneficiary that is not already a saved payee.
 from .nicknames import match_in_text as nickname_match, teach as teach_nickname
+from .scam_patterns import match_scam_pattern, message_params, raises
 from .controls import (resolve_payee_and_account, closest_saved_payee,
                         compare_validation_result, evaluate_risk,
                         evaluate_safety_policy, canonical_payload, payload_hash, sign_payload,
@@ -874,6 +875,31 @@ async def _run_turn(req: TurnRequest) -> TurnResponse:
                                               "anonymity cue, the verdict reaching the gate was "
                                               + previous_decision + "/" + previous_category})
 
+    # ---------- Stage 3: known scam typologies (one table, scam_patterns.py) ----------
+    # Consulted AFTER the agent and every relaxer above, so nothing downstream can undo it, and it
+    # can only RAISE the verdict: a stricter model verdict still wins, a missed scam cannot pass.
+    # The matched row also chooses the line the customer hears, so a romance scam is answered as a
+    # romance scam rather than with the generic "this feels urgent".
+    scam_row = match_scam_pattern(req.text)
+    if scam_row is not None and raises(guardrail.decision, scam_row):
+        previous = f"{guardrail.decision.value}/{guardrail.risk_category.value}"
+        guardrail = GuardrailResult(
+            decision=scam_row.decision, risk_category=scam_row.risk_category,
+            risk_level="HIGH", detected_language=guardrail.detected_language,
+            message_key=scam_row.message_key,
+            developer_reason=f"Known scam typology {scam_row.pattern_id} "
+                             f"({scam_row.typology}) matched in scam_patterns.py.")
+        emit("GUARDRAILS_RESULT", 3, {"engine": "deterministic-scam-pattern",
+                                      **guardrail.model_dump(),
+                                      "pattern_id": scam_row.pattern_id,
+                                      "typology": scam_row.typology,
+                                      "prompt_version": Settings.PROMPT_VERSION,
+                                      "schema_version": Settings.SCHEMA_VERSION,
+                                      "note": "raised by the scam typology table; the verdict "
+                                              "reaching the gate was " + previous})
+    else:
+        scam_row = None
+
     if guardrail.decision == GuardrailDecision.BLOCK:
         # BRD §8.5.7 deterministic routing: BLOCK -> session.state = "FROZEN".
         # The outcome vocabulary keeps the guardrails reason distinct from a validation freeze.
@@ -885,7 +911,8 @@ async def _run_turn(req: TurnRequest) -> TurnResponse:
             "draft_created": False, "gateway_available_to_agent": False,
             "ledger_invoked": False})
         # The agent returned a code; the deterministic layer decides how it is said.
-        say_line(guardrail.message_key, 3)
+        say_line(guardrail.message_key, 3,
+                 **(message_params(scam_row, req.text) if scam_row is not None else {}))
         return await finish()
 
     if guardrail.decision == GuardrailDecision.SAFETY_INTERVENTION:
@@ -921,6 +948,8 @@ async def _run_turn(req: TurnRequest) -> TurnResponse:
         # different words, all from the catalogue, never from the model's own phrasing.
         if safety.decision == RiskDecision.REJECT:
             say_line("PAUSE_SCAM", 10)
+        elif scam_row is not None:
+            say_line(scam_row.message_key, 10, **message_params(scam_row, req.text))
         elif guardrail.risk_category == RiskCategory.SCAM_OR_COERCION_SIGNAL:
             # A coercion signal gets the cooling-off wording that tells the customer to verify
             # the story with a number they already know, not the generic "something looks odd".

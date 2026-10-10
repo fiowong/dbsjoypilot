@@ -56,6 +56,104 @@ MESSAGES: Dict[str, Dict[str, str]] = {
         "BM": "Maaf {name}, saya tidak boleh langkau langkah pengesahan. Setiap bayaran perlu "
               "disahkan oleh {name} dahulu.",
     },
+    # ---------- Stage 3: known scam typologies (scam_patterns.py) ----------
+    # One line per typology, so the customer hears WHY this request looks like a scam and what to
+    # do about it, instead of one generic "this feels urgent" for every kind of scam.
+    "SCAM_GOVERNMENT": {
+        "EN": "{name}, please do not make this payment yet. Threats involving immediate payment "
+              "and government action can be signs of a scam. Contact the agency using its "
+              "official website or number.",
+        "ZH": "{name}，请先不要付款。以政府名义威胁您立即付款，可能是诈骗。请通过该机构的"
+              "官方网站或电话联系他们。",
+        "BM": "{name}, jangan buat bayaran ini dulu. Ugutan bayar segera atas nama kerajaan boleh "
+              "jadi tanda penipuan. Hubungi agensi itu melalui laman web atau nombor rasminya.",
+    },
+    "SCAM_SECRECY": {
+        "EN": "{name}, being told to keep a payment secret is a warning sign. I have not prepared "
+              "the payment. Please end the conversation with the caller and contact DBS through "
+              "an official channel.",
+        "ZH": "{name}，被要求对付款保密是一个警讯。我没有准备这笔付款。请结束与对方的通话，"
+              "并通过官方渠道联系 DBS。",
+        "BM": "{name}, disuruh merahsiakan bayaran ialah tanda amaran. Saya belum sediakan bayaran "
+              "itu. Sila tamatkan perbualan dengan pemanggil dan hubungi DBS melalui saluran rasmi.",
+    },
+    "SCAM_COACHING": {
+        "EN": "{name}, I cannot bypass the safety checks. Please stop and verify the request "
+              "independently. I have not prepared any payment.",
+        "ZH": "{name}，我不能跳过安全检查。请先停下来，自己核实这个要求。我没有准备任何付款。",
+        "BM": "{name}, saya tidak boleh langkau semakan keselamatan. Sila berhenti dan sahkan "
+              "permintaan ini sendiri. Saya belum sediakan sebarang bayaran.",
+    },
+    "SCAM_LIMITS": {
+        "EN": "{name}, I cannot remove or increase payment safeguards through this conversation. "
+              "I have not prepared the transfer.",
+        "ZH": "{name}，我不能在对话中取消或提高付款保护。我没有准备这笔转账。",
+        "BM": "{name}, saya tidak boleh buang atau naikkan perlindungan bayaran melalui perbualan "
+              "ini. Saya belum sediakan pemindahan itu.",
+    },
+    "SCAM_FAMILY": {
+        "EN": "{name}, before sending money, please contact your {relative} using a number you "
+              "already know. This is a new contact and an urgent request, so I have not prepared "
+              "the payment.",
+        "ZH": "{name}，汇钱之前，请用您原本就有的号码联系您的家人。这是一个新号码，又是紧急要钱，"
+              "所以我没有准备这笔付款。",
+        "BM": "{name}, sebelum hantar wang, sila hubungi ahli keluarga anda guna nombor yang anda "
+              "sudah tahu. Ini nombor baru dan permintaan segera, jadi saya belum sediakan bayaran.",
+    },
+    "SCAM_INVESTMENT": {
+        "EN": "{name}, guaranteed returns and urgent payment requests can be signs of an investment "
+              "scam. I have not prepared this payment. Please verify the company independently.",
+        "ZH": "{name}，保证回报加上催促付款，可能是投资诈骗。我没有准备这笔付款。请自行核实这家公司。",
+        "BM": "{name}, pulangan terjamin dan desakan bayar segera boleh jadi tanda penipuan "
+              "pelaburan. Saya belum sediakan bayaran ini. Sila sahkan syarikat itu sendiri.",
+    },
+    "SCAM_ROMANCE": {
+        "EN": "{name}, please do not send the money yet. Requests for urgent money from someone "
+              "you have not met can indicate a scam. I have not prepared the payment.",
+        "ZH": "{name}，请先不要汇钱。一个您没见过面的人急着向您要钱，可能是诈骗。我没有准备这笔付款。",
+        "BM": "{name}, jangan hantar wang dulu. Permintaan wang segera daripada orang yang anda "
+              "belum pernah jumpa boleh jadi penipuan. Saya belum sediakan bayaran.",
+    },
+    "SCAM_TECH_SUPPORT": {
+        "EN": "{name}, please do not make this payment. Legitimate technical-support providers will "
+              "not ask you to transfer money to secure your bank account. End the call and contact "
+              "DBS officially.",
+        "ZH": "{name}，请不要付款。正规的技术支持不会要您转账来保护银行账户。请挂断电话，"
+              "并通过官方渠道联系 DBS。",
+        "BM": "{name}, jangan buat bayaran ini. Sokongan teknikal yang sah tidak akan minta anda "
+              "pindahkan wang untuk lindungi akaun bank. Tamatkan panggilan dan hubungi DBS secara "
+              "rasmi.",
+    },
+    "SCAM_URGENCY": {
+        "EN": "{name}, I will not skip the safety checks. Please tell me who should receive the "
+              "money and why the payment is urgent.",
+        "ZH": "{name}，我不会跳过安全检查。请告诉我钱要汇给谁，以及为什么这么急。",
+        "BM": "{name}, saya tidak akan langkau semakan keselamatan. Sila beritahu siapa yang patut "
+              "terima wang ini dan kenapa bayaran ini segera.",
+    },
+    "SCAM_STRUCTURING": {
+        "EN": "{name}, I cannot help divide payments to avoid security checks. I have not created "
+              "any payments.",
+        "ZH": "{name}，我不能帮您把付款拆开来避开安全检查。我没有建立任何付款。",
+        "BM": "{name}, saya tidak boleh bantu pecahkan bayaran untuk elak semakan keselamatan. "
+              "Saya belum buat sebarang bayaran.",
+    },
+    "SCAM_CONCEAL": {
+        "EN": "{name}, I cannot hide a payment or remove it from transaction records. I have not "
+              "prepared this request.",
+        "ZH": "{name}，我不能隐藏付款，也不能把它从交易记录中删除。我没有准备这个要求。",
+        "BM": "{name}, saya tidak boleh sembunyikan bayaran atau buang dari rekod transaksi. Saya "
+              "belum sediakan permintaan ini.",
+    },
+    "SCAM_CALLER_PRESENT": {
+        "EN": "{name}, please do not make a payment while someone is coaching you. End the call "
+              "first, then contact DBS using the official number in the app.",
+        "ZH": "{name}，有人在旁边教您的时候，请不要付款。请先挂断电话，再用应用程序里的官方号码"
+              "联系 DBS。",
+        "BM": "{name}, jangan buat bayaran semasa seseorang sedang mengajar anda. Tamatkan "
+              "panggilan dulu, kemudian hubungi DBS guna nombor rasmi dalam aplikasi.",
+    },
+
     "BLOCK_OVERRIDE": {
         "EN": "I'm sorry, {name}. I can't change that safety setting. It stays on to protect you.",
         "ZH": "对不起，{name}，我不能更改这个安全设置。它是为了保护您。",
