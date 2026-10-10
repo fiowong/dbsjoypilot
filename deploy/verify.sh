@@ -38,13 +38,13 @@ VENV_PY="$BACKEND/.venv/bin/python"
 # scenarios.py). 59 -> 61 on 2026-10-09: IN-SRC-CPF (a CPF account is refused, not frozen as a
 # scam) and IN-COERCE-ATTRIB (an agency that WANTS a transfer still freezes - the cue the SCAM
 # relaxer reads). 61 -> 65 on 2026-10-10: IN-AND-AMT, IN-MULTI-UNKNOWN, IN-UNKNOWN-AMT and
-# IN-CHANGE-PAYEE. This line and EXPECT_ALL are the only place the shape is declared; update them
+# IN-CHANGE-PAYEE. 65 -> 72 the same day: the IN-SCAM-* scam-typology rows. This line and EXPECT_ALL are the only place the shape is declared; update them
 # together, never the individual greps.
-EXPECT_ALL='93/93 scenarios passed (28/28 acceptance, 65/65 regression pins)'
+EXPECT_ALL='100/100 scenarios passed (28/28 acceptance, 72/72 regression pins)'
 # The lines worth echoing on every run, whatever their values. The schedule count moved 8 -> 9
 # with the "next friday" row that pins the DATE, not only the weekday. Parser 62 -> 76 on
 # 2026-10-10: compound spoken numbers in EN / ZH / BM ("one hundred fifty", 一百五十).
-SUMMARY_LINES='^(93/93|6/6|9/9|11/11|1/1|76/76)'
+SUMMARY_LINES='^(100/100|6/6|9/9|11/11|1/1|83/83)'
 
 # Managed node first, then whatever is on PATH.
 #

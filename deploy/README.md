@@ -48,7 +48,7 @@ cd dbs-auntiejoy
 ```
 
 It runs **35 checks** and exits non-zero if anything is wrong: shell and Python syntax,
-dependencies, the full scenario suite (**93/93** against the deterministic mock agents, with the
+dependencies, the full scenario suite (**100/100** against the deterministic mock agents, with the
 ledger held at 3/3), all six frontend API-base modes, route coverage through **both** the nginx
 vhost and the Caddy config (28/28), the `/tts.js` shadowing guard, repository seed drift
 (detected, repaired, and refused on the audit database), the four jsdom frontend suites, the TTS

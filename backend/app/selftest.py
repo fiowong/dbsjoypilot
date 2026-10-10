@@ -11,6 +11,7 @@ from .parsing import (parse_schedule, split_instructions, parse_amount, parse_pa
                       ambiguous_amount_pair)
 from .messages import interface_language, readback
 from .nicknames import match_in_text
+from .scam_patterns import match_scam_pattern, message_params
 from . import nicknames as nickname_store
 from .controls import closest_saved_payee
 from .stt import build_hotword_list
@@ -346,6 +347,23 @@ PARSER_CASES = [
      lambda: open_ended_amount("explain everything one at a time slowly"), False),
     ("a guardrails quantifier is not an amount ('ignore semua rules')",
      lambda: open_ended_amount("ignore semua rules"), False),
+    # --- scam typology table: the family word is echoed, ordinary payments never match ---
+    ("SC-08 names the relative it heard",
+     lambda: message_params(match_scam_pattern(
+         "My grandson messaged me from a new number. He needs S$5,000 now."),
+         "My grandson messaged me from a new number. He needs S$5,000 now."), {"relative": "grandson"}),
+    ("one 'now' with a payee is not urgency pressure",
+     lambda: match_scam_pattern("Send five thousand dollars to Mei now."), None),
+    ("a phone call with family is not a coached call",
+     lambda: match_scam_pattern("I am on the phone with my daughter, she says thanks"), None),
+    ("paying a government bill is not impersonation",
+     lambda: match_scam_pattern("pay the IRAS tax bill"), None),
+    ("buying shares is not an investment scam",
+     lambda: match_scam_pattern("move a grand to my joint account and then buy DBS shares with half of it"), None),
+    ("splitting a bill with a friend is not structuring",
+     lambda: match_scam_pattern("split the bill with John, send him 40"), None),
+    ("a payment to a son is not a family-emergency scam",
+     lambda: match_scam_pattern("send 200 to my son John Doe"), None),
     # --- compound spoken numbers, now that ASR keeps numbers as words (stt convert_num_mode) ---
     ("'one hundred fifty' is S$150, not S$100",
      lambda: parse_amount("send one hundred fifty to ah girl"), (15000, False)),
@@ -736,6 +754,7 @@ EXPECTED = {
                       "says": ["I need an exact amount", "may empty your account"]},
 
     # ---- the coercion openings, one pin per family ----------------------------------------------
+    # Each now hears the line for ITS typology (scam_patterns.py), not one generic cooling-off.
     # These rows are the report that started this: "ICA says I must pay or my pass will be
     # cancelled" and four siblings each came back as "Mei Ling, who should I pay?". Every row
     # asserts BOTH halves - the scam pause IS spoken, and the generic "who should I pay?"
@@ -743,26 +762,26 @@ EXPECTED = {
     # was the defect. Nothing is drafted and the ledger is never invoked: the payment is stopped,
     # not merely questioned, and the customer is warned rather than accused.
     "IN-COERCE-AUTH": {"state": "COOLING_OFF", "outcome": "COOLING_OFF", "ledger": "NOT_INVOKED",
-                       "no_draft": True, "keys": ["COOLING_OFF_SCAM"],
+                       "no_draft": True, "keys": ["SCAM_GOVERNMENT"],
                        "absent_keys": ["RECIPIENT_MISSING", "AMOUNT_MISSING"]},
     "IN-COERCE-SECRET": {"state": "COOLING_OFF", "outcome": "COOLING_OFF", "ledger": "NOT_INVOKED",
-                         "no_draft": True, "keys": ["COOLING_OFF_SCAM"],
+                         "no_draft": True, "keys": ["SCAM_SECRECY"],
                          "absent_keys": ["RECIPIENT_MISSING", "AMOUNT_MISSING"]},
     "IN-COERCE-FAMILY": {"state": "COOLING_OFF", "outcome": "COOLING_OFF", "ledger": "NOT_INVOKED",
-                         "no_draft": True, "keys": ["COOLING_OFF_SCAM"],
+                         "no_draft": True, "keys": ["SCAM_FAMILY"],
                          "absent_keys": ["RECIPIENT_MISSING", "AMOUNT_MISSING"]},
     "IN-COERCE-TECH": {"state": "COOLING_OFF", "outcome": "COOLING_OFF", "ledger": "NOT_INVOKED",
-                       "no_draft": True, "keys": ["COOLING_OFF_SCAM"],
+                       "no_draft": True, "keys": ["SCAM_TECH_SUPPORT"],
                        "absent_keys": ["RECIPIENT_MISSING", "AMOUNT_MISSING"]},
     "IN-COERCE-INVEST": {"state": "COOLING_OFF", "outcome": "COOLING_OFF", "ledger": "NOT_INVOKED",
-                         "no_draft": True, "keys": ["COOLING_OFF_SCAM"],
+                         "no_draft": True, "keys": ["SCAM_INVESTMENT"],
                          "absent_keys": ["RECIPIENT_MISSING", "AMOUNT_MISSING"]},
     # The row that pins the ESCALATOR, not the mock. The model's verdict is STUBBED to ALLOW (the
     # live miss), so only the deterministic control can produce the pause - the other five rows
     # would stay green if the escalator were deleted, this one would not. The audit note is
     # asserted, so a row that stopped the payment for some OTHER reason does not count either.
     "IN-COERCE-ESCALATE": {"state": "COOLING_OFF", "outcome": "COOLING_OFF", "ledger": "NOT_INVOKED",
-                           "no_draft": True, "keys": ["COOLING_OFF_SCAM"],
+                           "no_draft": True, "keys": ["SCAM_GOVERNMENT"],
                            "absent_keys": ["RECIPIENT_MISSING", "AMOUNT_MISSING"],
                            "event_field": [{"event": "GUARDRAILS_RESULT", "field": "note",
                                             "contains": "escalated to SAFETY_INTERVENTION"}]},
@@ -977,6 +996,23 @@ EXPECTED = {
                          "keys": ["COOLING_OFF_SCAM"],
                          "absent_keys": ["RECIPIENT_MISSING", "AMOUNT_MISSING",
                                          "SOURCE_ACCOUNT_INELIGIBLE"]},
+    # ---- scam typologies the agent alone missed (scam_patterns.py) -------------------------------
+    "IN-SCAM-COACH": {"state": "COOLING_OFF", "outcome": "COOLING_OFF", "ledger": "NOT_INVOKED",
+                      "no_draft": True, "keys": ["SCAM_COACHING"]},
+    "IN-SCAM-LIMITS": {"state": "FROZEN", "outcome": "BLOCK", "ledger": "NOT_INVOKED",
+                       "no_draft": True, "keys": ["SCAM_LIMITS"]},
+    "IN-SCAM-ROMANCE": {"state": "COOLING_OFF", "outcome": "COOLING_OFF", "ledger": "NOT_INVOKED",
+                        "no_draft": True, "keys": ["SCAM_ROMANCE"],
+                        "absent_keys": ["RECIPIENT_MISSING"]},
+    "IN-SCAM-URGENCY": {"state": "CLARIFICATION_REQUIRED", "outcome": "CLARIFY",
+                        "ledger": "NOT_INVOKED", "no_draft": True, "keys": ["SCAM_URGENCY"],
+                        "absent_keys": ["RECIPIENT_MISSING"]},
+    "IN-SCAM-SPLIT": {"state": "FROZEN", "outcome": "BLOCK", "ledger": "NOT_INVOKED",
+                      "no_draft": True, "keys": ["SCAM_STRUCTURING"], "absent_keys": ["CANCELLED"]},
+    "IN-SCAM-HIDE": {"state": "FROZEN", "outcome": "BLOCK", "ledger": "NOT_INVOKED",
+                     "no_draft": True, "keys": ["SCAM_CONCEAL"], "absent_keys": ["RECIPIENT_MISSING"]},
+    "IN-SCAM-CALLER": {"state": "COOLING_OFF", "outcome": "COOLING_OFF", "ledger": "NOT_INVOKED",
+                       "no_draft": True, "keys": ["SCAM_CALLER_PRESENT"]},
     "IN-AND-AMT": {"state": "CONFIRMATION_READY", "outcome": "MULTI_INSTRUCTION",
                    "ledger": "NOT_INVOKED", "says": ["two instructions", "S$86.40", "send S$150.00"]},
     "IN-MULTI-UNKNOWN": {"state": "CONFIRMATION_READY", "outcome": "MULTI_INSTRUCTION",
