@@ -64,6 +64,7 @@ echo "==> Copying the repository (excluding secrets, venvs and databases)"
 rsync -az --delete \
     --exclude '.venv' --exclude '__pycache__' --exclude 'node_modules' \
     --exclude '*.db' --exclude '.env' --exclude '.git' \
+    --exclude '*.bak' --exclude '*~*' --exclude '*.test.js' --exclude 'test-api-base.mjs' \
     -e "ssh ${SSH_OPTS[*]}" \
     "$REPO_ROOT/" "$REMOTE_USER@$HOST:~/auntiejoy-dcta-main/"
 
