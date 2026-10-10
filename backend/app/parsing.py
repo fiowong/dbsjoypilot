@@ -15,7 +15,8 @@ from .nicknames import match_in_text as nickname_match
 NUMBER_WORDS = {
     # English
     "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7,
-    "eight": 8, "nine": 9, "ten": 10, "eleven": 11, "twelve": 12, "fifteen": 15,
+    "eight": 8, "nine": 9, "ten": 10, "eleven": 11, "twelve": 12, "thirteen": 13,
+    "fourteen": 14, "fifteen": 15, "sixteen": 16, "seventeen": 17, "eighteen": 18, "nineteen": 19,
     "twenty": 20, "thirty": 30, "forty": 40,
     "fifty": 50, "sixty": 60, "seventy": 70, "eighty": 80, "ninety": 90,
     "one hundred": 100, "hundred": 100,
@@ -378,6 +379,198 @@ def instruction_text(turn: str) -> str:
     return turn
 
 
+# ---------------------------------------------------------------------
+# Compound spoken numbers. NUMBER_WORDS holds single words, and _largest_number_word picks ONE of
+# them, so "one hundred fifty" read as S$100 ("hundred" was the largest word) and so did
+# "一百五十" and "seratus lima puluh". That was harmless only while the recogniser turned every
+# spoken number into digits; it does not, now that ASR returns the customer's own words (stt.py,
+# convert_num_mode). These evaluate a whole run of number words by the grammar of each language.
+#
+# A run is only ever an amount when it is GRAMMATICAL. "one fifty" (a unit followed by a tens word,
+# with no "hundred") is not a compound number, it is the S$1.50-or-S$150 question that
+# decimal_ambiguity_pair asks, so it returns nothing here and falls through to the existing logic.
+# A single word also falls through, so its x1000 scale ambiguity (§A.5 B1) is decided as before.
+# ---------------------------------------------------------------------
+_EN_UNIT = {"zero": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6,
+            "seven": 7, "eight": 8, "nine": 9}
+_EN_TEEN = {"ten": 10, "eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14,
+            "fifteen": 15, "sixteen": 16, "seventeen": 17, "eighteen": 18, "nineteen": 19}
+_EN_TENS = {"twenty": 20, "thirty": 30, "forty": 40, "fifty": 50, "sixty": 60, "seventy": 70,
+            "eighty": 80, "ninety": 90}
+_EN_SCALE = {"hundred": 100, "thousand": 1000, "grand": 1000}
+_EN_VOCAB = set(_EN_UNIT) | set(_EN_TEEN) | set(_EN_TENS) | set(_EN_SCALE) | {"a", "an", "and"}
+
+_BM_UNIT = {"kosong": 0, "satu": 1, "dua": 2, "tiga": 3, "empat": 4, "lima": 5, "enam": 6,
+            "tujuh": 7, "lapan": 8, "sembilan": 9}
+_BM_WHOLE = {"sepuluh": 10, "sebelas": 11, "seratus": 100}     # "se-" = one, already multiplied
+_BM_MULT = {"belas": None, "puluh": 10, "ratus": 100}           # belas: +10, the teens
+_BM_VOCAB = set(_BM_UNIT) | set(_BM_WHOLE) | set(_BM_MULT) | {"ribu", "seribu"}
+
+_ZH_DIGIT = {"零": 0, "〇": 0, "一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5, "六": 6,
+             "七": 7, "八": 8, "九": 9}
+_ZH_UNIT = {"十": 10, "百": 100, "千": 1000}
+_ZH_RUN = re.compile(r"[零〇一二两三四五六七八九十百千万]{2,}")
+
+
+def _latin_runs(text: str, vocab: set) -> List[Tuple[int, int, List[str]]]:
+    """(start, end, tokens) for each run of consecutive vocab words, separated only by spaces or
+    hyphens. Anything else between two words, a comma or another word, ends the run."""
+    runs: List[Tuple[int, int, List[str]]] = []
+    start = end = None
+    tokens: List[str] = []
+    for m in re.finditer(r"[a-z]+", text):
+        word = m.group(0)
+        joined = end is not None and re.fullmatch(r"[\s-]*", text[end:m.start()])
+        if word in vocab and (joined or start is None):
+            if start is None:
+                start = m.start()
+            tokens.append(word)
+            end = m.end()
+            continue
+        if tokens:
+            runs.append((start, end, tokens))
+        start, end, tokens = (m.start(), m.end(), [word]) if word in vocab else (None, None, [])
+    if tokens:
+        runs.append((start, end, tokens))
+    return runs
+
+
+def _en_compound(tokens: List[str]) -> Optional[int]:
+    """'one hundred and fifty' -> 150, 'twenty five' -> 25, 'two thousand five hundred' -> 2500.
+    None for anything that is not a well-formed English number (including 'one fifty')."""
+    # "and" is only a connector after a scale word, and a leading "a"/"an" only means one before
+    # a scale word ("a hundred", "a grand"); trailing connectors belong to the sentence.
+    while tokens and tokens[-1] in ("and", "a", "an"):
+        tokens = tokens[:-1]
+    while tokens and tokens[0] == "and":
+        tokens = tokens[1:]
+    total, current, last, seen_thousand = 0, 0, None, False
+    for i, tok in enumerate(tokens):
+        if tok == "and":
+            if last not in ("hundred", "thousand"):
+                return None
+            continue
+        if tok in ("a", "an"):
+            if last is not None or i + 1 >= len(tokens) or tokens[i + 1] not in _EN_SCALE:
+                return None
+            current, last = 1, "unit"
+        elif tok in _EN_UNIT:
+            if last in ("unit", "teen"):
+                return None                       # "one fifty" style, not a compound
+            current, last = current + _EN_UNIT[tok], "unit"
+        elif tok in _EN_TEEN or tok in _EN_TENS:
+            if last not in (None, "hundred", "thousand"):
+                return None
+            current += _EN_TEEN.get(tok) or _EN_TENS[tok]
+            last = "teen" if tok in _EN_TEEN else "tens"
+        elif tok == "hundred":
+            if last == "hundred" or current >= 100:
+                return None
+            current, last = (current or 1) * 100, "hundred"
+        else:                                     # thousand / grand
+            if seen_thousand:
+                return None
+            total, current, last, seen_thousand = total + (current or 1) * 1000, 0, "thousand", True
+    return total + current if last is not None else None
+
+
+def _bm_compound(tokens: List[str]) -> Optional[int]:
+    """'seratus lima puluh' -> 150, 'dua ribu lima ratus' -> 2500, 'lima belas' -> 15."""
+    total, current, pending, seen_thousand = 0, 0, None, False
+    for tok in tokens:
+        if tok in _BM_UNIT:
+            if pending is not None:
+                return None
+            pending = _BM_UNIT[tok]
+        elif tok in _BM_MULT:
+            if pending is None:
+                return None
+            current += (10 + pending) if tok == "belas" else pending * _BM_MULT[tok]
+            pending = None
+        elif tok in _BM_WHOLE:
+            if pending is not None:
+                return None
+            current += _BM_WHOLE[tok]
+        else:                                     # ribu / seribu
+            if seen_thousand:
+                return None
+            if tok == "seribu":
+                if current or pending is not None:
+                    return None
+                group = 1
+            else:
+                group = current + (pending or 0)
+                if not group:
+                    return None
+            total, current, pending, seen_thousand = total + group * 1000, 0, None, True
+    return total + current + (pending or 0)
+
+
+def _zh_compound(run: str) -> Optional[int]:
+    """'一百五十' -> 150, and the everyday short forms '一百五' -> 150, '两千五' -> 2500."""
+    total, section, digit, last_unit, after_zero = 0, 0, None, None, False
+    for ch in run:
+        if ch in _ZH_DIGIT:
+            if digit is not None:
+                return None                       # "一五", not a number
+            value = _ZH_DIGIT[ch]
+            if value == 0:
+                after_zero = True
+            else:
+                digit = value
+        elif ch in _ZH_UNIT:
+            unit = _ZH_UNIT[ch]
+            if digit is None:
+                if ch != "十":
+                    return None
+                digit = 1                         # "十五" = 15
+            if last_unit is not None and last_unit <= unit:
+                return None                       # units must descend: "十百" is not a number
+            section, digit, last_unit, after_zero = section + digit * unit, None, unit, False
+        else:                                     # 万
+            if total:
+                return None
+            total = (section + (digit or 0) or 1) * 10000
+            section, digit, last_unit, after_zero = 0, None, 10000, False
+    if digit is not None:
+        # A trailing digit straight after a unit is one step below it: 一百五 = 150, not 105.
+        # After 零 it is literal: 一百零五 = 105.
+        section += digit * (last_unit // 10) if last_unit and not after_zero else digit
+    return total + section
+
+
+def _compound_spoken_amount(text: str) -> Optional[Tuple[int, str]]:
+    """(value, text with that run blanked) for the LARGEST compound number in the turn, or None.
+
+    Only multi-word runs count (two characters for Mandarin); see the block comment above.
+    """
+    lowered = text.lower()
+    best: Optional[Tuple[int, int, int]] = None
+    for vocab, evaluate in ((_EN_VOCAB, _en_compound), (_BM_VOCAB, _bm_compound)):
+        for start, end, tokens in _latin_runs(lowered, vocab):
+            words = [t for t in tokens if t not in ("and", "a", "an")]
+            # A run that is ALREADY one NUMBER_WORDS entry ("lima puluh", "one hundred") is left to
+            # the single-word path, which also carries its x1000 scale ambiguity.
+            if " ".join(words) in NUMBER_WORDS:
+                continue
+            if len(words) < 2 and not (len(words) == 1 and words[0] in _EN_SCALE
+                                       and tokens[0] in ("a", "an")):
+                continue
+            value = evaluate(tokens)
+            if value is not None and (best is None or value > best[0]):
+                best = (value, start, end)
+    for m in _ZH_RUN.finditer(text):
+        if m.group(0) in NUMBER_WORDS:
+            continue
+        value = _zh_compound(m.group(0))
+        if value is not None and (best is None or value > best[0]):
+            best = (value, m.start(), m.end())
+    if best is None:
+        return None
+    value, start, end = best
+    return value, text[:start] + " " * (end - start) + text[end:]
+
+
 def parse_amount(text: str) -> Tuple[Optional[int], bool]:
     """Return (amount_minor, scale_ambiguous).
 
@@ -406,7 +599,25 @@ def parse_amount(text: str) -> Tuple[Optional[int], bool]:
             value *= SCALE_WORDS[scale_word]
         return int(round(value * 100)), False
 
-    # 2) Compound spoken form, the number word that precedes the scale word multiplies it.
+    # 2) A whole spoken number ("one hundred and fifty", "一百五十", "seratus lima puluh"). The
+    #    largest amount in the turn wins, as it does for single words below, so a compound is
+    #    compared with whatever the single-word path finds in the rest of the turn.
+    compound = _compound_spoken_amount(text)
+    if compound is not None:
+        value, rest = compound
+        other, ambiguous = _word_amount(rest)
+        if other is not None and other > value * 100:
+            return other, ambiguous
+        return value * 100, False
+    return _word_amount(text)
+
+
+def _word_amount(text: str) -> Tuple[Optional[int], bool]:
+    """parse_amount's single-word path: a scale compound ("two thousand") or one number word."""
+    lowered = text.lower()
+    scale_word = _scale_word_in(lowered, text)
+
+    # 3) Compound spoken form, the number word that precedes the scale word multiplies it.
     if scale_word:
         head_lowered, head_raw = lowered.split(scale_word, 1)[0], None
         if not scale_word.isascii():
@@ -417,7 +628,7 @@ def parse_amount(text: str) -> Tuple[Optional[int], bool]:
         # "a thousand" / bare scale word, the scale is the whole value.
         return SCALE_WORDS[scale_word] * 100, False
 
-    # 3) Plain number words.
+    # 4) Plain number words.
     word, value = _largest_number_word(lowered, text)
     if word is None:
         return None, False
