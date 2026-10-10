@@ -894,19 +894,19 @@ class ValidationAgent:
         recipient_source = "TRANSCRIPT"
         if is_bill:
             evidence_phrase = None
-            for turn in evidence:
+            for turn in reversed(evidence):     # the LATEST naming wins: a changed mind is not a mismatch
                 evidence_phrase = evidence_phrase or parse_biller_phrase(turn)
             recipient_ok = bool(evidence_phrase) and draft.payee_display.lower().startswith(
                 evidence_phrase.lower())
         elif is_card:
             evidence_phrase = None
-            for turn in evidence:
+            for turn in reversed(evidence):     # the LATEST naming wins: a changed mind is not a mismatch
                 evidence_phrase = evidence_phrase or parse_card_phrase(turn)
             recipient_ok = bool(evidence_phrase) and draft.payee_display.lower().startswith(
                 evidence_phrase.lower())
         elif is_own:
             evidence_phrase = None
-            for turn in evidence:
+            for turn in reversed(evidence):     # the LATEST naming wins: a changed mind is not a mismatch
                 evidence_phrase = evidence_phrase or parse_own_account_phrase(turn)
             recipient_ok = bool(evidence_phrase) and draft.payee_display.lower().startswith(
                 evidence_phrase.lower())
@@ -916,7 +916,7 @@ class ValidationAgent:
             # RECIPIENT check came back MISMATCH, and the comparator FROZE the payment; the
             # customer was told the amount did not match what they said.
             evidence_phrase = None
-            for turn in evidence:
+            for turn in reversed(evidence):     # the LATEST naming wins: a changed mind is not a mismatch
                 evidence_phrase = evidence_phrase or parse_payee_phrase(turn, customer_id)
             # The customer CONFIRMED this recipient on this turn ("did you mean Mei Tan?" -> "yes"),
             # so the field is settled by their own answer, and the evidence will never name it: the

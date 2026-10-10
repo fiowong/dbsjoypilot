@@ -334,6 +334,12 @@ _PAYMENT_VERBS = re.compile(
     r"|汇|给|帮我|转", re.I)
 
 
+# " and " joins two instructions, EXCEPT inside a spoken number: "one hundred and fifty" is one
+# amount. Cutting there split "transfer one hundred and fifty dollars to Ah Girl" into "...one
+# hundred" and "fifty dollars to Ah Girl", and the second piece became a S$50 payment.
+_AND_SEP = r"(?<!hundred)(?<!thousand)(?<!grand)\s+and\s+"
+
+
 # The boundary between a leading acknowledgement and the real instruction that follows it.
 # A hard sentence boundary (. ! ? ;) AND the spoken connectors a customer actually uses to
 # chain a confirmation onto a new instruction ("1000是对的，然后…", "yes, then send…", "betul,
@@ -342,7 +348,7 @@ _INSTRUCTION_BOUNDARY = re.compile(
     r"[.!?;]+(\s+|$)"
     r"|，|；"
     r"|然后|之后|接着|还有|再"
-    r"|\s+and\s+|\s+then\s+"
+    r"|" + _AND_SEP + r"|\s+then\s+"
     r"|\bkemudian\b|\blepas\s+itu\b|\blalu\b|\bdan\b|\bserta\b", re.I)
 
 
@@ -1841,10 +1847,55 @@ def blocked_destination_cue(text: str) -> bool:
 # separated. CJK is matched as a bare substring because \b is a no-op around CJK, which is safe
 # here: every one of these is a function word, never part of a name or an amount.
 _INSTRUCTION_SEP = re.compile(
-    r",\s+|，|；|;\s*|\s+and\s+|\s+then\s+"
+    r",\s+|，|；|;\s*|" + _AND_SEP + r"|\s+then\s+"
     r"|然后|之后|接着|还有|再"
     r"|\bkemudian\b|\blepas\s+itu\b|\blalu\b|\bdan\b|\bserta\b", re.I)
 _LEADING_CONJ = re.compile(r"^(?:and|then|also|and then)\s+", re.I)
+
+
+# "send one fifty to arel": a payment to a name that matches nobody the customer holds, most often
+# because the recogniser misheard a saved name ("arel" for "Ah Girl"). Recognising the SHAPE of
+# the instruction matters even though the name binds nothing: without it, a breath such as "move a
+# grand to my joint account, then send one fifty to arel" looked like ONE instruction and the
+# second payment vanished without a word. The phrase is only ever used to ASK who was meant; it
+# never resolves a destination.
+_TO_NAME = re.compile(
+    r"\b(?:to|kepada|ke)\s+([a-z][a-z'\-]*(?:\s+[a-z][a-z'\-]*){0,2}?)"
+    r"\s*(?=$|[.!?,;]|\s+(?:from|using|via|now|today|tomorrow|please|lah|first|then|and|"
+    r"on|at|in|by|dari|sekarang)\b)", re.I)
+_NOT_A_NAME = {"my", "the", "your", "his", "her", "our", "their", "a", "an", "me", "him", "them",
+               "it", "this", "that", "account", "akaun", "saya", "pay", "send", "be", "do", "go"}
+
+
+def unknown_recipient_phrases(text: str, customer_id: Optional[str] = None) -> List[str]:
+    """The names a payment is addressed to ("... to arel") that match no saved payee, nickname,
+    biller, card or own account. A name the customer holds is never returned."""
+    if not _PAYMENT_VERBS.search(text or ""):
+        return []
+    found: List[str] = []
+    for m in _TO_NAME.finditer(text):
+        phrase = m.group(1).strip().lower()
+        if not phrase or phrase.split()[0] in _NOT_A_NAME:
+            continue
+        if (parse_payee_phrase(phrase, customer_id) or parse_biller_phrase(phrase, customer_id)
+                or parse_card_phrase(phrase, customer_id)
+                or parse_own_account_phrase(phrase, customer_id)):
+            continue
+        if phrase not in found:
+            found.append(phrase)
+    return found
+
+
+def unknown_recipient_instruction(text: str, customer_id: Optional[str] = None) -> Optional[str]:
+    """The unknown name when ``text`` is ONE payment instruction to it: a payment verb, an amount
+    and "to <name>", with no destination the customer holds. Otherwise None."""
+    if (parse_biller_phrase(text, customer_id) or parse_card_phrase(text, customer_id)
+            or parse_own_account_phrase(text, customer_id) or parse_payee_phrase(text, customer_id)):
+        return None
+    if parse_amount(text)[0] is None:
+        return None
+    names = unknown_recipient_phrases(text, customer_id)
+    return names[0] if names else None
 
 
 def split_instructions(text: str, customer_id: Optional[str] = None) -> List[str]:
@@ -1869,6 +1920,8 @@ def split_instructions(text: str, customer_id: Optional[str] = None) -> List[str
         pp = parse_payee_phrase(t, customer_id)
         if pp:
             found.add("PAYEE:" + pp)
+        # A payment to a name nobody holds is still a payment the customer asked for.
+        found.update("UNKNOWN:" + n for n in unknown_recipient_phrases(t, customer_id))
         return found
 
     if len(_targets(text)) < 2:
@@ -1878,7 +1931,8 @@ def split_instructions(text: str, customer_id: Optional[str] = None) -> List[str
         return bool(parse_biller_phrase(t, customer_id)
                     or parse_card_phrase(t, customer_id)
                     or parse_own_account_phrase(t, customer_id)
-                    or parse_payee_phrase(t, customer_id))
+                    or parse_payee_phrase(t, customer_id)
+                    or unknown_recipient_instruction(t, customer_id))
 
     pieces = [p.strip() for p in _INSTRUCTION_SEP.split(text) if p and p.strip()]
     # A comma inside ONE instruction is not the boundary between two.

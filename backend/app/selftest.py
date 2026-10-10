@@ -977,6 +977,19 @@ EXPECTED = {
                          "keys": ["COOLING_OFF_SCAM"],
                          "absent_keys": ["RECIPIENT_MISSING", "AMOUNT_MISSING",
                                          "SOURCE_ACCOUNT_INELIGIBLE"]},
+    "IN-AND-AMT": {"state": "CONFIRMATION_READY", "outcome": "MULTI_INSTRUCTION",
+                   "ledger": "NOT_INVOKED", "says": ["two instructions", "S$86.40", "send S$150.00"]},
+    "IN-MULTI-UNKNOWN": {"state": "CONFIRMATION_READY", "outcome": "MULTI_INSTRUCTION",
+                         "ledger": "NOT_INVOKED",
+                         "events": ["AMOUNT_DISAMBIGUATED", "RECIPIENT_SETTLED"],
+                         "says": ["1,000.00", "S$150.00 to Ah Girl"],
+                         "at_turn": [{"turn": 2, "keys": ["MULTI_RECIPIENT_UNKNOWN"],
+                                      "open": "RECIPIENT", "no_draft": True}]},
+    "IN-UNKNOWN-AMT": {"state": "CONFIRMATION_READY", "outcome": "ALLOW", "ledger": "NOT_INVOKED",
+                       "draft": {"amount_minor": 15000, "payee_display": "Mei Tan"},
+                       "at_turn": [{"turn": 3, "absent_keys": ["AMOUNT_MISSING"]}]},
+    "IN-CHANGE-PAYEE": {"state": "CONFIRMATION_READY", "outcome": "ALLOW", "ledger": "NOT_INVOKED",
+                        "draft": {"amount_minor": 5000, "payee_display": "John Doe"}},
 }
 
 

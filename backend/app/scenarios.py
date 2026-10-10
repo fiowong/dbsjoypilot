@@ -772,6 +772,41 @@ REGRESSIONS: Dict[str, dict] = {
         "turns": [{"text": "The CPF officer wants me to transfer S$5,000 now.",
                    "asr_confidence": 0.96}],
         "confirm": None},
+    # "one hundred AND fifty" is one amount. The splitter used to cut the breath on that "and", so
+    # the second payment became "fifty Singapore dollars to a girl" and was read back as S$50.00.
+    "IN-AND-AMT": {"branch": "-",
+        "title": "'one hundred and fifty' inside a two-payment breath stays S$150",
+        "turns": [{"text": ("Pay my star hub bill from my current account. Then transfer one "
+                            "hundred and fifty Singapore dollars to a girl from my savings "
+                            "account. Explain each transaction one at a time."),
+                   "asr_confidence": 0.96}],
+        "confirm": None},
+    # A two-payment breath whose second payment names nobody the customer holds ("arel" was the
+    # recogniser mishearing "Ah Girl"). That payment used to vanish without a word; now the breath
+    # is held, Joy asks who was meant, and BOTH payments are read back with the chosen amount.
+    "IN-MULTI-UNKNOWN": {"branch": "-",
+        "title": "A misheard name in a two-payment breath is asked about, not dropped",
+        "turns": [{"text": ("One grand from my savings account to my joint account, then send "
+                            "one fifty to arel."), "asr_confidence": 0.96},
+                  {"text": "one hundred and fifty dollars", "asr_confidence": 0.97},
+                  {"text": "pay ah girl", "asr_confidence": 0.97}],
+        "confirm": None},
+    # The single-payment twin: the amount chosen for "arel" follows the payment to the person the
+    # customer then names, instead of Joy asking "how much?" a second time.
+    "IN-UNKNOWN-AMT": {"branch": "-",
+        "title": "An amount chosen for a misheard name is kept when the real payee is named",
+        "turns": [{"text": "send one fifty to arel.", "asr_confidence": 0.96},
+                  {"text": "one hundred and fifty dollars", "asr_confidence": 0.97},
+                  {"text": "pay ah girl", "asr_confidence": 0.97}],
+        "confirm": None},
+    # Changing your mind about WHO to pay is not a mismatch. Validation read the FIRST payee in
+    # the conversation, so the new payee was frozen as "does not match what you said".
+    "IN-CHANGE-PAYEE": {"branch": "-",
+        "title": "A later instruction to a different payee is prepared, not frozen",
+        "turns": [{"text": "send one fifty to mei tan", "asr_confidence": 0.96},
+                  {"text": "one hundred and fifty", "asr_confidence": 0.97},
+                  {"text": "actually send fifty dollars to john doe", "asr_confidence": 0.97}],
+        "confirm": None},
 }
 
 

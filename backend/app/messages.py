@@ -214,6 +214,17 @@ MESSAGES: Dict[str, Dict[str, str]] = {
               "{option_a} atau {option_b}?",
     },
 
+    # One payment in a multi-instruction breath is addressed to a name the customer holds nobody
+    # by, most often a misheard saved name ("arel" for "Ah Girl"). The whole breath is held, so
+    # Joy says so and lists the payees the customer DOES hold; they only have to recognise one.
+    "MULTI_RECIPIENT_UNKNOWN": {
+        "EN": "{name}, before I prepare these: I didn't catch who \"{phrase}\" is. Which of your "
+              "saved payees did you mean: {options}?",
+        "ZH": "{name}，在准备之前：我没听清「{phrase}」是谁。您指的是哪一位收款人，{options}？",
+        "BM": "{name}, sebelum saya sediakan: saya tak pasti siapa \"{phrase}\". Penerima simpanan "
+              "yang mana {name} maksudkan: {options}?",
+    },
+
     # ---------- Stage 5: a name Joy does not know yet ----------
     # "Send Ah Girl S$100": the customer has a name for their daughter and expects Joy to know it.
     # "Who should I pay?" is unanswerable for somebody who has just said exactly who they meant, so
