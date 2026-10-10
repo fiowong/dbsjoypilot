@@ -24,3 +24,7 @@ frontend/*.log
 .idea/
 
 .integration-backup/
+
+# editor backups and superseded assets (never deployed)
+*.bak
+*~*
