@@ -764,16 +764,13 @@ document.querySelectorAll('#langtog .lt').forEach(b=>{
 /* Tencent has no single engine that covers English + Chinese + Malay, so the language
    toggle picks the ENGINE, not just a hint: EN and ZH share 16k_zh_en (which auto-detects
    between them), while BM needs 16k_multi_lang.
-   Auto therefore has to sacrifice one language, and it sacrifices Malay rather than Chinese:
-   it resolves to 16k_zh_en, which is the SAME engine the default EN pill already opens, so
-   choosing Auto can only add recognition and never removes any. Resolving Auto to the Malay
-   engine instead would silently drop Chinese for whoever selected it. See
+   There are three pills (EN / 中文 / BM) and no Auto pill. The backend still accepts "auto"
+   (it resolves to 16k_zh_en), so an older client that sends it keeps working. See
    backend/app/stt.py ENGINE_BY_LANGUAGE, which is the authority for this mapping. */
 function sttLanguage(){
   const l = document.querySelector('#langtog .lt.on')?.dataset.l || 'EN';
   if(l === 'BM') return 'bm';
   if(l === 'ZH') return 'zh';
-  if(l === 'AUTO') return 'auto';           // 16k_zh_en: English + Chinese
   return 'en';
 }
 
