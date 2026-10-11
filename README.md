@@ -1,8 +1,9 @@
-# AuntieJoy
+# JoyPilot
 
 Our entry for the **Tencent Cloud AI Singapore Hackathon 2026, DBS Banking Track**:
 the Direct Conversational Transaction Agent (DCTA) challenge, Scenario 1 (voice-enabled
-payments). In the app the assistant is called Joy, and the page is titled JoyPilot.
+payments). The assistant inside JoyPilot is called Joy. (The repo and some settings still use
+the earlier working name, AuntieJoy.)
 
 Joy lets an older customer ("Auntie") pay someone by talking or typing normally, in English,
 Mandarin or Bahasa Melayu. "Send fifty dollars to Ah Girl" is enough. The AI only drafts the
