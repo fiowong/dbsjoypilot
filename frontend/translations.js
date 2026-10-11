@@ -74,7 +74,7 @@ const POLICY  = { demoLimitMinor: 100000, threshold:'synthetic demonstration lim
      ai   - (1) UNDERSTAND AND PROPOSE, the AI half. Agents may propose; nothing here can
             authorise anything, and no stage in this band can reach the ledger.
      det  - (2) DECIDE, AUTHORISE AND EXECUTE, the deterministic half. Plain code, from the
-            policy check to the rail. This is the only half that can move money. */
+            policy check to the mock ledger. This is the only half that can move money. */
 const STAGES = [
   ['Authentication',                  'Registered device · session tier',       'ai'],
   ['Audio Input (ASR)',               'Tencent Cloud ASR',                     'ai'],
@@ -91,7 +91,7 @@ const STAGES = [
   ['Mock Biometrics',                 'Simulated adapter',                     'det'],
   ['Canonical Payload Signing',       'Deterministic crypto',                  'det'],
   ['Zero-Trust Gateway',              'Deterministic',                         'det'],
-  ['Payment Complete',                'Mock rail',                             'det']
+  ['Payment Complete',                'Mock ledger',                           'det']
 ];
 
 /* The two bands, named once, in the diagram's own words. The explainer and the control chain

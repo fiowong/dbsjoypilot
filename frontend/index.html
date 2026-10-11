@@ -449,7 +449,7 @@
                 <div class="dgnode agent">
                   <span class="dgpill">Agent 1</span>
                   <div class="dgnt"><span class="dgnum">3</span>Guardrails Agent</div>
-                  <div class="dgns">Scam + override screening<br><em>Deterministic gate</em></div>
+                  <div class="dgns">Scam + override screening<br><em>Backed by a deterministic scam table</em></div>
                 </div>
                 <div class="dgarrow" aria-hidden="true"></div>
                 <div class="dgnode agent">
@@ -494,7 +494,7 @@
                 <div class="dgchip"><b>Dynamic Ambiguity Resolution</b> and Semantic Discrepancy Auditing</div>
                 <div class="dgchip"><b>Typed Contracts</b> — structured JSON proposals only:
                   amount · payee · source · others</div>
-                <div class="dgchip"><b>Deterministic DBS Developers</b> banking protocols and APIs template</div>
+                <div class="dgchip"><b>Shaped for DBS's APIs</b> — the draft carries the fields a bank transfer needs (source, beneficiary, amount, currency, reference)</div>
                 <div class="dgchip"><b>No agent holds a key.</b> Without an approval and a signing
                   key there is no ledger access.</div>
               </div>
@@ -554,11 +554,13 @@
 
               <div class="dgchips">
                 <div class="dgchip"><b>Zero-Trust API Gateway Policies</b> — the gateway re-derives
-                  the payload and checks identity, authorisation, evidence, policy, limits and
-                  demography before the rail is reachable.</div>
-                <div class="dgchip"><b>The rail is config-selected</b> and sits behind the gateway.
-                  In this demo it is the mock ledger; the integration target is the DBS Fund
-                  Transfer API.</div>
+                  the canonical payload and runs 14 checks: the signature, the draft version, a complete
+                  confirmation, the validation result, the risk policy, freeze and cancel status,
+                  nonce reuse and expiry. Only then is the ledger reachable.</div>
+                <div class="dgchip"><b>Behind the gateway is a mock ledger.</b> Stage 15 calls one
+                  function, <span class="mono">Ledger.execute()</span>, which records the payment in
+                  memory. Connecting DBS's payment API means replacing that one call; that
+                  integration is not built in this prototype.</div>
               </div>
             </div>
           </div>
@@ -602,7 +604,7 @@
              of the bounded agents the architecture draws. -->
         <section class="expage" data-page="how" hidden>
           <h2>One utterance in — one governed, audited DBS payment out</h2>
-          <p class="exlead">AI proposes. Deterministic code decides. DBS authorises. Tencent Cloud
+          <p class="exlead">AI proposes. Deterministic code decides. You approve. Tencent Cloud
             carries the voice. <b>No model ever holds a key or touches the ledger.</b></p>
 
           <div class="twoband">
@@ -620,7 +622,7 @@
                 </div>
                 <div class="tbcard">
                   <div class="tbt">Guardrails</div>
-                  <div class="tbs">Scam + prompt-injection screen — deterministic</div>
+                  <div class="tbs">Scam + prompt-injection screen, backed by deterministic rules</div>
                 </div>
                 <div class="tbcard">
                   <div class="tbt">4 bounded agents</div>
@@ -668,19 +670,19 @@
                   <div class="tbt">Authorise + execute</div>
                   <ul class="tbl">
                     <li>Lock the reviewed draft</li>
-                    <li>Bank-owned biometric sign</li>
+                    <li>Mock FaceID, then signing</li>
                     <li>Zero-trust gateway</li>
-                    <li>Rail executes</li>
+                    <li>Mock ledger records</li>
                   </ul>
                 </div>
               </div>
             </div>
 
             <div class="tb foot">
-              <span class="tbfk">PAYMENT RAIL</span>
-              <span class="tbfv">config-selected, behind the gateway</span>
-              <span class="tbfpill">MockLedgerRail (demo)</span>
-              <span class="tbfpill">DBS Fund Transfer API (live)</span>
+              <span class="tbfk">PAYMENT</span>
+              <span class="tbfv">behind the gateway</span>
+              <span class="tbfpill">Mock ledger (this demo)</span>
+              <span class="tbfpill">DBS payment API (integration target, not built)</span>
             </div>
           </div>
 
@@ -726,21 +728,25 @@
               <ul>
                 <li><b>Speech recognition.</b> Tencent Cloud ASR. Audio goes up, text comes back,
                   in English, Mandarin and Bahasa Melayu.</li>
-                <li><b>Speech synthesis.</b> Cartesia Sonic, with three real voices — English,
-                  Mandarin and Malay. The top bar shows which engine is speaking, and says so if
-                  it ever has to fall back.</li>
-                <li><b>The four agents.</b> Real model calls over HTTPS, each with a typed JSON
-                  schema, a retry budget and a hard deadline. If the model is unreachable the
-                  agent degrades to its deterministic mock and the panel says so — it never
+                <li><b>Speech synthesis.</b> Cartesia Sonic by default, with English, Mandarin and
+                  Malay voices; TRTC Mode switches to Tencent Cloud TTS. The top bar shows which
+                  engine is speaking, and says so if it ever has to fall back.</li>
+                <li><b>The four agents.</b> Real model calls over HTTPS when a model key is
+                  configured, each with a typed JSON schema, a retry budget and a hard deadline.
+                  Without a key, or if the model is unreachable, each agent runs its deterministic
+                  mock instead, and its card says <span class="mono">engine: mock</span>. It never
                   silently pretends.</li>
                 <li><b>The sixteen-stage control chain.</b> Plain deterministic code. No model
                   can call into it, skip a stage, or reorder one.</li>
                 <li><b>The audit ledger.</b> Append-only and hash-chained: every event carries
                   the hash of the event before it, so editing history breaks the chain visibly.</li>
-                <li><b>The payload signature.</b> A real signature over the canonical draft,
-                  re-verified at the gateway before anything is allowed to execute.</li>
-                <li><b>Guardrail screening.</b> Amount, velocity, payee, scam-language and
-                  audio-risk rules all run as code, not as a model's opinion.</li>
+                <li><b>The payload signature.</b> An HMAC-SHA256 signature over the canonical
+                  payload, re-verified at the gateway before anything is allowed to execute. The
+                  key is a server-held demo key, not a bank HSM.</li>
+                <li><b>Guardrail screening.</b> The Guardrails Agent's verdict is backed by code:
+                  a scam-typology table (government impersonation, romance, tech support,
+                  secrecy and more), amount, velocity and payee rules. Code can make the verdict
+                  stricter, never looser.</li>
               </ul>
             </div>
 
@@ -751,7 +757,11 @@
                   returns the same verdict shape the real one would, and it is the only thing in
                   the system that can authorise a payment.</li>
                 <li><b>The payment itself.</b> A restricted mock capability writes to a synthetic
-                  ledger. No money moves, no real account is touched, no gateway is contacted.</li>
+                  ledger. No money moves, no real account is touched, no bank system is
+                  contacted.</li>
+                <li><b>Voice risk.</b> "Speaker mismatch" and "synthetic voice" are simulated
+                  signals, raised by Voice Mode to show the step-up path. No audio is analysed
+                  for liveness.</li>
                 <li><b>The customer.</b> “Mei Ling” and “DBS Savings ending 1234” are synthetic
                   fixtures — not real customer data.</li>
                 <li><b>Payees and balances.</b> Fixtures, resolved through the same code path a
@@ -759,7 +769,7 @@
                   bypassed.</li>
               </ul>
               <p class="exnote">Why the boundary sits exactly there: the biometric sensor and the
-                payment rail are the two places a prototype cannot legally or practically reach.
+                payment ledger are the two places a prototype cannot legally or practically reach.
                 Everything either side of that line is the real thing.</p>
             </div>
           </div>
@@ -793,8 +803,8 @@
           <p class="exlead">Every stage from 09 onwards is deterministic code — and only stage 15
             can move money.</p>
           <p class="exsub">The signed artifact is produced at stage 13. The gateway at stage 14
-            re-derives it and trusts nothing it is told. The rail at stage 15 is the only place a
-            payment leaves the building.</p>
+            re-derives it and trusts nothing it is told. The mock ledger at stage 15 is the only place a
+            payment is recorded.</p>
 
           <div class="pwrap">
             <div class="pcol">
@@ -830,7 +840,7 @@
                   <span class="prtag">the signed artifact</span>
                 </div>
                 <div class="prsub">One canonical serialisation of the reviewed draft, then signed
-                  by the bank-owned key. Everything downstream verifies against this, and nothing
+                  with HMAC-SHA256 using a server-held demo key (a bank would use an HSM). Everything downstream verifies against this, and nothing
                   downstream is allowed to trust a claim about it.</div>
               </div>
 
@@ -841,67 +851,60 @@
                   <span class="prtag">no agent may reach this</span>
                 </div>
                 <div class="prsub">Re-derives the canonical payload and independently checks the
-                  signature, the authorisation evidence, the policy, the limits and the demography.
-                  A mismatch stops the payment here, after signing and before the rail.</div>
+                  signature, the draft version, a complete confirmation, the validation result,
+                  the risk policy, freeze and cancel status, nonce reuse and expiry.
+                  A mismatch stops the payment here, after signing and before the ledger.</div>
               </div>
 
               <div class="prow rail">
-                <div class="prlab">STAGE 15 <span>payment rail (config-selected)</span></div>
+                <div class="prlab">STAGE 15 <span>restricted mock payment capability</span></div>
                 <div class="prflow">
-                  <span class="prnode mono">MockLedgerRail</span>
-                  <span class="prar" aria-hidden="true">→</span>
                   <span class="prnode mono">Ledger.execute()</span>
-                  <span class="prtag">today</span>
+                  <span class="prtag">this demo</span>
                 </div>
                 <div class="prflow">
-                  <span class="prnode mono">DbsFundTransferRail</span>
-                  <span class="prar" aria-hidden="true">→</span>
-                  <span class="prnode mono">DBS Fund Transfer HTTP API</span>
-                  <span class="prtag">the integration</span>
+                  <span class="prnode mono">DBS Fund Transfer API</span>
+                  <span class="prtag">integration target, not built</span>
                 </div>
               </div>
 
               <div class="prow out">
-                <div class="prlab">OUTCOME <span>after the rail returns</span></div>
+                <div class="prlab">OUTCOME <span>after the ledger returns</span></div>
                 <div class="prflow">
                   <span class="prnode mono">LEDGER_RECORDED / LEDGER_NOT_INVOKED / SCHEDULE_HELD</span>
                 </div>
-                <div class="prsub">Every outcome carries the rail's own reference plus a
+                <div class="prsub">Every outcome carries the ledger's transaction reference plus a
                   hash-chained, append-only audit record — the audit record is the only version of
                   events that counts.</div>
               </div>
 
               <div class="pnote">
-                <b>TODAY vs THE INTEGRATION.</b> MockLedgerRail writes to a simulated in-memory
-                ledger: no money moves, no real account is touched, and the demo says so on screen.
-                DbsFundTransferRail calls the real DBS HTTP API and is switched in by
-                configuration alone. Both sit behind the same gateway, so <b>nothing in the
-                control chain changes when the rail is switched</b> — that seam is the whole point.
+                <b>TODAY vs THE INTEGRATION.</b> Stage 15 makes one call, <span class="mono">Ledger.execute()</span>,
+                which records the payment in a simulated in-memory ledger: no money moves, no real
+                account is touched, and the demo says so on screen. Connecting DBS means replacing
+                that one call with a DBS API client. It sits behind the same gateway, so
+                <b>nothing else in the control chain has to change</b>. That integration is not
+                built in this prototype.
               </div>
             </div>
 
             <div class="pside">
-              <!-- These two cards are transcribed from backend/app/rails.py, config.py and
-                   stt.py, NOT from the slide. The slide's wording was checked against the code on
-                   10 Oct and three details were wrong: it named a token endpoint the app never
-                   calls (the token is pre-issued and sent in the header set), it gave the wrong
-                   path for BOTH transfer operations, and it called the gateway function by a name
-                   the code does not define.
-                   A demo page that names an endpoint the code does not call is worse than no
-                   detail at all, because someone will ask. The paths, the version pin, the
-                   amount-as-string rule and the gateway check count are all asserted against the
-                   backend source in shell.test.js section 9f - and that check reads the SERVED
-                   BYTES, comments included, so this comment deliberately does NOT quote the
-                   strings that were wrong. -->
+              <!-- The DBS card is the INTEGRATION TARGET, taken from DBS's published Fund Transfer API
+                   documentation. This build does not call it: stage 15 is Ledger.execute(). It is
+                   worded as what the integration would send, never as something the app does.
+                   The Tencent card describes only what this build actually uses. The gateway
+                   function name and its check count are asserted against controls.py in
+                   shell.test.js section 9f. -->
               <div class="pcard">
-                <div class="pch">DBS Fund Transfer API — the live rail</div>
+                <div class="pch">DBS Fund Transfer API — the integration target</div>
                 <dl class="pdl">
+                  <dt>Status</dt><dd><b>Not built.</b> From DBS's published API documentation;
+                    this build records payments in the mock ledger and does not call DBS</dd>
                   <dt>Base</dt><dd><span class="mono">https://www.dbs.com/sandbox/api/sg/v1</span></dd>
                   <dt>Auth</dt><dd>a pre-issued token carried in the header set — <span
                     class="mono">clientId</span>, <span class="mono">accessToken</span>,
-                    <span class="mono">uuid</span>, <span class="mono">accept-version</span>. The
-                    app calls no token endpoint</dd>
-                  <dt>Version</dt><dd><span class="mono">accept-version: 1.0</span>, pinned.
+                    <span class="mono">uuid</span>, <span class="mono">accept-version</span></dd>
+                  <dt>Version</dt><dd><span class="mono">accept-version: 1.0</span>, to be pinned.
                     Unset means "latest", which would change behaviour the day DBS publishes a
                     new version</dd>
                   <dt>Own accounts</dt><dd>POST /transfers/toOwnAccounts · wrapper
@@ -911,11 +914,10 @@
                     <span class="mono">fundTransferPayee</span> — carries
                     <span class="mono">transferType</span>, plus
                     <span class="mono">purpose</span> when the destination is another bank</dd>
-                  <dt>Amount</dt><dd>sent as a two-decimal <b>string</b>, because every published
-                    sample sends one and the schema does not say so</dd>
-                  <dt>Reference</dt><dd><span class="mono">AJ-…</span> derived from (draft,
-                    idempotency key). DBS has no idempotency key, so a retry is indistinguishable
-                    from a second payment unless we make it distinguishable</dd>
+                  <dt>Amount</dt><dd>a two-decimal <b>string</b> in every published sample</dd>
+                  <dt>Reference</dt><dd>DBS takes no idempotency key, so the integration would
+                    derive a stable reference from the draft and the gateway's idempotency key,
+                    so that a retry cannot become a second payment</dd>
                   <dt>Response</dt><dd>201 <span class="mono">{referenceId, status: ACCEPTED}</span>;
                     errors arrive as an array of <span class="mono">{code, message, moreInfo}</span></dd>
                   <dt>Separate product</dt><dd>bills and card payments are the Bill Payments API
@@ -927,21 +929,19 @@
               <div class="pcard">
                 <div class="pch">Tencent Cloud — what is genuinely live</div>
                 <dl class="pdl">
-                  <dt>Lighthouse</dt><dd>43.156.247.155 · ap-singapore · Ubuntu 24.04 — the page,
-                    the app and the audit DB</dd>
+                  <dt>Lighthouse</dt><dd>ap-singapore — hosts the page, the backend and the audit
+                    DB</dd>
                   <dt>ASR</dt><dd>asr.cloud.tencent.com · signed WebSocket · <b>two</b> engines,
                     because no single one covers English + Chinese + Malay:
                     <span class="mono">16k_zh_en</span> (zh + en) and
                     <span class="mono">16k_multi_lang</span> (en + ms). Auto resolves to
                     <span class="mono">16k_zh_en</span>, deliberately</dd>
-                  <dt>TTS</dt><dd>tts.cloud.tencent.com · TextToVoice · TC3-HMAC-SHA256 —
-                    synchronous, because the international site exposes no streaming TTS</dd>
-                  <dt>DNSPod</dt><dd>dbsjoy.xyz → 43.156.247.155</dd>
+                  <dt>TTS</dt><dd>Cartesia Sonic by default (the only engine with a Malay voice).
+                    TRTC Mode switches to Tencent Cloud TTS: TextToVoice, or TRTC
+                    TextToSpeechSSE streaming when it is configured</dd>
                   <dt>Model</dt><dd>served from Tencent Cloud MaaS
                     (tokenhub-intl.tencentcloudmaas.com); /health reports which model is active,
                     rather than the page naming one that may have changed</dd>
-                  <dt>Not used</dt><dd>COS — blocked on account-owner identity verification;
-                    EdgeOne covers static hosting instead</dd>
                 </dl>
               </div>
 
@@ -959,7 +959,7 @@
                the DOM carrying `.sbtn`, and scenarios.js binds every scripted scenario with
                `document.querySelectorAll('.sbtn')`. With the rail gone there is no in-UI
                trigger for the 22 rehearsal branches - the app runs through the live /turn flow
-               only. The 19 SC.* definitions, runScenario(), the backend's 62-scenario suite and
+               only. The 19 SC.* definitions, runScenario(), the backend's 100-scenario suite and
                the `data-s` ids are all still present and tested; only the buttons are gone. -->
         </section>
 

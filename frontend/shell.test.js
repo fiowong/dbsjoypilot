@@ -718,28 +718,23 @@ console.log('\n=== 9d. TOP BAR, TWO PANELS, HERO PAIR, EXPLAINER OVERLAY ===');
 })();
 
 console.log('\n=== 9f. THE EXECUTION-PATH PAGE QUOTES THE CODE, NOT THE SLIDE ===');
-// The Execution-path page names DBS endpoints, header names and function names. Those are
-// checkable facts, and the slide they were first copied from was wrong in three places: it
-// invented a `POST /auth/token`, it used `/transfers/ownAccount` and `/transfers/payeeAccount`,
-// and it called the gateway `gateway.verify()`.
-//
-// A demo page that names an endpoint the code does not call is worse than no detail at all,
-// because a judge will ask about it. So the page is asserted against the BACKEND SOURCE rather
-// than against a reviewer's memory: every path the rail can actually send must appear on the
-// page, and every string the slide got wrong must be absent. If someone renames a path in
-// rails.py, this fails until the page is updated with it.
+// The explainer pages name functions, a check count and the payment path. Those are checkable
+// facts, so they are asserted against the BACKEND SOURCE rather than against a reviewer's memory.
+// This build has no payment rail: stage 15 calls Ledger.execute() directly (orchestrator.py), and
+// the DBS Fund Transfer API is an integration target only. The page must say exactly that, and
+// must never name a rail class the code does not define.
 (function(){
-  const rails    = fs.readFileSync(path.join(dir, '..', 'backend', 'app', 'rails.py'), 'utf8');
   const controls = fs.readFileSync(path.join(dir, '..', 'backend', 'app', 'controls.py'), 'utf8');
+  const orch     = fs.readFileSync(path.join(dir, '..', 'backend', 'app', 'orchestrator.py'), 'utf8');
   const html     = fs.readFileSync(path.join(dir, 'index.html'), 'utf8');
 
-  // The rail's own routing table, read straight out of _DBS_OPERATION / _BILL_OPERATION.
-  const paths = [...rails.matchAll(/"POST",\s*"(\/[A-Za-z0-9_\/]+)"/g)].map(m => m[1]);
-  ok('the rail declares its DBS paths', paths.length >= 2, paths.join(', '));
-  ok('every DBS path the rail can send is named on the execution-path page',
-     paths.every(p => html.includes(p)),
-     paths.filter(p => !html.includes(p)).join(', ') || 'all present');
-
+  ok('stage 15 on the page is the mock ledger the orchestrator actually calls',
+     /Ledger\.execute\(/.test(orch) && /Ledger\.execute\(\)/.test(html));
+  ok('the page names no rail class the backend does not define',
+     !/MockLedgerRail|DbsFundTransferRail/.test(html) ||
+     /class (MockLedgerRail|DbsFundTransferRail)/.test(controls + orch));
+  ok('the DBS API is presented as an integration target, not as something the app calls',
+     /integration target/.test(html) && /not built/.test(html));
   ok('the page does not invent a token endpoint the code never calls',
      !/\/auth\/token/.test(html));
   ok("the page does not use the slide's wrong path names",
@@ -761,11 +756,9 @@ console.log('\n=== 9f. THE EXECUTION-PATH PAGE QUOTES THE CODE, NOT THE SLIDE ==
   ok('the checks the page claims are the checks the function runs',
      keys.length === 14 && /14 checks/.test(html), keys.length + ' in code');
 
-  // The version pin and the amount-as-string decision are both load-bearing DBS details.
-  ok('the page states the accept-version pin',
-     /accept-version/.test(html) && rails.includes('accept-version'));
-  ok('the page states that the amount is sent as a string',
-     /two-decimal <b>string<\/b>/.test(html) && /def _major_units/.test(rails));
+  // The signature is an HMAC with a demo key; the page must not call it a bank-owned key.
+  ok('the page describes the signature as the demo HMAC the code uses',
+     /hmac\.new\(/.test(controls) && /HMAC-SHA256/.test(html) && !/bank-owned key/.test(html));
 })();
 
 console.log('\n=== 9e. HOME RETURNS TO THE LOGIN SCREEN FROM ANYWHERE ===');
