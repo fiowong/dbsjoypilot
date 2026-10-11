@@ -358,7 +358,7 @@
        and an unqualified brand impression is a credibility risk worth pre-empting. -->
   <div class="foot">
     <b>Agents may screen, classify and propose. Only deterministic controls can authorise mock execution.</b>
-    <span class="disclaim">Hackathon prototype — not an official DBS product.</span>
+    <span class="disclaim">Hackathon prototype, not an official DBS product.</span>
   </div>
 
   <!-- ================= EXPLAINER OVERLAY =================
@@ -420,7 +420,7 @@
              (0-15); the note under the diagram says exactly where the two differ and why. Do
              not "fix" one numbering to match the other. -->
         <section class="expage" data-page="arch">
-          <h2>How JoyPilot works — end to end</h2>
+          <h2>How JoyPilot works: end to end</h2>
           <p class="exlead">One utterance in, one governed, audited DBS payment out.
             <b>A model may propose; only deterministic code may decide.</b></p>
 
@@ -492,9 +492,9 @@
 
               <div class="dgchips">
                 <div class="dgchip"><b>Dynamic Ambiguity Resolution</b> and Semantic Discrepancy Auditing</div>
-                <div class="dgchip"><b>Typed Contracts</b> — structured JSON proposals only:
+                <div class="dgchip"><b>Typed Contracts</b>, structured JSON proposals only:
                   amount · payee · source · others</div>
-                <div class="dgchip"><b>Shaped for DBS's APIs</b> — the draft carries the fields a bank transfer needs (source, beneficiary, amount, currency, reference)</div>
+                <div class="dgchip"><b>Shaped for DBS's APIs</b>, the draft carries the fields a bank transfer needs (source, beneficiary, amount, currency, reference)</div>
                 <div class="dgchip"><b>No agent holds a key.</b> Without an approval and a signing
                   key there is no ledger access.</div>
               </div>
@@ -553,7 +553,7 @@
               </div>
 
               <div class="dgchips">
-                <div class="dgchip"><b>Zero-Trust API Gateway Policies</b> — the gateway re-derives
+                <div class="dgchip"><b>Zero-Trust API Gateway Policies</b>: the gateway re-derives
                   the canonical payload and runs 14 checks: the signature, the draft version, a complete
                   confirmation, the validation result, the risk policy, freeze and cancel status,
                   nonce reuse and expiry. Only then is the ledger reachable.</div>
@@ -576,7 +576,7 @@
               is code.</li>
             <li><b>The Banking Policy Check is one stage, not four.</b> The dashed block holds
               boxes 9–12. The chain runs the policy, risk and velocity checks as <b>one</b> stage
-              (index 10) — they read the same resolved draft and share one decision — and runs the
+              (index 10), they read the same resolved draft and share one decision, and runs the
               field-by-field confirmation as its own stage (index 11).</li>
             <li><b>So from chain index 11 on, the chain index is the diagram number minus one.</b>
               Nothing is missing and nothing is duplicated; the two are the same path at two
@@ -603,7 +603,7 @@
              choose phrasing, it can never authorise, sign or reach the ledger - so it is not one
              of the bounded agents the architecture draws. -->
         <section class="expage" data-page="how" hidden>
-          <h2>One utterance in — one governed, audited DBS payment out</h2>
+          <h2>One utterance in, one governed, audited DBS payment out</h2>
           <p class="exlead">AI proposes. Deterministic code decides. You approve. Tencent Cloud
             carries the voice. <b>No model ever holds a key or touches the ledger.</b></p>
 
@@ -630,7 +630,7 @@
                 </div>
                 <div class="tbcard">
                   <div class="tbt">Typed contracts</div>
-                  <div class="tbs">JSON proposals only — never an account, never an approval</div>
+                  <div class="tbs">JSON proposals only, never an account, never an approval</div>
                 </div>
               </div>
             </div>
@@ -695,7 +695,7 @@
           <ul class="exlist">
             <li><b>A model's output is data, never an instruction.</b> Every agent returns JSON
               that is parsed against a strict schema. Anything out of shape is rejected and the
-              turn falls back — it cannot be reinterpreted as a command.</li>
+              turn falls back, it cannot be reinterpreted as a command.</li>
             <li><b>Independence is structural, not promised.</b> The Validation Agent (stage 8)
               never sees the other agents' reasoning. It reads the immutable evidence and the
               canonical draft, and returns MATCH or MISMATCH. The stage after it is code, not a
@@ -718,13 +718,13 @@
                Same markup, same classes, same #reqs id - only the page wrapper changed. The
                two-column shape is kept because the two columns ARE the argument, and #reqs stays
                in the DOM so its live row-lighting still works (ui.js looks it up by id). -->
-          <h2>What is simulated — and what is real</h2>
+          <h2>What is simulated, and what is real</h2>
           <p class="exlead">Two things in this build are mocks, and both are named on the screen.
             Everything either side of them is the live system.</p>
 
           <div class="excols">
             <div class="excol real">
-              <h4><span class="exdot live"></span>LIVE — running for real in this demo</h4>
+              <h4><span class="exdot live"></span>LIVE, running for real in this demo</h4>
               <ul>
                 <li><b>Speech recognition.</b> Tencent Cloud ASR. Audio goes up, text comes back,
                   in English, Mandarin and Bahasa Melayu.</li>
@@ -751,7 +751,7 @@
             </div>
 
             <div class="excol sim">
-              <h4><span class="exdot sim"></span>SIMULATED — deliberately, and labelled</h4>
+              <h4><span class="exdot sim"></span>SIMULATED, deliberately, and labelled</h4>
               <ul>
                 <li><b>Customer approval.</b> A mock biometric adapter stands in for FaceID. It
                   returns the same verdict shape the real one would, and it is the only thing in
@@ -760,7 +760,7 @@
                   ledger. No money moves, no real account is touched, no bank system is
                   contacted.</li>
                 <li><b>The customer.</b> “Mei Ling” and “DBS Savings ending 1234” are synthetic
-                  fixtures — not real customer data.</li>
+                  fixtures, not real customer data.</li>
                 <li><b>Payees and balances.</b> Fixtures, resolved through the same code path a
                   real directory would use, so the resolution logic is exercised rather than
                   bypassed.</li>
@@ -789,7 +789,7 @@
              section for what that costs: those buttons were the only `.sbtn` elements in the
              DOM, so the 22 scripted branches no longer have an in-UI trigger. -->
         <section class="expage" data-page="path" hidden>
-          <h2>The execution path — voice to a signed DBS payment</h2>
+          <h2>The execution path, voice to a signed DBS payment</h2>
           <!-- The numbering on this page is the CONTROL CHAIN's (00-15), the same one the chain on
                the main screen highlights and the same one the reference card on the right lists.
                It is deliberately NOT the slide's numbering: the slide's own reference table and
@@ -797,7 +797,7 @@
                label the signed artifact "stage 13" where the table puts it at 14), so quoting the
                slide here would put two different numbers on one screen. The chain's numbering is
                the only one that is also what the live event stream emits. -->
-          <p class="exlead">Every stage from 09 onwards is deterministic code — and only stage 15
+          <p class="exlead">Every stage from 09 onwards is deterministic code, and only stage 15
             can move money.</p>
           <p class="exsub">The signed artifact is produced at stage 13. The gateway at stage 14
             re-derives it and trusts nothing it is told. The mock ledger at stage 15 is the only place a
@@ -844,7 +844,7 @@
               <div class="prow gate">
                 <div class="prlab">STAGE 14 <span>zero-trust gateway</span></div>
                 <div class="prflow">
-                  <span class="prnode mono">gateway_verify() — 14 checks, trusts nothing it is told</span>
+                  <span class="prnode mono">gateway_verify(), 14 checks, trusts nothing it is told</span>
                   <span class="prtag">no agent may reach this</span>
                 </div>
                 <div class="prsub">Re-derives the canonical payload and independently checks the
@@ -871,7 +871,7 @@
                   <span class="prnode mono">LEDGER_RECORDED / LEDGER_NOT_INVOKED / SCHEDULE_HELD</span>
                 </div>
                 <div class="prsub">Every outcome carries the ledger's transaction reference plus a
-                  hash-chained, append-only audit record — the audit record is the only version of
+                  hash-chained, append-only audit record, the audit record is the only version of
                   events that counts.</div>
               </div>
 
@@ -893,22 +893,22 @@
                    function name and its check count are asserted against controls.py in
                    shell.test.js section 9f. -->
               <div class="pcard">
-                <div class="pch">DBS Fund Transfer API — the integration target</div>
+                <div class="pch">DBS Fund Transfer API, the integration target</div>
                 <dl class="pdl">
                   <dt>Status</dt><dd><b>Not built.</b> From DBS's published API documentation;
                     this build records payments in the mock ledger and does not call DBS</dd>
                   <dt>Base</dt><dd><span class="mono">https://www.dbs.com/sandbox/api/sg/v1</span></dd>
-                  <dt>Auth</dt><dd>a pre-issued token carried in the header set — <span
+                  <dt>Auth</dt><dd>a pre-issued token carried in the header set, <span
                     class="mono">clientId</span>, <span class="mono">accessToken</span>,
                     <span class="mono">uuid</span>, <span class="mono">accept-version</span></dd>
                   <dt>Version</dt><dd><span class="mono">accept-version: 1.0</span>, to be pinned.
                     Unset means "latest", which would change behaviour the day DBS publishes a
                     new version</dd>
                   <dt>Own accounts</dt><dd>POST /transfers/toOwnAccounts · wrapper
-                    <span class="mono">fundTransferDetl</span> — <span class="mono">transferType</span>
+                    <span class="mono">fundTransferDetl</span>, <span class="mono">transferType</span>
                     does not exist on this operation</dd>
                   <dt>Saved payee</dt><dd>POST /transfers/creditPayeeAccount · wrapper
-                    <span class="mono">fundTransferPayee</span> — carries
+                    <span class="mono">fundTransferPayee</span>, carries
                     <span class="mono">transferType</span>, plus
                     <span class="mono">purpose</span> when the destination is another bank</dd>
                   <dt>Amount</dt><dd>a two-decimal <b>string</b> in every published sample</dd>
@@ -918,15 +918,15 @@
                   <dt>Response</dt><dd>201 <span class="mono">{referenceId, status: ACCEPTED}</span>;
                     errors arrive as an array of <span class="mono">{code, message, moreInfo}</span></dd>
                   <dt>Separate product</dt><dd>bills and card payments are the Bill Payments API
-                    (<span class="mono">/billPayments</span>) — a different DBS product, not a
+                    (<span class="mono">/billPayments</span>), a different DBS product, not a
                     parameter on this one</dd>
                 </dl>
               </div>
 
               <div class="pcard">
-                <div class="pch">Tencent Cloud — what is genuinely live</div>
+                <div class="pch">Tencent Cloud, what is genuinely live</div>
                 <dl class="pdl">
-                  <dt>Lighthouse</dt><dd>ap-singapore — hosts the page, the backend and the audit
+                  <dt>Lighthouse</dt><dd>ap-singapore, hosts the page, the backend and the audit
                     DB</dd>
                   <dt>ASR</dt><dd>asr.cloud.tencent.com · signed WebSocket · <b>two</b> engines,
                     because no single one covers English + Chinese + Malay:
@@ -943,7 +943,7 @@
               </div>
 
               <div class="pcard">
-                <div class="pch">The 16-stage chain — reference</div>
+                <div class="pch">The 16-stage chain, reference</div>
                 <div class="preftable" id="exRefList"></div>
               </div>
             </div>

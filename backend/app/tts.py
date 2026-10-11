@@ -75,7 +75,7 @@ from .config import Settings, active_proxy
 
 log = logging.getLogger("auntiejoy.tts")
 
-# Raw PCM, mono, 16-bit signed little-endian — the same shape the browser already builds
+# Raw PCM, mono, 16-bit signed little-endian, the same shape the browser already builds
 # AudioBuffers from. Asking for PCM rather than WAV means no container to strip.
 SAMPLE_RATE = Settings.TTS_SAMPLE_RATE
 
@@ -153,13 +153,13 @@ def _resolve_voice_and_model(piece: str, ui_lang: str) -> Tuple[str, int]:
 
     Tencent needs the VOICE and the MODEL to agree with the text, not just the model. An
     English voice handed Chinese characters comes back as
-    `InvalidParameter.InvalidText` with NO audio at all — verified against the live API,
+    `InvalidParameter.InvalidText` with NO audio at all, verified against the live API,
     including with PrimaryLanguage forced to Chinese. So:
 
       * a piece containing any CJK is spoken by the CHINESE voice on the Chinese model
         (the Chinese model also reads embedded English, so a code-mixed sentence is fine);
       * everything else uses the session language's own voice on the English model, which
-        also carries Malay — the international catalogue has no Malay voice.
+        also carries Malay, the international catalogue has no Malay voice.
 
     Deciding per piece (not per line) is what keeps a code-mixed line working after
     split_for_tts() has cut it at sentence boundaries.
@@ -185,7 +185,7 @@ def _pcm_to_wav(pcm: bytes, sample_rate: int) -> bytes:
 
 
 # =====================================================================
-# Text splitting — one request is capped at 150 CJK chars or 500 letters
+# Text splitting, one request is capped at 150 CJK chars or 500 letters
 # =====================================================================
 _CJK = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
 # Sentence boundaries in every language this app speaks, plus the newline.
@@ -195,7 +195,7 @@ _SOFT_SPLIT = re.compile(r"(?<=[,;:，、；：])\s*|\s+")
 
 
 def _weight(text: str) -> Tuple[int, int]:
-    """(CJK character count, non-CJK character count) — the two budgets Tencent caps."""
+    """(CJK character count, non-CJK character count), the two budgets Tencent caps."""
     cjk = len(_CJK.findall(text))
     return cjk, len(text) - cjk
 

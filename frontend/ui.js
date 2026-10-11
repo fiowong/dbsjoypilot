@@ -382,15 +382,15 @@ function renderVerdict(name, p){
 // spends 7-27s screening, classifying, drafting and validating, the panel used to sit idle and
 // then dump every card at once when the response landed. agentThinking() paints the four
 // specialists as "reviewing…" the moment a turn is sent, so the panel thinks out loud DURING
-// the wait (the reframed-latency trust signal), and each card locks in — in place, never
-// stacked — when its verdict arrives. Any specialist the backend did not actually consult this
+// the wait (the reframed-latency trust signal), and each card locks in, in place, never
+// stacked, when its verdict arrives. Any specialist the backend did not actually consult this
 // turn is left marked "not invoked this turn", so the panel never over-states the pipeline.
 //
 // FOUR, not five. The names here are the backend's own agent keys and are matched literally when
 // a verdict card resolves into its placeholder, so they must not be re-worded for style. The
 // Personalization Agent is deliberately NOT in this list: it is a wording-register service that
 // runs outside the control chain and is not one of the bounded agents the architecture draws. If
-// the backend does return a personalization payload, agent() still renders it — it simply appends
+// the backend does return a personalization payload, agent() still renders it, it simply appends
 // a card instead of resolving a placeholder.
 let agentCards = {};
 const AGENT_THINK_ORDER = ['GUARDRAILS AGENT','INTENT CLASSIFIER','PAYMENT AGENT',
@@ -425,7 +425,7 @@ function agent(name,obj){
   agentCalls++; $('acnt').textContent = agentCalls+' call'+(agentCalls>1?'s':'');
   const verdict = renderVerdict(name, obj || {});
   // If a placeholder is waiting for this specialist, resolve it IN PLACE (the lock-in
-  // animation) instead of stacking a second card — the panel shows one card per agent.
+  // animation) instead of stacking a second card, the panel shows one card per agent.
   const slot = agentCards[name];
   if(slot){
     delete agentCards[name];
@@ -701,7 +701,7 @@ function closeDraftCard(v){
    The chat-level choice to verify with Face ID, shown AFTER the 3x field review
    and BEFORE the biometric prompt. Deliberately not a modal: the customer clicks
    it in the transcript, then the FaceID popup (the actual biometric) opens. The
-   two clicks are distinct — "I'm ready to verify" and "here is my Face ID" — so
+   two clicks are distinct, "I'm ready to verify" and "here is my Face ID", so
    the step reads as a real, customer-driven gate rather than an auto-advance.
    It renders only what the draft already says; it composes no figure of its own.
    ========================================================================== */
@@ -829,7 +829,7 @@ function draftCard(d, lang){
    ========================================================================== */
 /* The composer is VOICE-FIRST: the text field is hidden until the customer taps the keyboard
    toggle. This is the ONE place that flips it, so the keyboard button and the retry button on a
-   clarification card stay in step — and the field is focused only AFTER it is visible, or the
+   clarification card stay in step, and the field is focused only AFTER it is visible, or the
    browser silently ignores the focus (a hidden input cannot take focus). */
 function setComposerTyping(on){
   const c=$('cinput'), f=$('fld'), k=$('kbd');

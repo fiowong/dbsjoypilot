@@ -745,7 +745,7 @@ button{font-family:inherit}
 .chip:hover{background:var(--dbs-red);border-color:var(--dbs-red);color:#fff}
 
 /* ==========================================================================
-   INLINE DRAFT CARD / FACE ID CARD — "Ready to confirm"
+   INLINE DRAFT CARD / FACE ID CARD, "Ready to confirm"
    The light-red hairline is the whole signal: this is a PROPOSAL, not a payment.
    The Face ID variant uses the brand red so it reads as the biometric gate it is.
    ========================================================================== */
@@ -770,7 +770,7 @@ button{font-family:inherit}
 /* Face ID variant: brand-red hairline + tick so the biometric gate is visually distinct.
    Class is "fid-ready" (not "faceid") to avoid colliding with the popup scan-frame class
    `.faceid{width:92px;height:92px;animation:fpulse…}` which is defined in this file but
-   currently rendered by no element — using "faceid" here would force the card into a
+   currently rendered by no element, using "faceid" here would force the card into a
    92×92 halo box. */
 .dcard.fid-ready{border-color:var(--brand)}
 .dcard.fid-ready .dtick{color:var(--brand)}
@@ -997,7 +997,7 @@ button{font-family:inherit}
   background:#1E1E24;border:1px solid #33333C;border-radius:7px;padding:4px 9px;cursor:pointer;flex:0 0 auto}
 .auditmore:hover{color:#fff;border-color:#4A4A57}
 
-/* requirements coverage — the scoring panel.
+/* requirements coverage, the scoring panel.
    Five rows, each: number, the challenge's own wording, where it is demonstrated, and an
    honest status chip. The chip colours carry the honesty: green = live code, amber = the
    mock/simulated boundary. Amber is a feature here, not a defect - a labelled simulation is

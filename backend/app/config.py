@@ -328,7 +328,7 @@ class Settings:
     #     and terminated by the chunk whose IsEnd is true; mid-stream failures arrive as
     #     {Type:"error", Error:{Code,Message}}, while a parameter error BEFORE synthesis is a
     #     plain JSON {Response:{Error:{...}}} body detectable via the Content-Type header.
-    #   * One request is capped at Text length [1, 255] — much tighter than TextToVoice's
+    #   * One request is capped at Text length [1, 255], much tighter than TextToVoice's
     #     150-CJK/500-letter budgets, hence its own cap below.
     #   * 20 requests/second.
     # It needs the TRTC SdkAppId and a TRTC VoiceId STRING ("v-female-..." style), which is a
@@ -582,8 +582,8 @@ class Settings:
     def _voice_chain(cls, ui_lang: str) -> tuple:
         """(language, ordered candidate voice ids) for `ui_lang`.
 
-        The order is: the language's OWN voice, then the single shared voice, then — for
-        Malay only — the English voice. That last step exists because the international
+        The order is: the language's OWN voice, then the single shared voice, then, for
+        Malay only, the English voice. That last step exists because the international
         Tencent TTS catalogue ships no Malay voice at all: without it, a Malay conversation
         would get a 503 and no speech whatsoever. Reading Malay with an English voice is a
         compromise, but silence is not an option, and tts_voice_is_fallback() reports the
@@ -638,7 +638,7 @@ def now_iso() -> str:
 def active_proxy():
     """The outbound proxy the voice clients will actually use, or None when they go direct.
 
-    Diagnostics only — it decides nothing. Both clients PIN their behaviour to
+    Diagnostics only, it decides nothing. Both clients PIN their behaviour to
     Settings.USE_ENV_PROXY (default: direct), so this must agree with that flag or it would
     report a proxy the clients are not using. Used to log ONE line at connect time, so a
     proxied egress shows up as "going through <proxy>" in the terminal instead of as an

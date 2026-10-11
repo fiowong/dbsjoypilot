@@ -330,11 +330,11 @@ async function verifyReceiptChain(sid){
     } else {
       el.dataset.state = 'bad';
       el.textContent = '⚠ Hash chain broken at event ' + (ch.broken_at_seq != null ? ch.broken_at_seq : '?')
-        + ' — do not trust this receipt';
+        + ', do not trust this receipt';
     }
   } catch (e) {
     el.dataset.state = 'warn';
-    el.textContent = 'Audit log unavailable — receipt could not be verified on-chain';
+    el.textContent = 'Audit log unavailable, receipt could not be verified on-chain';
   }
 }
 
@@ -397,7 +397,7 @@ async function liveConfirmOnce(session, lang, my, skipFaceId){
     iface(tt(lang).ready); await sleep(500);
     if(my!==RUN) return null;
     // Inline "Ready to confirm" Face ID card in the chat: the customer's choice to verify with
-    // FaceID. Clicking it opens the biometric prompt below — a real, clickable gate, not an
+    // FaceID. Clicking it opens the biometric prompt below, a real, clickable gate, not an
     // auto-advancing step.
     const fgo = await faceIdCard(d, lang);
     if(my!==RUN || fgo!=='confirm') return null;
@@ -488,7 +488,7 @@ async function liveConfirmOnce(session, lang, my, skipFaceId){
   await play(steps, my);
   // Feature 2: the receipt proves itself against the backend's append-only, hash-chained audit
   // log. GET /audit/{session_id} -> {chain:{intact, head, events, broken_at_seq}}. We fill the
-  // receipt's verify line with the REAL result — a banking-grade trust signal, not a claim.
+  // receipt's verify line with the REAL result, a banking-grade trust signal, not a claim.
   if(typeof verifyReceiptChain === 'function') verifyReceiptChain(FREE_SESSION_ID);
   if(my!==RUN) return null;
   // The money has moved, but the transcript alone cannot tell the customer whether this

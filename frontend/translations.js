@@ -182,7 +182,7 @@ const T = {
         confirm:'Confirm & Slide to Pay',
         started:'Approval started: review each field below' },
       // Inline "Ready to confirm" Face ID card: the chat-level choice to verify with FaceID.
-      // Clicking it opens the biometric prompt (the popup below) — a real, clickable gate.
+      // Clicking it opens the biometric prompt (the popup below), a real, clickable gate.
       faceidCard:{ title:'Ready to confirm', tag:'FACE ID',
         amount:'Amount:', draft:'Draft:',
         confirm:'Confirm with Face ID',

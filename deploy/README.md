@@ -1,12 +1,12 @@
 # Deploying AuntieJoy to Tencent Cloud Lighthouse
 
 **Your chosen path: you create the instance in the console, I do everything after that.
-No domain yet — we serve over HTTP on the instance IP, and add the domain + TLS later.**
+No domain yet, we serve over HTTP on the instance IP, and add the domain + TLS later.**
 
 > **Adding the EdgeOne layer (DNS + CDN + WAF + free certificate):** see
 > [`../DEPLOY-EDGEONE.md`](../DEPLOY-EDGEONE.md). Short version: the origin below is provisioned
 > and verified **first**, then EdgeOne is put in front of it. AuntieJoy cannot run on EdgeOne
-> Makers alone — its WebSocket, streaming TTS and in-process session state need a persistent
+> Makers alone, its WebSocket, streaming TTS and in-process session state need a persistent
 > origin. The reusable procedure is the `tencent-edgeone-deploy` skill.
 
 ---
@@ -15,18 +15,18 @@ No domain yet — we serve over HTTP on the instance IP, and add the domain + TL
 
 | Item | Status |
 |---|---|
-| SSH key pair | **NOT PRESENT on this machine** — there is no `~/.ssh` at all. Generate one (STEP 1 below) and bind it to the instance, or obtain the existing private key. `deploy.sh` cannot run until this exists. |
+| SSH key pair | **NOT PRESENT on this machine**, there is no `~/.ssh` at all. Generate one (STEP 1 below) and bind it to the instance, or obtain the existing private key. `deploy.sh` cannot run until this exists. |
 | Tencent Cloud SDK | Installed on the original author's machine; **not required** unless you use `create_lighthouse.py` |
-| Instance-creation script | **Written & validated** — `deploy/create_lighthouse.py` (optional, see below) |
-| Provisioning script | **Written & syntax-checked** — `deploy/provision.sh` |
-| One-command deploy | **Written & syntax-checked** — `deploy/deploy.sh` |
-| Frontend for a deployed page | **Fixed** — resolves the page's own origin on port 80/443 |
+| Instance-creation script | **Written & validated**, `deploy/create_lighthouse.py` (optional, see below) |
+| Provisioning script | **Written & syntax-checked**, `deploy/provision.sh` |
+| One-command deploy | **Written & syntax-checked**, `deploy/deploy.sh` |
+| Frontend for a deployed page | **Fixed**, resolves the page's own origin on port 80/443 |
 | Nginx + Basic Auth + systemd | **Automated** inside `provision.sh` (or Caddy, when present) |
-| Web server detection | **Automatic** — prefers Caddy if installed & running, else nginx |
-| Readiness gate | **Written & GREEN in this repo** — `deploy/verify.sh` (**35 passed, 0 failed**). Run it first. |
-| Reachability preflight | **Written & tested** — `deploy/preflight.sh` (SSH, firewall, DNS) |
-| Route/Nginx coverage check | **Written & green** — `deploy/check_routes.py` (28/28) |
-| Frontend resolver test | **Written & green** — `frontend/test-api-base.mjs` (6 cases) |
+| Web server detection | **Automatic**, prefers Caddy if installed & running, else nginx |
+| Readiness gate | **Written & GREEN in this repo**, `deploy/verify.sh` (**35 passed, 0 failed**). Run it first. |
+| Reachability preflight | **Written & tested**, `deploy/preflight.sh` (SSH, firewall, DNS) |
+| Route/Nginx coverage check | **Written & green**, `deploy/check_routes.py` (28/28) |
+| Frontend resolver test | **Written & green**, `frontend/test-api-base.mjs` (6 cases) |
 
 ### The SSH key (do this before STEP 1)
 
@@ -40,7 +40,7 @@ cat ~/.ssh/dbsjoy_lighthouse.pub     # paste this into the console in STEP 1
 
 ---
 
-## STEP 0 — Before anything: run the readiness gate
+## STEP 0, Before anything: run the readiness gate
 
 ```bash
 cd dbs-auntiejoy
@@ -56,7 +56,7 @@ voice + Malay checks, the runtime mouth switch, and the domain-adoption guard. I
 cloud resource and no network.
 
 > Sections 4/5/6 of the original file (the DBS payment rail configured, fail-closed, and
-> idempotent-on-replay) and section 15 (the JSONL export) are **not present here** — this repo
+> idempotent-on-replay) and section 15 (the JSONL export) are **not present here**, this repo
 > has no `app/rails.py` and does not ship `export_turns.py` / `cos_sync.py`. See the header
 > comment in `verify.sh`.
 
@@ -66,7 +66,7 @@ cloud resource and no network.
 
 ---
 
-## STEP 1 — You: create the instance in the console
+## STEP 1, You: create the instance in the console
 
 Console → **Lighthouse** → Create instance. These are the exact settings:
 
@@ -75,10 +75,10 @@ Console → **Lighthouse** → Create instance. These are the exact settings:
 | Region | **Singapore (ap-singapore)** |
 | Availability zone | any (leave default) |
 | Image / blueprint | **Ubuntu 22.04 LTS** (24.04 also works) |
-| Bundle | **Linux Starter — USD 4.20/month** (2 vCPU / 2 GB / 40 GB SSD / 1 TB traffic) |
+| Bundle | **Linux Starter, USD 4.20/month** (2 vCPU / 2 GB / 40 GB SSD / 1 TB traffic) |
 | Instance name | `DBSJoy-demo` |
 | Purchase duration | 1 month |
-| Auto-renew | **off** (manual) — so it cannot silently charge you |
+| Auto-renew | **off** (manual), so it cannot silently charge you |
 | Login method | **SSH key** → "Create key pair" or "Use existing key" |
 | SSH key | paste the public key above (or upload `~/.ssh/dbsjoy_lighthouse.pub`) |
 
@@ -103,7 +103,7 @@ Lighthouse has its own firewall, separate from any OS firewall. Add three rules
 
 ---
 
-## STEP 1b — Check it is actually reachable (run this first, always)
+## STEP 1b, Check it is actually reachable (run this first, always)
 
 ```bash
 ./deploy/preflight.sh <public-ip> [domain]
@@ -114,18 +114,18 @@ an opaque message:
 
 | Check | Why it matters |
 |---|---|
-| SSH auth | A key that is not **bound** to the instance gives `Permission denied` — a different fix from an unreachable host |
+| SSH auth | A key that is not **bound** to the instance gives `Permission denied`, a different fix from an unreachable host |
 | Port 22 | Must be open, or nothing can be deployed |
 | Ports 80 / 443 | Must be open, or HTTP and TLS issuance fail. A **timeout** means the Lighthouse firewall is blocking; a **refusal** means the firewall allows it and nothing is listening yet (normal before Nginx) |
 | Port 8078 | Must **not** be reachable from the internet |
-| DNS | Whether the domain already resolves here — if not, deploy over the IP and add the domain later |
+| DNS | Whether the domain already resolves here, if not, deploy over the IP and add the domain later |
 
 It exits non-zero and prints the exact console steps to fix whatever is wrong. Run it before
 `deploy.sh`, not after a failure.
 
 ---
 
-## STEP 2 — Me: deploy everything
+## STEP 2, Me: deploy everything
 
 Tell me the public IP and I run this (or run it yourself):
 
@@ -140,17 +140,17 @@ That single command:
 2. copies the repository up (excluding `.env`, databases and venvs),
 3. installs python3-venv, nginx, apache2-utils and rsync,
 4. builds the virtualenv and installs the backend dependencies,
-5. seeds `backend/.env` from `.env.example` (empty of secrets — it never invents credentials),
+5. seeds `backend/.env` from `.env.example` (empty of secrets, it never invents credentials),
 6. installs a systemd service (**one** uvicorn worker, because session state is in-process),
 7. creates the Basic Auth user and writes the Nginx vhost,
 8. runs the **28-scenario suite on the instance** and prints the result,
 9. prints the URL and the generated Basic Auth password.
 
-It is idempotent — re-running it is the normal way to ship a change.
+It is idempotent, re-running it is the normal way to ship a change.
 
 ---
 
-## STEP 3 — You: the live credentials
+## STEP 3, You: the live credentials
 
 The provisioner deliberately leaves `.env` blank. On the instance:
 
@@ -161,16 +161,16 @@ sudo systemctl restart auntiejoy
 curl -s localhost:8078/health | python3 -m json.tool
 ```
 
-`/health` tells you exactly what is configured — `engine: live`, `asr_configured`,
-`tts_configured`, `payment_rail` — so a half-filled file is visible rather than silent.
+`/health` tells you exactly what is configured, `engine: live`, `asr_configured`,
+`tts_configured`, `payment_rail`, so a half-filled file is visible rather than silent.
 
 Then open **`http://<public-ip>`** and log in with the Basic Auth user.
 
 ---
 
-## Pointing `dbsjoy.xyz` at the instance — step by step
+## Pointing `dbsjoy.xyz` at the instance, step by step
 
-> **STATUS (checked 2026-10-09): `dbsjoy.xyz` is REGISTERED but FROZEN — it does not resolve.**
+> **STATUS (checked 2026-10-09): `dbsjoy.xyz` is REGISTERED but FROZEN, it does not resolve.**
 >
 > The domain is paid up (registered 2026-10-08, expires 2027-10-08) and its DNS records are
 > intact: querying DNSPod **directly** still returns `43.156.247.155`. But the registry has the
@@ -179,21 +179,21 @@ Then open **`http://<public-ip>`** and log in with the Basic Auth user.
 >
 > **This is not a DNS problem, and no DNS edit can fix it.** Only the registrar (DNSPod /
 > Tencent Cloud) can lift a server hold. The likely cause is an incomplete account identity
-> verification — the same account's COS bucket creation returns `451 verify your identity in
+> verification, the same account's COS bucket creation returns `451 verify your identity in
 > account center`. The same failure hit `dbsjoy.space` before it; two domains, one account.
 >
 > Until it is lifted the origin is reachable **only** as `http://43.156.247.155`, and a plain
-> HTTP origin on a bare IP is **not a secure context** — browsers expose
+> HTTP origin on a bare IP is **not a secure context**, browsers expose
 > `navigator.mediaDevices` only on HTTPS or localhost, so the microphone (and with it the
 > voice-first half of the demo) cannot run there. The steps below are the reproducible record
 > for restoring it once the hold is lifted.
 
-> ### You do not have to pass `DOMAIN=` again — and you must not lose it by forgetting
+> ### You do not have to pass `DOMAIN=` again, and you must not lose it by forgetting
 >
 > `provision.sh` rebuilds `/etc/caddy/Caddyfile` from scratch and emits a site block **only for
 > `$DOMAIN`**. A plain re-deploy with `DOMAIN` unset therefore used to replace a working HTTPS
 > domain config with an IP-only, HTTP-only one, and **nothing in the deploy output looked
-> wrong** — the app kept serving on `127.0.0.1:8078`, while port 443 stopped answering and the
+> wrong**, the app kept serving on `127.0.0.1:8078`, while port 443 stopped answering and the
 > certificate stopped being presented.
 >
 > `provision.sh` now **adopts the domain the existing Caddyfile already names** when `DOMAIN`
@@ -211,7 +211,7 @@ Then open **`http://<public-ip>`** and log in with the Basic Auth user.
 > check the site label first: `sudo grep -nE '^[a-z0-9:(].*\{' /etc/caddy/Caddyfile`.
 
 **The important bit: the domain must be registered before any DNS record can be added.** A DNS
-lookup returning `NXDOMAIN` means the name does not exist in the registry — a purchase first,
+lookup returning `NXDOMAIN` means the name does not exist in the registry, a purchase first,
 then a DNS setting. `.xyz` was registered on 8 Oct 2026 and delegated within minutes.
 
 Confirm the current state at any time:
@@ -225,8 +225,8 @@ dig dbsjoy.xyz | grep status   # should be NOERROR, not NXDOMAIN
 
 Buy the domain from any registrar. Two options that make the later steps easiest:
 
-- **Tencent Cloud / DNSPod** — the account already in use here, so DNS stays in one console.
-- **Any other registrar** — works identically; you just get a different DNS control panel.
+- **Tencent Cloud / DNSPod**, the account already in use here, so DNS stays in one console.
+- **Any other registrar**, works identically; you just get a different DNS control panel.
 
 **Check the registry status before you build on a name.** A newly registered domain should show
 `client transfer prohibited` + `add period` (both normal). If it shows **`server hold`**, the
@@ -259,7 +259,7 @@ Notes:
   `CNAME` pointing at a parking page, and two records for the same name conflict.
 - Do **not** add a `CNAME` at `@`. A CNAME cannot coexist with the apex, and it would also break
   the certificate check.
-- If the panel asks for a "record value" with a trailing dot, `43.156.247.155` needs no dot — it
+- If the panel asks for a "record value" with a trailing dot, `43.156.247.155` needs no dot, it
   is an IP address, not a hostname.
 
 ### 3. Wait, then verify
@@ -280,7 +280,7 @@ Once **both** lookups return the IP:
 DOMAIN=dbsjoy.xyz ./deploy/deploy.sh 43.156.247.155
 ```
 
-`preflight.sh` refuses to pretend this is ready before it is — it reports `NXDOMAIN` distinctly
+`preflight.sh` refuses to pretend this is ready before it is, it reports `NXDOMAIN` distinctly
 from "registered but not pointing here", because the two need different actions.
 
 The site is already reachable on **`http://43.156.247.155`** while you sort the domain out. The
@@ -297,12 +297,12 @@ When the domain's A record points at the instance IP:
 DOMAIN=dbsjoy.xyz ./deploy/deploy.sh <public-ip>
 ```
 
-The same command re-provisions with the domain set. Nothing else changes — the frontend already
+The same command re-provisions with the domain set. Nothing else changes, the frontend already
 resolves the page's own origin on both port 80 and port 443, so no code edit is needed.
 
 **If the instance runs Caddy, TLS is automatic.** `provision.sh` prefers Caddy when it is already
 installed and running, and a domain block makes Caddy fetch and renew a Let's Encrypt certificate
-by itself — no certbot, no `--redirect` step, no renewal cron. Requirements are only that DNS
+by itself, no certbot, no `--redirect` step, no renewal cron. Requirements are only that DNS
 resolves here and ports 80/443 are reachable. If the instance has no Caddy, nginx + certbot is
 used instead. Either way the same command applies.
 
@@ -350,7 +350,7 @@ instance. It does **not** buy a domain or touch DNS.
 
 I will not log into your console with the password that was shared in chat:
 
-1. It was sent in plain text — rotate it and enable 2FA before the demo. If you already
+1. It was sent in plain text, rotate it and enable 2FA before the demo. If you already
    rotated it, the old one is dead anyway.
 2. Console logins from a new device normally require email/SMS/2FA, which I cannot complete,
    so the attempt would strand halfway through.

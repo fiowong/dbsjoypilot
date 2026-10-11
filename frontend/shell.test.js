@@ -646,7 +646,7 @@ console.log('\n=== 9d. TOP BAR, TWO PANELS, HERO PAIR, EXPLAINER OVERLAY ===');
   ok('the requirements-coverage list now lives on the how-it-works page',
      doc.querySelector('.expage[data-page="how"]').contains($('reqs')));
   ok('the live/simulated comparison moved with it',
-     /SIMULATED — deliberately, and labelled/.test(
+     /SIMULATED, deliberately, and labelled/.test(
        doc.querySelector('.expage[data-page="how"]').textContent));
   ok('there is no "real" page and no "real" tab any more',
      !doc.querySelector('.expage[data-page="real"]') &&

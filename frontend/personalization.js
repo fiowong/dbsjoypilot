@@ -54,8 +54,8 @@ function syncPersonalization(session){
     iface('I\'ll take a little more time from here, and check each detail with you twice, just to be safe.');
   }
   updatePersonalizeBadge();
-  // Feature 3: surface Joy adapting to Mei Ling in the inspector — the preferred name plus the
-  // wording mode — so the assistant is visibly "learning" across turns, not just obeying.
+  // Feature 3: surface Joy adapting to Mei Ling in the inspector, the preferred name plus the
+  // wording mode, so the assistant is visibly "learning" across turns, not just obeying.
   const pe = $('stPers');
   if(pe){
     const nm = CUSTOMER_NAME_KNOWN ? CUSTOMER_NAME : 'Mei Ling';

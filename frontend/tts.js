@@ -271,7 +271,7 @@ function stopSpeaking(){
 }
 
 /* ==========================================================================
-   VOICE ENGINE SWITCH — Cartesia (default) vs TRTC (Tencent)
+   VOICE ENGINE SWITCH, Cartesia (default) vs TRTC (Tencent)
 
    The top-bar "TRTC Mode" checkbox. OFF = Cartesia speaks; ON = Tencent speaks. The backend
    owns the decision (POST /tts/provider) and this file only reflects it, so the UI can never
@@ -392,7 +392,7 @@ async function setTtsProvider(name){
       _ttsFallbackFrom = d.tts_fallback_from || '';
       const box = document.getElementById('ttsToggle');
       // The checkbox means "use Tencent", so it is checked exactly when a Tencent mouth is
-      // active — whichever of the two Tencent engines that turns out to be.
+      // active, whichever of the two Tencent engines that turns out to be.
       if(box) box.checked = !!d.tts_provider_is_tencent;
       _renderTtsProvider();
     }

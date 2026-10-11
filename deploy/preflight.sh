@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# preflight.sh — check everything that can be verified BEFORE deploying.
+# preflight.sh, check everything that can be verified BEFORE deploying.
 #
 #     ./deploy/preflight.sh <public-ip> [domain]
 #
@@ -42,7 +42,7 @@ banner() { printf '\n\033[1m== %s\033[0m\n' "$1"; }
 banner "SSH authentication"
 if [ ! -f "$SSH_KEY" ]; then
   echo "  FAIL  key not found: $SSH_KEY"
-  FIXES+=("SSH key missing at $SSH_KEY — regenerate it, or set SSH_KEY=<path>")
+  FIXES+=("SSH key missing at $SSH_KEY, regenerate it, or set SSH_KEY=<path>")
 else
   echo "  key   $SSH_KEY"
   AUTHED=0
@@ -88,11 +88,11 @@ host, timeout = sys.argv[1], float(sys.argv[2])
 # the CORRECT state before the web server is deployed. Only TIMEOUT (silently dropped) means
 # the firewall is blocking. Treating REFUSED as a failure here produced a false alarm.
 EXPECT = {
-    22:   ("OPEN",    "firewall blocks SSH — nothing can be deployed",
+    22:   ("OPEN",    "firewall blocks SSH, nothing can be deployed",
                      "firewall allows SSH; sshd is not answering"),
-    80:   ("ALLOWED", "firewall BLOCKS 80 — HTTP and TLS issuance will fail", ""),
-    443:  ("ALLOWED", "firewall BLOCKS 443 — HTTPS will not work", ""),
-    8078: ("BLOCKED", "firewall ALLOWS the backend port — close it, the app must not be reachable directly",
+    80:   ("ALLOWED", "firewall BLOCKS 80, HTTP and TLS issuance will fail", ""),
+    443:  ("ALLOWED", "firewall BLOCKS 443, HTTPS will not work", ""),
+    8078: ("BLOCKED", "firewall ALLOWS the backend port, close it, the app must not be reachable directly",
                      ""),
 }
 
@@ -166,11 +166,11 @@ if [ -n "$DOMAIN" ]; then
     echo "  ..    not pointing here yet"
     echo "        -> deploy over HTTP on the IP now, then re-run once DNS propagates:"
     echo "           DOMAIN=$DOMAIN ./deploy/deploy.sh $HOST"
-    FIXES+=("Point $DOMAIN (and www) at $HOST — currently ${RESOLVED:-unresolved}")
+    FIXES+=("Point $DOMAIN (and www) at $HOST, currently ${RESOLVED:-unresolved}")
   fi
 else
   banner "DNS"
-  echo "  no domain supplied — deploy will serve over HTTP on the IP"
+  echo "  no domain supplied, deploy will serve over HTTP on the IP"
 fi
 
 # ------------------------------------------------------------------ verdict
