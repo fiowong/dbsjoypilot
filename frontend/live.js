@@ -605,7 +605,7 @@ async function liveFreeTurn(text, viaVoice, asrConfidence, asrSource){
     }
   }
 
-  // Paint the five specialists as "reviewing…" in the agent panel the moment the turn is
+  // Paint the four specialists as "reviewing…" in the agent panel the moment the turn is
   // sent, so the 7-27s the backend spends screening/classifying/drafting/validating is shown
   // as Joy "thinking out loud" rather than an idle gap. Each card locks in when its verdict
   // lands; specialists the backend did not consult this turn are marked, not hidden.
@@ -764,14 +764,16 @@ document.querySelectorAll('#langtog .lt').forEach(b=>{
 /* Tencent has no single engine that covers English + Chinese + Malay, so the language
    toggle picks the ENGINE, not just a hint: EN and ZH share 16k_zh_en (which auto-detects
    between them), while BM needs 16k_multi_lang.
-   This build has THREE pills (EN / ZH / BM) and no Auto pill, so nothing here has to sacrifice
-   a language. The backend still accepts "auto" and resolves it to 16k_zh_en, so a client that
-   sends it keeps working. See backend/app/stt.py ENGINE_BY_LANGUAGE, which is the authority
-   for this mapping. */
+   Auto therefore has to sacrifice one language, and it sacrifices Malay rather than Chinese:
+   it resolves to 16k_zh_en, which is the SAME engine the default EN pill already opens, so
+   choosing Auto can only add recognition and never removes any. Resolving Auto to the Malay
+   engine instead would silently drop Chinese for whoever selected it. See
+   backend/app/stt.py ENGINE_BY_LANGUAGE, which is the authority for this mapping. */
 function sttLanguage(){
   const l = document.querySelector('#langtog .lt.on')?.dataset.l || 'EN';
   if(l === 'BM') return 'bm';
   if(l === 'ZH') return 'zh';
+  if(l === 'AUTO') return 'auto';           // 16k_zh_en: English + Chinese
   return 'en';
 }
 

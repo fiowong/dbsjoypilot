@@ -40,9 +40,10 @@ function resetPanels(){
   auditReset();   // back to three visible rows and a hidden disclosure button
   agentCalls=0; $('acnt').textContent='0 calls';
   STAGES.forEach((_,i)=>stage(i,''));
-  // The visible failure map is gone, so the br*/nd* lookups below find nothing. They are
-  // guarded rather than deleted because BRANCHES still drives the hidden scenario rail, and an
-  // unguarded null here would throw and take the whole inspector down with it.
+  // The visible failure map is gone, and so is the scenario rail, so the br*/nd* lookups below
+  // find nothing. They stay guarded rather than deleted: BRANCHES still exists, resetRun() is
+  // still called from the live flow, and an unguarded null here would throw and take the whole
+  // inspector down with it.
   BRANCHES.forEach(b=>{
     const br=$('br'+b[0]); if(br) br.classList.remove('hit');
     b[2].forEach(n=>{ const nd=$('nd'+n); if(nd) nd.classList.remove('hit'); });
@@ -363,7 +364,7 @@ SC.B2 = () => [
       risk_flags:[]}},
   {t:'stage',n:8,s:'pass'},{t:'stage',n:9,s:'pass'},{t:'stage',n:10,s:'pass'},
   {t:'state',v:'CONFIRMATION_READY'},{t:'outcome',v:'ALLOW',c:'ok'},
-  {t:'iface',v:"You want to send S$20.00 from DBS Savings ending 1234 to John Doe ending 4521. Tell me if you'd rather use another account. I can prepare this payment for you to review. Is that correct?"},
+  {t:'iface',v:"You want to send S$20.00 from DBS Savings ending 1234 to John Doe ending 4521. I can prepare this payment for you to review. Is that correct?"},
   {t:'popup',d:150,cfg:{kicker:'BRANCH B · B2: DUPLICATE PAYEE',title:'The LLM never picked the payee',
     body:'The Payment Agent extracted the phrase <b>“John”</b>. Deterministic code found two matches and asked Auntie to choose. The <code>beneficiary_id</code> is bound from the repository, never generated.',
     fields:`<div class="fr"><span class="k">Chosen</span><span class="v">${PAYEES.john_doe.beneficiary_id}</span></div>
@@ -603,7 +604,7 @@ SC.E2 = () => {
     {t:'sys',v:'Deterministic comparator: PASS · Risk policy: PASS · Old field confirmations reused: NO · Next state: FRESH_CONFIRMATION_REQUIRED'},
     {t:'hit',b:'E',n:'E2'},
     {t:'state',v:'FRESH_CONFIRMATION_REQUIRED'},{t:'outcome',v:'EDIT_APPLIED',c:'brand'},
-    {t:'iface',v:"You want to send S$15.00 from DBS Savings ending 1234 to Mei Tan ending 7788. Tell me if you'd rather use another account. I can prepare this payment for you to review. Is that correct?"},
+    {t:'iface',v:"You want to send S$15.00 from DBS Savings ending 1234 to Mei Tan ending 7788. I can prepare this payment for you to review. Is that correct?"},
     {t:'review',lang:'EN',d:d2},
     ...executeChain('EN',d2),
     {t:'iface',v:T.EN.done('S$15.00','Mei Tan','txn_00'+draftSeq)},
@@ -895,19 +896,7 @@ function finalStateSteps(s){
   if(s.signature) steps.push({t:'sig', v: s.signature});
   if(s.ledger) steps.push({t:'ledger', v: s.ledger});
   if(s.outcome){
-    // Outcome -> badge colour. Spelled out rather than left to inference: an outcome matching
-    // nothing falls to the final branch, so it would LOOK deliberate while being an accident.
-    // Two amber outcomes are named here for exactly that reason.
-    //   REFUSED     - the fourth resolver outcome. Nothing is suspicious and nothing moved; the
-    //                 field the customer gave simply cannot be used (a blocked payee, an
-    //                 unverified account number). It stays CLARIFICATION_REQUIRED, so it must
-    //                 NOT read as a freeze -- hence amber, never red.
-    //   COOLING_OFF - a deliberate pause, never an accusation (§A.7 D3).
-    // 'warn' is the deliberate default: the customer's attention is needed and nothing has
-    // moved. Anything that HAS moved ('ok') or been stopped ('stop') is matched above it.
-    const cls = /ACCEPT|RECORD/.test(s.outcome) ? 'ok'
-              : /REJECT|BLOCK|FROZEN/.test(s.outcome) ? 'stop'
-              : 'warn';   // incl. REFUSED, COOLING_OFF, CLARIFY, EDIT_REQUESTED
+    const cls = /ACCEPT|RECORD/.test(s.outcome) ? 'ok' : /REJECT|BLOCK|FROZEN/.test(s.outcome) ? 'stop' : 'warn';
     steps.push({t:'outcome', v: s.outcome, c: cls});
   }
   return steps;
