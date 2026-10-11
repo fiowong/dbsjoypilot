@@ -546,7 +546,7 @@ async def _run_turn(req: TurnRequest) -> TurnResponse:
             emit("VOICE_STEP_UP_REQUIRED", 1, {
                 "reason_code": "SPEAKER_MISMATCH",
                 "next_control": "transaction-specific mock FaceID",
-                "note": "None of the four agents establishes identity. Identity evidence is "
+                "note": "None of the agents establishes identity. Identity evidence is "
                         "produced outside the LLM boundary."})
             say_line("VOICE_STEP_UP", 1)
 

@@ -288,7 +288,8 @@ def anonymous_payment_cue(text: str) -> bool:
     return bool(text) and ANONYMOUS_PAYMENT_RE.search(text) is not None
 
 # =====================================================================
-# 6. The four bounded agents, each a typed call, live or mock
+# 6. The five agents, each a typed call, live or mock. Four run in the control chain
+#    (stages 3, 4, 5, 8); the Personalization Agent runs outside it.
 # =====================================================================
 GUARDRAILS_SYSTEM_PROMPT = """You are the Guardrails Agent for AuntieJoy, an elderly-first Singapore payment prototype.
 You are a gate, not a parser. You decide ONLY whether the latest committed customer turn may proceed to

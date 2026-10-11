@@ -646,7 +646,7 @@ console.log('\n=== 9d. TOP BAR, TWO PANELS, HERO PAIR, EXPLAINER OVERLAY ===');
   ok('the requirements-coverage list now lives on the how-it-works page',
      doc.querySelector('.expage[data-page="how"]').contains($('reqs')));
   ok('the live/simulated comparison moved with it',
-     /SIMULATED — deliberately, and labelled/.test(
+     /SIMULATED: on purpose, and labelled/.test(
        doc.querySelector('.expage[data-page="how"]').textContent));
   ok('there is no "real" page and no "real" tab any more',
      !doc.querySelector('.expage[data-page="real"]') &&
@@ -662,11 +662,14 @@ console.log('\n=== 9d. TOP BAR, TWO PANELS, HERO PAIR, EXPLAINER OVERLAY ===');
   ok('the how-it-works page has a mount for the agents and one for the controls',
      !!$('exAgentList') && !!$('exCtlList'));
   ok('the execution-path page has a mount for the reference table', !!$('exRefList'));
-  ok('the how-it-works page lists all FOUR agents, not five',
-     doc.querySelectorAll('#exAgentList .exagent').length === 4,
+  // Five agents: four in the control chain and the Personalization Agent, which runs outside
+  // it. The card for the fifth must say where it runs, so it is never mistaken for a chain stage.
+  ok('the how-it-works page lists all FIVE agents',
+     doc.querySelectorAll('#exAgentList .exagent').length === 5,
      doc.querySelectorAll('#exAgentList .exagent').length + ' cards');
-  ok('the Personalization Agent is not presented as a bounded agent',
-     !/Personalization Agent/.test($('exAgentList').textContent));
+  ok('the Personalization Agent is shown as running outside the control chain',
+     /Personalization Agent/.test($('exAgentList').textContent) &&
+     /OUTSIDE THE CHAIN/.test($('exAgentList').textContent));
   // The control list is rendered from the SAME STAGES array the live chain uses, so this is
   // really a check that the explainer cannot drift out of step with the main screen.
   ok('the controls list renders all sixteen stages',
