@@ -88,7 +88,7 @@ console.log('=== 4b. THE CARD MIRRORS interface_language(), NOT dominantLang() A
 // The customer's two reported turns: Han plus Latin, so the word count ties to English and the
 // card used to come up English over a Chinese reply. detect_language() sees Han and no other
 // marker and calls them ZH; the backend answers in Chinese, so the card must say ZH too.
-const CHIP = '付三十块给Uncle Lim';
+const CHIP = '付30块给Uncle Lim';
 const SPOKEN = '付给John Smith 50块';
 ok('detectLang(chip) is ZH', window.detectLang(CHIP) === 'ZH', window.detectLang(CHIP));
 ok('detectLang(spoken) is ZH', window.detectLang(SPOKEN) === 'ZH', window.detectLang(SPOKEN));
