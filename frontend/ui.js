@@ -114,7 +114,7 @@ function reqReset(){
    Three pages, one shell:
      arch  - the architecture diagram, end to end, in ONE click. This is the page a presenter
              opens first, so it is the default page and the leftmost tab.
-     how   - how it works: the two bands, the four bounded agents, the sixteen-stage chain, the
+     how   - how it works: the two bands, the five agents, the sixteen-stage chain, the
              live-versus-simulated comparison and the requirements-coverage list (#reqs)
      path  - the execution path, stage by stage, with the integration boundary
 
@@ -127,9 +127,9 @@ function reqReset(){
    so the explainer can never drift out of step with what is actually on the main screen.
    LLM_STAGES names the four stages that call a model; everything else is code.
 
-   There are FOUR agents, not five. The Personalization Agent was removed: it sat outside the
-   control chain and chose wording register only, so it is not part of the architecture the
-   diagram describes. */
+   There are FIVE agents: four in the payment control chain (stages 3, 4, 5 and 8) and the
+   Personalization Agent, which runs outside the chain and only changes how Joy asks. The live
+   agent panel shows the four chain agents; the How it works page lists all five. */
 
 const LLM_STAGES = {
   3: 'Guardrails Agent',
@@ -140,21 +140,25 @@ const LLM_STAGES = {
 
 const EXPLAIN_AGENTS = [
   { name:'Guardrails Agent', stage:'STAGE 3 · LLM',
-    may:'Screen the request and return a verdict - ALLOW, BLOCK or STEP_UP - with a risk category, a risk level and the language it detected.',
+    may:'Screen the request and return a verdict (ALLOW, CLARIFY, SAFETY_INTERVENTION or BLOCK) with a risk category, a risk level and the language it detected. A deterministic scam table can make the verdict stricter.',
     never:'Authorise anything, sign anything, or reach the ledger.',
     out:'decision · risk_category · risk_level · detected_language · message_key' },
   { name:'Intent Classifier', stage:'STAGE 4 · LLM',
-    may:'Say what the customer is actually asking for - a payment, a question, or something out of shape - and name the intent.',
+    may:'Say what the customer is asking for (a payment, a change to one, a cancel, a safety question, or something unclear) and name the intent.',
     never:'Choose a payee, an amount or a source account.',
     out:'intent · confidence · detected_language' },
   { name:'Payment Agent', stage:'STAGE 5 · LLM',
-    may:'Draft a payment proposal - payee, amount, currency, source account - or ask one clarifying question when something is genuinely ambiguous.',
+    may:'Draft a payment proposal (payee, amount, currency, source account), or ask one clarifying question when something is ambiguous.',
     never:'Execute, mark its own draft valid, or bypass the confirmation step.',
     out:'payee · amount · currency · source_account · clarification_field' },
   { name:'Validation Agent', stage:'STAGE 8 · LLM',
-    may:'Compare the canonical draft against the committed evidence and return MATCH or MISMATCH with a reason.',
-    never:'See the other agents\u2019 reasoning, or repair the draft itself. It is independent by construction: it reads the evidence, not the proposal.',
-    out:'verdict · reason · mismatched_fields' }
+    may:'Check each field of the draft against what the customer actually said, and return PASS or FREEZE.',
+    never:'See the other agents\u2019 reasoning, or fix the draft itself. It reads the evidence, not the proposal.',
+    out:'status · field_checks · risk_flags' },
+  { name:'Personalization Agent', stage:'OUTSIDE THE CHAIN · LLM',
+    may:'Notice when the customer is struggling (the same field rejected twice, the same question asked twice, two unclear turns in a row) and switch on a slower mode where Joy confirms each field twice.',
+    never:'Read the conversation, change a payment field, or approve anything. It only sees counts of what happened, never the words.',
+    out:'personalize · score · reason_code' }
 ];
 
 function buildExplainAgents(){
@@ -378,7 +382,7 @@ function renderVerdict(name, p){
   return null;   // every other agent keeps the plain payload card
 }
 
-// The FOUR bounded agents are always on the table for a customer turn. While the backend
+// The FOUR control-chain agents are always on the table for a customer turn. While the backend
 // spends 7-27s screening, classifying, drafting and validating, the panel used to sit idle and
 // then dump every card at once when the response landed. agentThinking() paints the four
 // specialists as "reviewing…" the moment a turn is sent, so the panel thinks out loud DURING
@@ -406,7 +410,7 @@ function agentThinking(){
     agentsEl.appendChild(c);
     agentCards[name] = c;
   }
-  capline('Joy thinks out loud through four specialists so the payment is provably safe.');
+  capline('Four agents check this payment. Code makes the final decision.');
 }
 
 function agentThinkingDone(){

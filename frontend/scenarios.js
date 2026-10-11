@@ -831,7 +831,7 @@ const API_BASE = (() => {
   return `http://${window.location.hostname || '127.0.0.1'}:8078`;
 })();
 
-// Which event_type values are one of the four LLM agents (§ stages 3/4/5/8),
+// Which event_type values are one of the four control-chain LLM agents (§ stages 3/4/5/8),
 // these get rendered as an agent card (name + JSON), same as the scripted demo.
 const AGENT_NAME_FOR_EVENT = {
   GUARDRAILS_RESULT: 'GUARDRAILS AGENT',

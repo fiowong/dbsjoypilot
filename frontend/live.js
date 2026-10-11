@@ -330,11 +330,11 @@ async function verifyReceiptChain(sid){
     } else {
       el.dataset.state = 'bad';
       el.textContent = '⚠ Hash chain broken at event ' + (ch.broken_at_seq != null ? ch.broken_at_seq : '?')
-        + ' — do not trust this receipt';
+        + '. Do not trust this receipt';
     }
   } catch (e) {
     el.dataset.state = 'warn';
-    el.textContent = 'Audit log unavailable — receipt could not be verified on-chain';
+    el.textContent = 'Audit log unavailable, so the receipt could not be checked against it';
   }
 }
 
@@ -605,7 +605,7 @@ async function liveFreeTurn(text, viaVoice, asrConfidence, asrSource){
     }
   }
 
-  // Paint the four specialists as "reviewing…" in the agent panel the moment the turn is
+  // Paint the four chain agents as "reviewing…" in the agent panel the moment the turn is
   // sent, so the 7-27s the backend spends screening/classifying/drafting/validating is shown
   // as Joy "thinking out loud" rather than an idle gap. Each card locks in when its verdict
   // lands; specialists the backend did not consult this turn are marked, not hidden.

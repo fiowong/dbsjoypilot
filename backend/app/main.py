@@ -42,7 +42,8 @@ _TTS_RELAY_BYTES = 4096
 # =====================================================================
 app = FastAPI(title="AuntieJoy", version="1.0",
               description="DBS DCTA Scenario 1, voice-first conversational payments. "
-                          "Four bounded agents, sixteen deterministic controls.")
+                          "Five agents (four in the control chain, plus Personalization), "
+                          "sixteen-stage deterministic control chain.")
 # expose_headers is load-bearing, not cosmetic. tts.js reads X-TTS-Provider off the
 # /tts response to label the SPEAKING row with the engine that actually produced THAT
 # audio. Without an explicit expose_headers, a browser silently hides every custom
