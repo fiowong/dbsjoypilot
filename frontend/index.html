@@ -9,7 +9,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap">
-<link rel="stylesheet" href="styles.css?v=20261011p">
+<link rel="stylesheet" href="styles.css?v=20261011q">
 </head>
 <body>
 <div class="wrap" id="studio">
@@ -230,17 +230,6 @@
             <button class="lt on" data-lang="en-SG" data-l="EN">EN</button>
             <button class="lt" data-lang="zh-CN" data-l="ZH">中文</button>
             <button class="lt" data-lang="ms-MY" data-l="BM">BM</button>
-            <!-- AUTO. Tencent has no single engine covering English + Chinese + Malay, so
-                 "auto" selects one of the two engines instead of asking the customer to
-                 choose first. `data-l="AUTO"` is what live.js sttLanguage() keys on; it
-                 resolves to the backend's "auto" engine, which is 16k_zh_en -- the same
-                 engine the EN pill already opens, so Auto can only add recognition. See
-                 backend/app/stt.py ENGINE_BY_LANGUAGE for why Malay is the language Auto
-                 gives up rather than Chinese.
-                 `data-lang` stays a VALID BCP-47 tag on purpose: it is what the no-server
-                 Web Speech fallback is given, and that API cannot auto-detect at all, so
-                 Auto falls back to English rather than being handed a tag it would reject. -->
-            <button class="lt" data-lang="en-SG" data-l="AUTO" title="Detect the language automatically">Auto</button>
           </div>
           <div class="cinput" id="cinput">
             <button class="kbd" id="kbd" type="button" title="Type instead" aria-label="Type instead">
@@ -930,8 +919,7 @@
                   <dt>ASR</dt><dd>asr.cloud.tencent.com · signed WebSocket · <b>two</b> engines,
                     because no single one covers English + Chinese + Malay:
                     <span class="mono">16k_zh_en</span> (zh + en) and
-                    <span class="mono">16k_multi_lang</span> (en + ms). Auto resolves to
-                    <span class="mono">16k_zh_en</span>, deliberately</dd>
+                    <span class="mono">16k_multi_lang</span> (en + ms). The EN, 中文 and BM pills pick the engine</dd>
                   <dt>TTS</dt><dd>Cartesia Sonic by default (the only engine with a Malay voice).
                     TRTC Mode switches to Tencent Cloud TTS: TextToVoice, or TRTC
                     TextToSpeechSSE streaming when it is configured</dd>
@@ -968,14 +956,14 @@
      cached copies of these files, so a fix that IS in the file never reaches the screen - a
      Bahasa "working on it" card kept coming up in English long after the code was corrected.
      Bump the stamp whenever one of these files changes. -->
-<script src="translations.js?v=20261011p"></script>
-<script src="icons.js?v=20261011p"></script>
-<script src="ui.js?v=20261011p"></script>
-<script src="personalization.js?v=20261011p"></script>
-<script src="scenarios.js?v=20261011p"></script>
-<script src="stt.js?v=20261011p"></script>
-<script src="live.js?v=20261011p"></script>
-<script src="tts.js?v=20261011p"></script>
-<script src="shell.js?v=20261011p"></script>
+<script src="translations.js?v=20261011q"></script>
+<script src="icons.js?v=20261011q"></script>
+<script src="ui.js?v=20261011q"></script>
+<script src="personalization.js?v=20261011q"></script>
+<script src="scenarios.js?v=20261011q"></script>
+<script src="stt.js?v=20261011q"></script>
+<script src="live.js?v=20261011q"></script>
+<script src="tts.js?v=20261011q"></script>
+<script src="shell.js?v=20261011q"></script>
 </body>
 </html>
