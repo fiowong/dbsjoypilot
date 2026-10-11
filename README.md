@@ -183,7 +183,7 @@ firewall. After the first deploy, fill in `.env` on the server and restart the s
 
 ## Team
 
-- **Ignatius:** business logic and frontend
+- **Iggy Aditya:** business logic and frontend
 - **Fionna Wong:** backend, control chain, Tencent Cloud and LLM integration
 
 Submission deadline: 16 Oct 2026.
