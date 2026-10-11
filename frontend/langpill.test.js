@@ -1,4 +1,4 @@
-/* Guards the language pills: EN, ZH and BM. There is deliberately NO Auto pill in this build.
+/* Guards the language pills, and in particular the Auto pill.
 
    WHY THIS EXISTS
    --------------
@@ -18,9 +18,9 @@
         understands -- read out of stt.py, not duplicated as a literal here, so this test
         fails if either side is edited without the other.
 
-   Every pill is also asserted to carry a real BCP-47 `data-lang`: `data-lang` is what the
-   no-server Web Speech fallback is handed, and that API cannot auto-detect a language, so it
-   must never be given a token like "auto" that it would reject.
+   The Auto pill is also asserted to carry a real BCP-47 `data-lang`: `data-lang` is what the
+   no-server Web Speech fallback is handed, and that API cannot auto-detect, so it must never
+   receive the literal string "auto".
 
    Run:  NODE_PATH=<workspace>/node_modules node langpill.test.js                */
 const fs = require('fs');
@@ -61,24 +61,21 @@ const selected = () => doc.querySelector('#langtog .lt.on');
 const byL = l => pills().find(b => b.dataset.l === l);
 
 console.log('=== 1. THE PILL SET ===');
-ok('there are three language pills (EN, ZH, BM) and no Auto pill', pills().length === 3, pills().length);
-ok('no Auto pill is present', !byL('AUTO'));
+ok('there are four language pills (EN, ZH, BM, Auto)', pills().length === 4, pills().length);
 ok('exactly one pill is selected', doc.querySelectorAll('#langtog .lt.on').length === 1);
 ok('the default selection is EN', selected() && selected().dataset.l === 'EN',
    selected() && selected().dataset.l);
-for (const l of ['EN', 'ZH', 'BM']) {
+for (const l of ['EN', 'ZH', 'BM', 'AUTO']) {
   ok(`the ${l} pill exists`, !!byL(l));
 }
 
-console.log('=== 2. EVERY PILL IS SAFE FOR THE WEB SPEECH FALLBACK ===');
-for (const l of ['EN', 'ZH', 'BM']) {
-  const b = byL(l);
-  ok(`the ${l} pill carries a real BCP-47 data-lang`,
-     !!b && /^[a-z]{2}(-[A-Za-z0-9]{2,8})*$/.test(b.dataset.lang || ''),
-     b && b.dataset.lang);
-  ok(`the ${l} pill is labelled for a human`, !!b && b.textContent.trim().length > 0,
-     b && b.textContent.trim());
-}
+console.log('=== 2. THE AUTO PILL IS SAFE FOR THE WEB SPEECH FALLBACK ===');
+const auto = byL('AUTO');
+ok('the Auto pill carries a real BCP-47 data-lang, not the literal "auto"',
+   !!auto && auto.dataset.lang !== 'auto' && /^[a-z]{2}(-[A-Za-z0-9]{2,8})*$/.test(auto.dataset.lang || ''),
+   auto && auto.dataset.lang);
+ok('the Auto pill is labelled for a human', !!auto && auto.textContent.trim().length > 0,
+   auto && auto.textContent.trim());
 
 console.log('=== 3. EVERY PILL RESOLVES TO A LANGUAGE THE BACKEND KNOWS ===');
 // Read the backend's own mapping rather than restating it, so the two cannot drift apart.
@@ -86,9 +83,9 @@ const sttSrc = fs.readFileSync(path.join(dir, '..', 'backend', 'app', 'stt.py'),
 const block = sttSrc.match(/ENGINE_BY_LANGUAGE\s*=\s*\{([\s\S]*?)\}/);
 ok('stt.py declares ENGINE_BY_LANGUAGE', !!block);
 const backendKeys = block ? [...block[1].matchAll(/"([^"]+)"\s*:/g)].map(m => m[1]) : [];
-ok('stt.py declares at least the three pill languages', backendKeys.length >= 3, backendKeys.join(','));
+ok('stt.py lists at least four languages', backendKeys.length >= 4, backendKeys.join(','));
 
-const expected = { EN: 'en', ZH: 'zh', BM: 'bm' };
+const expected = { EN: 'en', ZH: 'zh', BM: 'bm', AUTO: 'auto' };
 for (const [pill, want] of Object.entries(expected)) {
   const b = byL(pill);
   if (!b) { ok(`${pill} -> ${want}`, false, 'pill missing'); continue; }
@@ -110,12 +107,11 @@ ok('clicking BM selects only BM',
 ok('clicking BM leaves the backend a key it knows', backendKeys.includes(window.sttLanguage()),
    window.sttLanguage());
 
-const en = byL('EN');
-en.click();
-ok('clicking EN selects only EN',
-   doc.querySelectorAll('#langtog .lt.on').length === 1 && selected().dataset.l === 'EN',
+auto.click();
+ok('clicking Auto selects only Auto',
+   doc.querySelectorAll('#langtog .lt.on').length === 1 && selected().dataset.l === 'AUTO',
    selected() && selected().dataset.l);
-ok('EN resolves to a key the backend knows',
+ok('Auto resolves to the backend engine for auto-detect',
    backendKeys.includes(window.sttLanguage()), window.sttLanguage());
 
 console.log('=== 5. NO STRAY ERRORS ===');

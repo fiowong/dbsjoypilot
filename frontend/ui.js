@@ -1,4 +1,4 @@
-/* 2/5 ui.js, load 2nd. DOM plumbing: chat/panel element refs, tech-toggle, buildStatic() (needs STAGES from translations.js, called immediately), the requirements-coverage list (REQ_COVERAGE/REQ_FOR_SCENARIO + reqHit/reqReset), the EXPLAINER OVERLAY (the two top-bar status chips open it; it carries the requirements-coverage list, the agent/control explainer and the A-H failure-branch rail), bubble/auntie/attacker/iface/sysLine, agent/stage/state/draft/ledger/sig/outcome/hit/audit cards, the popup() system, fieldReview(), and the canonical/hmac/newDraft signing helpers. */
+/* 2/5 ui.js, load 2nd. DOM plumbing: chat/panel element refs, tech-toggle, buildStatic() (needs STAGES from translations.js, called immediately), the requirements-coverage list (REQ_COVERAGE/REQ_FOR_SCENARIO + reqHit/reqReset), the EXPLAINER OVERLAY (the four top-bar buttons open it; it carries the architecture diagram, the two-band explanation with the four agents and the sixteen-stage chain, the execution path with the A-H failure-branch rail, and the requirements-coverage list), bubble/auntie/attacker/iface/sysLine, agent/stage/state/draft/ledger/sig/outcome/hit/audit cards, the popup() system, fieldReview(), and the canonical/hmac/newDraft signing helpers. */
 
 /* ============================ UI plumbing ============================ */
 const $ = id => document.getElementById(id);
@@ -108,20 +108,28 @@ function reqReset(){
 }
 
 /* ======================= EXPLAINER OVERLAY =======================
-   The two status chips in the top bar make two claims - "this is a demo environment" and "five
-   bounded agents, sixteen deterministic controls". Each chip OPENS the page that backs its own
-   claim, because a judge's next move after reading a claim is always "show me", and the answer
-   should not be in a document nobody opens.
+   Each top-bar button names the thing it opens, so a judge's next move after reading a claim is
+   one click away instead of in a document nobody opens.
 
    Three pages, one shell:
-     demo     - what is simulated vs what is real, plus the requirements-coverage list
-     agents   - the five agents and the sixteen controls
-     branches - the A-H failure-branch rail, which used to occupy a full-width strip under the
-                top bar on every screen
+     arch  - the architecture diagram, end to end, in ONE click. This is the page a presenter
+             opens first, so it is the default page and the leftmost tab.
+     how   - how it works: the two bands, the four bounded agents, the sixteen-stage chain, the
+             live-versus-simulated comparison and the requirements-coverage list (#reqs)
+     path  - the execution path, stage by stage, with the integration boundary
+
+   A fourth page ("real" - what is simulated vs what is real) was removed on request: it is no
+   longer a standalone tab, and its two blocks are now the closing sections of `how`. The A-H
+   failure-branch rail was removed from `path` in the same round, so the overlay is three pages
+   with three buttons and there is no `.sbtn` in the document any more.
 
    The stage lists are rendered from the SAME `STAGES` array the live chain uses (translations.js),
    so the explainer can never drift out of step with what is actually on the main screen.
-   LLM_STAGES names the four stages that call a model; everything else is code. */
+   LLM_STAGES names the four stages that call a model; everything else is code.
+
+   There are FOUR agents, not five. The Personalization Agent was removed: it sat outside the
+   control chain and chose wording register only, so it is not part of the architecture the
+   diagram describes. */
 
 const LLM_STAGES = {
   3: 'Guardrails Agent',
@@ -143,14 +151,10 @@ const EXPLAIN_AGENTS = [
     may:'Draft a payment proposal - payee, amount, currency, source account - or ask one clarifying question when something is genuinely ambiguous.',
     never:'Execute, mark its own draft valid, or bypass the confirmation step.',
     out:'payee · amount · currency · source_account · clarification_field' },
-  { name:'Independent Validation Agent', stage:'STAGE 8 · LLM',
+  { name:'Validation Agent', stage:'STAGE 8 · LLM',
     may:'Compare the canonical draft against the committed evidence and return MATCH or MISMATCH with a reason.',
     never:'See the other agents\u2019 reasoning, or repair the draft itself. It is independent by construction: it reads the evidence, not the proposal.',
-    out:'verdict · reason · mismatched_fields' },
-  { name:'Personalization Agent', stage:'ADAPTIVE · LLM',
-    may:'Choose the wording register - standard or simpler - and confirm the customer\u2019s preferred name.',
-    never:'Change WHAT is said, only how it is said. It cannot alter a payment field.',
-    out:'personalize_auto · customer_preferred_name' }
+    out:'verdict · reason · mismatched_fields' }
 ];
 
 function buildExplainAgents(){
@@ -167,23 +171,61 @@ function buildExplainAgents(){
 }
 
 /* The sixteen controls, rendered from the live STAGES array so the numbering, the names and the
-   sub-labels are guaranteed to be the same strings the control chain on the main screen shows. */
+   sub-labels are guaranteed to be the same strings the control chain on the main screen shows.
+   Rendered in the two bands the architecture diagram draws, because the band is the argument:
+   everything in the first band may propose, and none of it can authorise anything. The band
+   header comes from BANDS in translations.js so it is named in exactly one place. */
 function buildExplainControls(){
   const host = $('exCtlList'); if(!host) return;
   if(typeof STAGES === 'undefined'){ host.innerHTML = ''; return; }
-  host.innerHTML = STAGES.map((s,i)=>{
-    const llm = !!LLM_STAGES[i];
-    return `<div class="exct${llm?' llm':''}">`+
-      `<span class="exctn">${String(i).padStart(2,'0')}</span>`+
-      `<span class="exctb"><div class="exctt">${s[0]}</div><div class="excty">${s[1]}</div></span>`+
+  const order = ['ai','det'];
+  const seen  = order.concat(STAGES.map(s=>s[2]).filter(b=>order.indexOf(b) < 0));
+  host.innerHTML = seen.map(band=>{
+    const rows = STAGES.map((s,i)=>({s,i})).filter(r=>r.s[2] === band);
+    if(!rows.length) return '';
+    const b = (typeof BANDS !== 'undefined' && BANDS[band]) || { no:'', name:band, sub:'' };
+    return `<div class="exband ${band}">`+
+      `<div class="exbandh"><span class="exbandno">${b.no}</span>${b.name}`+
+        `<span class="exbandsub">${b.sub}</span></div>`+
+      rows.map(({s,i})=>{
+        const llm = !!LLM_STAGES[i];
+        return `<div class="exct${llm?' llm':''}">`+
+          `<span class="exctn">${String(i).padStart(2,'0')}</span>`+
+          `<span class="exctb"><div class="exctt">${s[0]}</div><div class="excty">${s[1]}</div></span>`+
+        `</div>`;
+      }).join('')+
     `</div>`;
   }).join('');
 }
 
-let explainPage = 'demo';
+/* The 16-stage chain as a compact two-column reference (stage -> what it does), the same shape the
+   presenter's slide uses. Built from the same STAGES array, so it cannot disagree with the chain
+   on the main screen or with the control list above it. The band tag is what makes the split
+   legible at a glance: AI half above, deterministic half below. */
+function buildExplainRef(){
+  const host = $('exRefList'); if(!host) return;
+  if(typeof STAGES === 'undefined'){ host.innerHTML = ''; return; }
+  host.innerHTML = STAGES.map((s,i)=>{
+    const band = s[2] === 'ai' ? 'AI' : 'CODE';
+    return `<div class="prefrow ${s[2]}">`+
+      `<span class="prefn">${String(i).padStart(2,'0')}</span>`+
+      `<span class="preft">${s[0]}</span>`+
+      `<span class="prefb">${band}</span>`+
+    `</div>`;
+  }).join('');
+}
+
+/* `explainPage` records which page is on screen. openExplainer() deliberately does NOT reuse it
+   as a default: every top-bar button passes its own page, so the only caller that reaches the
+   no-argument path is one that wants "the explanation" without naming a page - and for that
+   caller the right answer is always the architecture diagram, which is the one-click entry point
+   the whole overlay exists to provide. Reopening on whichever page was read last would mean the
+   same call showed a different page depending on history, which is the kind of thing that only
+   ever shows up during a live demo. */
+let explainPage = 'arch';
 function openExplainer(page){
   const host = $('explain'); if(!host) return;
-  showExplainerPage(page || explainPage);
+  showExplainerPage(page || 'arch');
   host.hidden = false;
   const close = $('exClose'); if(close) close.focus();
 }
@@ -193,7 +235,7 @@ function closeExplainer(){
 }
 function showExplainerPage(page){
   const host = $('explain'); if(!host) return;
-  explainPage = page || 'demo';
+  explainPage = page || 'arch';
   host.querySelectorAll('.expage').forEach(s=>{
     s.hidden = s.dataset.page !== explainPage;
   });
@@ -208,6 +250,7 @@ function showExplainerPage(page){
   const host = $('explain'); if(!host) return;
   buildExplainAgents();
   buildExplainControls();
+  buildExplainRef();
   // Any element carrying data-explain opens the overlay on that page. A delegated listener, so a
   // future chip only has to add the attribute.
   document.addEventListener('click', ev=>{
@@ -335,16 +378,23 @@ function renderVerdict(name, p){
   return null;   // every other agent keeps the plain payload card
 }
 
-// The five bounded agents are always on the table for a customer turn. While the backend
+// The FOUR bounded agents are always on the table for a customer turn. While the backend
 // spends 7-27s screening, classifying, drafting and validating, the panel used to sit idle and
-// then dump every card at once when the response landed. agentThinking() paints the five
+// then dump every card at once when the response landed. agentThinking() paints the four
 // specialists as "reviewing…" the moment a turn is sent, so the panel thinks out loud DURING
 // the wait (the reframed-latency trust signal), and each card locks in — in place, never
 // stacked — when its verdict arrives. Any specialist the backend did not actually consult this
 // turn is left marked "not invoked this turn", so the panel never over-states the pipeline.
+//
+// FOUR, not five. The names here are the backend's own agent keys and are matched literally when
+// a verdict card resolves into its placeholder, so they must not be re-worded for style. The
+// Personalization Agent is deliberately NOT in this list: it is a wording-register service that
+// runs outside the control chain and is not one of the bounded agents the architecture draws. If
+// the backend does return a personalization payload, agent() still renders it — it simply appends
+// a card instead of resolving a placeholder.
 let agentCards = {};
 const AGENT_THINK_ORDER = ['GUARDRAILS AGENT','INTENT CLASSIFIER','PAYMENT AGENT',
-                           'INDEPENDENT VALIDATION AGENT','PERSONALIZATION AGENT'];
+                           'INDEPENDENT VALIDATION AGENT'];
 
 function agentThinking(){
   agentCards = {};
@@ -356,7 +406,7 @@ function agentThinking(){
     agentsEl.appendChild(c);
     agentCards[name] = c;
   }
-  capline('Joy thinks out loud through 5 specialists so the payment is provably safe.');
+  capline('Joy thinks out loud through four specialists so the payment is provably safe.');
 }
 
 function agentThinkingDone(){
@@ -859,26 +909,15 @@ function removeLastIfaceBubble(){
    guesswork: a value with no entry here falls through to the RAW enum and the box renders
    "CONFIRMATION_READY" - which, at 14px monospace in a third-of-a-panel box, breaks mid-word as
    "CONFIRMATION_RE / ADY". Human labels also wrap on a space, so they stay readable.
-   Labels are kept short on purpose: this box is ~145px wide.
-
-   The list below is checked against backend/app/models.py SessionState, which has 15 members.
-   Seven of them had no entry here and were rendering as raw enums; they are marked (added).
-   Six entries are not reachable from this build's enum at all (CONFIRMED, BLOCKED,
-   SAFETY_INTERVENTION, STEP_UP_REQUIRED, AWAITING_BIOMETRIC, EXPIRED) and are kept only so a
-   value from an older build still renders as words rather than as a machine token. */
+   Labels are kept short on purpose: this box is ~145px wide. */
 const STATE_LABEL = {
   IDLE:'Idle', CAPTURED:'Captured',
-  EVIDENCE_COMMITTED:'Evidence in',                        // (added)
   CLARIFICATION_REQUIRED:'Clarification required',
-  DRAFTING:'Drafting', DRAFT_READY:'Draft ready',          // (added)
   CONFIRMATION_READY:'Ready to confirm',
-  CONFIRMATION_COMPLETE:'Confirmed',                       // (added)
   CONFIRMED:'Confirmed', EXECUTED:'Executed',
-  FROZEN:'Frozen', COOLING_OFF:'Cooling off',              // (added)
-  REJECTED:'Rejected', BLOCKED:'Blocked',
+  FROZEN:'Frozen', REJECTED:'Rejected', BLOCKED:'Blocked',
   SAFETY_INTERVENTION:'Safety hold', STEP_UP_REQUIRED:'Step-up needed',
-  AWAITING_BIOMETRIC:'Awaiting FaceID', SIGNED:'Signed', EXPIRED:'Expired',
-  SCHEDULED:'Scheduled', CANCELLED:'Cancelled'             // (added)
+  AWAITING_BIOMETRIC:'Awaiting FaceID', SIGNED:'Signed', EXPIRED:'Expired'
 };
 const DRAFT_LABEL = { 'NOT_CREATED':'Not created', '-':'-' };
 // NOT_INVOKED is the one raw enum left in the main view once state/draft/sig are humanised, and
@@ -963,11 +1002,11 @@ function voiceEngine(text, reveal){
   if(reveal) row.hidden = false;
 }
 
-/* The failure-map branch/node highlight. The visible map is gone, so the `br*`/`nd*` lookups
-   are now no-ops that must stay null-safe - they are NOT dead code to tidy away, because the
-   hidden scenario rail is still built from BRANCHES and a judge may open it. The same call now
-   also lights the requirements-coverage row(s) this scenario is evidence for, which is what the
-   panel is for. */
+/* The failure-map branch/node highlight. Both the visible map AND the scenario rail are gone now,
+   so the `br*`/`nd*` lookups are no-ops. They stay guarded rather than deleted because BRANCHES
+   still exists and `hit()` is still reached from the live flow; an unguarded null here would
+   throw and take the whole inspector down with it. The call also lights the
+   requirements-coverage row(s) this scenario is evidence for, which is what the panel is for. */
 function hit(branch,node){
   const b=$('br'+branch); if(b)b.classList.add('hit');
   const n=$('nd'+node); if(n)n.classList.add('hit');

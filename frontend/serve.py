@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Serve the AuntieJoy demo UI from this folder, with browser caching switched OFF.
+"""Serve the Joy demo UI from this folder, with browser caching switched OFF.
 
 Use this instead of `python3 -m http.server`. The built-in server answers without a
 Cache-Control header, which lets the browser keep its own copy of every file, so a

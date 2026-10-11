@@ -3,13 +3,13 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Joy · DBS Voice-First Payments</title>
+<title>JoyPilot · DBS hackathon prototype (not an official DBS product)</title>
 <!-- Banking-grade type. Inter is the requested DBS/enterprise face; the CSS stack keeps a
      full system fallback, so an offline demo laptop simply renders in system-ui instead. -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap">
-<link rel="stylesheet" href="styles.css?v=20261009b">
+<link rel="stylesheet" href="styles.css?v=20261011m">
 </head>
 <body>
 <div class="wrap" id="studio">
@@ -23,20 +23,35 @@
       </div>
     </div>
     <div class="badges">
-      <!-- BOTH STATUS CHIPS ARE BUTTONS, and that is the point. Each one states a claim about
-           the system; a judge's next move is always "show me". Making the claim itself the
-           control that answers it means the evidence is one click away instead of in a
-           document nobody opens. See openExplainer() in ui.js. -->
-      <!-- Demo status. Every simulated element is named here rather than left for a judge to
-           discover: a labelled simulation is credible, an unlabelled one is not. Clicking it
-           opens the "what is simulated vs what is real" page. -->
-      <button class="bdg mock bdgbtn" id="demoBadge" type="button" data-explain="demo"
-              title="What this demo simulates, and what is real">DEMO ENVIRONMENT · SIMULATED APPROVAL · SYNTHETIC LEDGER</button>
-      <!-- The architecture claim, and the page behind it names all five agents and all sixteen
-           controls. The badge used to be a dead label; it is now the way in. -->
-      <button class="bdg live bdgbtn" id="agentsBadge" type="button" data-explain="agents"
-              title="How the five bounded agents and sixteen deterministic controls work">5 bounded agents · 16 deterministic controls</button>
+      <!-- ALL THREE ARE BUTTONS, and that is the point. A judge's next move after hearing a
+           claim is always "show me". Making the control name the thing it opens means the
+           evidence is one click away instead of in a document nobody opens.
+           See openExplainer() in ui.js. -->
+      <!-- THREE BUTTONS, EACH NAMED FOR WHAT IT OPENS.
+           These replaced two long status chips. The old wording described the demo's LIMITS
+           ("DEMO ENVIRONMENT · SIMULATED APPROVAL · SYNTHETIC LEDGER") rather than its own
+           contents, so a reader had to click to find out what was behind it - and the green
+           chip claimed five agents when the architecture has four. A control should name its
+           destination. The three destinations are the three things a judge asks for, in the
+           order they get asked: the whole picture, how the two halves work, and the
+           stage-by-stage path.
+           A fourth "What's real" button was removed on request. Its page is no longer a tab:
+           the live/simulated comparison and the requirements-coverage list are now the closing
+           sections of "How it works", so there are three pages and three buttons. -->
+      <button class="bdg arch bdgbtn" type="button" data-explain="arch"
+              title="The whole architecture, end to end, on one screen">Architecture</button>
+      <button class="bdg how bdgbtn" type="button" data-explain="how"
+              title="The two halves, the four agents, and what is real versus simulated">How it works</button>
+      <button class="bdg path bdgbtn" type="button" data-explain="path"
+              title="The execution path, stage by stage, to a signed payment">Execution path</button>
       <label class="techtoggle"><input type="checkbox" id="techToggle" checked><span>Technical panels</span></label>
+      <!-- DEMO SWITCH - VOICE MODE.
+           Off (default): every turn is treated as Auntie herself, exactly as before.
+           On: the turn is submitted as a voice that is NOT the registered customer, so the
+           audio-risk adapter returns SPEAKER_MISMATCH and the control chain takes the
+           escalation route - secondary out-of-band confirmation before anything can proceed.
+           It changes only the EVIDENCE about who is speaking; no control-chain rule is
+           bypassed or softened, and the ledger still cannot be reached without the step-up. -->
       <label class="techtoggle voicetoggle" title="Demo: submit the turn as a voice that is not the registered customer">
         <input type="checkbox" id="voiceToggle"><span>Voice mode</span></label>
       <!-- VOICE ENGINE SWITCH - CARTESIA vs TRTC (Tencent).
@@ -50,6 +65,13 @@
       <label class="techtoggle trtctoggle" id="ttsToggleWrap"
              title="Speak with Tencent (TRTC) instead of Cartesia">
         <input type="checkbox" id="ttsToggle"><span>TRTC Mode</span></label>
+      <!-- HOME - back to the login screen, from wherever the run happens to be.
+           Reset (below) clears the run but is context-aware: inside the chat it restarts in
+           place. Home is the unconditional one - a presenter who has wandered into the chat,
+           or into a branch, or into a half-finished confirmation, has exactly one control that
+           always returns to the top of the demo. Two buttons, two different jobs:
+           Reset = clean state, Home = clean state AND back to the login screen. -->
+      <button class="ghostbtn" id="homeBtn" title="Back to the DBS login screen">Home</button>
       <!-- ONE button, and it RESETS rather than navigates. The old "DBS app" button did the same
            thing as the phone's own back arrow, so it spent top-bar space duplicating a control
            that already exists on the device. Reset is the action a presenter actually reaches
@@ -60,11 +82,10 @@
     </div>
   </div>
 
-  <!-- The A-H failure-branch rail USED to live here, filling the width under the top bar on
-       every screen. It is a rehearsal tool for the BRD walkthrough, not something a judge
-       should be reading during the golden path, so it now lives inside the explainer overlay
-       (see #railPanel below) and is reachable in one click from either status chip. The buttons
-       themselves are unchanged and scenarios.js still wires them by class. -->
+  <!-- The A-H failure-branch rail used to live here, then inside the explainer overlay. It has
+       since been removed entirely, at the owner's request, so nothing on the main screen and
+       nothing in the overlay carries a `.sbtn` any more. The 19 SC.* definitions and the
+       backend's 62-scenario suite are untouched; only the buttons are gone. -->
 
   <!-- ================= STAGE: hero pair + technical inspector ================= -->
   <div class="stage">
@@ -101,15 +122,22 @@
         </div>
         <div class="island"></div>
 
-        <!-- 1 · DBS digibank LOG IN (the User ID / PIN form IS the screen. The
-             launchpad hero photo, the six tiles and the form's back arrow were
-             removed on 2 Oct: with no launchpad there was nothing to go back to.) -->
+        <!-- 1 · DBS digibank LOG IN. The User ID / PIN form IS the screen, as it was before.
+             RESTORED 9 Oct at the owner's explicit request, with the trade-off understood.
+             Earlier the same day this form was deleted: a bank login on a domain that was one
+             day old reads as phishing to an automated classifier, and it was treated as
+             phishing -- Safe Browsing warned and the .xyz registry put the domain on server
+             hold. The owner has accepted that risk and wants the screen back, so it is back.
+             The DEMO tag stays beside the logo, and the disclaimer stays under the form.
+             Nothing here collects anything: both fields are prefilled samples, the form has no
+             action and no method, and no value is ever read, stored or transmitted. -->
         <section class="scr on" id="scrLogin">
           <div class="lgwrap">
 
             <div class="lgform" id="lgForm">
               <div class="lgform-head">
                 <img class="dbslogo" src="assets/dbs-logo-white.png" alt="DBS">
+                <span class="lgdemotag">DEMO</span>
               </div>
 
               <label class="lgf">
@@ -139,7 +167,7 @@
 
               <div class="lgnote">Prototype only, these are sample credentials.
                 No real credentials are collected, stored or transmitted.</div>
-              <div class="lgfoot">DBS Bank Ltd · Reg. No. 196800306E · Demonstration build</div>
+              <div class="lgfoot">DBS Bank Ltd · Demonstration build</div>
             </div>
           </div>
         </section>
@@ -149,6 +177,10 @@
           <div class="appbar">
             <img class="dbslogo sm" src="assets/dbs-logo-white.png" alt="DBS">
             <span class="appbar-t">digibank</span>
+            <!-- The DEMO chip travels with the DBS chrome on every screen inside the phone.
+                 A disclaimer in the footer is not enough: the branding is what makes a page
+                 look official, so the counter-label has to sit against the branding itself. -->
+            <span class="appdemo">DEMO</span>
             <!-- Single top-right control, and it is LOG OUT (matching iggy). It used to open
                  Joy, but Joy is reachable from the home CTA and the Pay & Transfer row, which
                  is the real customer journey anyway - so this slot does the honest thing. -->
@@ -199,13 +231,17 @@
             <button class="lt on" data-lang="en-SG" data-l="EN">EN</button>
             <button class="lt" data-lang="zh-CN" data-l="ZH">中文</button>
             <button class="lt" data-lang="ms-MY" data-l="BM">BM</button>
-            <!-- NO AUTO PILL, deliberately. Tencent has no single engine that covers
-                 English + Chinese + Malay, so an Auto pill has to give one of them up --
-                 silently, because the wrong engine still returns a confident transcript
-                 rather than an error. Three explicit pills put that choice in the customer's
-                 hands instead of hiding it. The backend still accepts "auto" and resolves it
-                 to 16k_zh_en (the engine the EN pill already opens), so a client that sends
-                 it keeps working. See backend/app/stt.py ENGINE_BY_LANGUAGE. -->
+            <!-- AUTO. Tencent has no single engine covering English + Chinese + Malay, so
+                 "auto" selects one of the two engines instead of asking the customer to
+                 choose first. `data-l="AUTO"` is what live.js sttLanguage() keys on; it
+                 resolves to the backend's "auto" engine, which is 16k_zh_en -- the same
+                 engine the EN pill already opens, so Auto can only add recognition. See
+                 backend/app/stt.py ENGINE_BY_LANGUAGE for why Malay is the language Auto
+                 gives up rather than Chinese.
+                 `data-lang` stays a VALID BCP-47 tag on purpose: it is what the no-server
+                 Web Speech fallback is given, and that API cannot auto-detect at all, so
+                 Auto falls back to English rather than being handed a tag it would reject. -->
+            <button class="lt" data-lang="en-SG" data-l="AUTO" title="Detect the language automatically">Auto</button>
           </div>
           <div class="cinput" id="cinput">
             <button class="kbd" id="kbd" type="button" title="Type instead" aria-label="Type instead">
@@ -286,9 +322,10 @@
           </div>
           <div class="statewrap statewrap3">
             <div class="sbox"><div class="k">LAST HEARD</div><div class="v" id="stHeard">-</div></div>
-            <!-- The Personalization Agent's own output. The top-bar "Personalisation: Standard"
-                 button is gone; this line stays because it is live EVIDENCE of an agent that
-                 actually ran, and it costs nothing but a chip. -->
+            <!-- The wording-register service's own output (the Personalization Agent, which runs
+                 OUTSIDE the control chain and is not one of the four bounded agents). The top-bar
+                 "Personalisation: Standard" button is gone; this line stays because it is live
+                 EVIDENCE of a decision that actually ran, and it costs nothing but a chip. -->
             <div class="sbox"><div class="k">CUSTOMER PROFILE</div><div class="v" id="stPers">Standard</div></div>
             <!-- WHICH MOUTH IS SPEAKING. Always visible, unlike the ASR fallback row below: with
                  two TTS providers and a runtime toggle, "which engine is talking" is a fact the
@@ -325,30 +362,45 @@
   </div>
 
   <!-- ================= EXPLAINER OVERLAY =================
-       The two status chips in the top bar open this. It exists so the main screen can stay
-       clean WITHOUT the evidence disappearing: each chip makes a claim, and clicking the claim
-       is what shows the working. A labelled simulation is credible; a claim with nothing behind
+       FOUR top-bar buttons open this, one per page, each named for the page it opens. It exists
+       so the main screen can stay clean WITHOUT the evidence disappearing: the button is a claim,
+       clicking it is the working. A labelled simulation is credible; a claim with nothing behind
        it is not.
 
        A fixed overlay rather than a routed page on purpose. The whole front end is one HTML
        file with no build step and no router, and a judge must be able to get back to a live
        screen in one click without losing a turn that is mid-flight.
 
-       PAGE 1 carries the REQUIREMENTS COVERAGE list (#reqs). It used to be a panel on the main
-       screen. Moving it here keeps the five challenge criteria - in the challenge's own wording,
-       verbatim - one click from the claim they support, and the rows still light up live as
-       scenarios run, so it is still evidence rather than a blurb.
-       PAGE 3 carries the A-H failure-branch buttons, which used to occupy a full-width rail
-       under the top bar on every screen. They are a rehearsal tool, not something a judge should
-       be reading during the golden path, so they moved here. The buttons themselves are
-       untouched and scenarios.js still wires them by class. -->
+       ARCHITECTURE is the diagram, end to end, on ONE click - it is the page the presenter opens
+       first, so it is the default page and it is the leftmost tab. It is drawn here in HTML and
+       CSS rather than shipped as an image so it stays sharp at any zoom, follows the DBS palette,
+       and can be edited in the same file as everything else.
+
+       HOW IT WORKS is the two-band explanation: (1) UNDERSTAND AND PROPOSE, the AI half, and
+       (2) DECIDE, AUTHORISE AND EXECUTE, the deterministic half. It also carries the four
+       bounded agents, the sixteen-stage control chain, the live-versus-simulated comparison
+       and the REQUIREMENTS COVERAGE list (#reqs). There are FOUR agents, not five: the
+       Personalization Agent is a wording-register service that runs outside the control chain,
+       so it is not one of the bounded agents the diagram draws.
+
+       The live/simulated comparison and #reqs used to be a fourth page ("What's real") with
+       its own top-bar button and its own tab. Both were removed on request: the content is now
+       the closing section of this page, so there are THREE pages and THREE buttons. #reqs is
+       still looked up by id in ui.js, so moving it between pages needed no JavaScript change.
+
+       EXECUTION PATH is the stage-by-stage walk to a signed payment, with the integration
+       boundary. It used to end with the A-H failure-branch rail; that section was removed on
+       request, so the page now ends at the outcome. NOTE: those buttons were the only elements
+       in the DOM carrying `.sbtn`, which is how scenarios.js binds every scripted scenario -
+       with the rail gone there is no in-UI trigger for the 22 rehearsal branches, and the app
+       runs only through the live /turn flow. -->
   <div class="explain" id="explain" hidden>
     <div class="excard" role="dialog" aria-modal="true" aria-label="How this demo works">
       <div class="exhead">
         <div class="extabs" id="exTabs" role="tablist">
-          <button class="extab" type="button" data-page="demo">What is simulated</button>
-          <button class="extab" type="button" data-page="agents">Agents &amp; controls</button>
-          <button class="extab" type="button" data-page="branches">Failure branches</button>
+          <button class="extab" type="button" data-page="arch">Architecture</button>
+          <button class="extab" type="button" data-page="how">How it works</button>
+          <button class="extab" type="button" data-page="path">Execution path</button>
         </div>
         <button class="exclose" id="exClose" type="button" aria-label="Close">
           <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
@@ -357,8 +409,315 @@
 
       <div class="exbody" id="exBody">
 
-        <!-- ---------------- PAGE 1 · what is simulated, what is real ---------------- -->
-        <section class="expage" data-page="demo">
+        <!-- ---------------- PAGE 1 · the architecture diagram ----------------
+             The presenter's own "Architectural Summary: HOW JOYPILOT WORKS - END-TO-END",
+             redrawn in HTML and CSS so it opens in ONE click, stays sharp at any zoom, follows
+             the DBS palette, and lives in the same file as everything else.
+
+             The numbering on this page is the DIAGRAM's numbering (0-16), because this is the
+             diagram the presenter demos from and the words on it are the words they say out
+             loud. The control chain on the main screen runs the same steps as 16 stages
+             (0-15); the note under the diagram says exactly where the two differ and why. Do
+             not "fix" one numbering to match the other. -->
+        <section class="expage" data-page="arch">
+          <h2>How JoyPilot works — end to end</h2>
+          <p class="exlead">One utterance in, one governed, audited DBS payment out.
+            <b>A model may propose; only deterministic code may decide.</b></p>
+
+          <div class="dgm">
+
+            <!-- ---------- BAND 1 · the AI half ---------- -->
+            <div class="dgband ai">
+              <div class="dgbhead">
+                <span class="dgbno">①</span>
+                <span class="dgbname">UNDERSTAND AND PROPOSE</span>
+                <span class="dgbsub">the AI half</span>
+              </div>
+
+              <div class="dgrow">
+                <div class="dgstack">
+                  <div class="dgnode"><span class="dgnum">0</span>Authentication</div>
+                  <div class="dgnode"><span class="dgnum">1</span>Audio Input (ASR)</div>
+                  <div class="dgnode"><span class="dgnum">2</span>Evidence Commit</div>
+                </div>
+                <div class="dgarrow" aria-hidden="true"></div>
+                <div class="dgnode wide">
+                  <div class="dgnt">User Input</div>
+                  <div class="dgns">Voice or typed input<br>English · Chinese · Bahasa</div>
+                </div>
+                <div class="dgarrow" aria-hidden="true"></div>
+                <div class="dgnode agent">
+                  <span class="dgpill">Agent 1</span>
+                  <div class="dgnt"><span class="dgnum">3</span>Guardrails Agent</div>
+                  <div class="dgns">Scam + override screening<br><em>Backed by a deterministic scam table</em></div>
+                </div>
+                <div class="dgarrow" aria-hidden="true"></div>
+                <div class="dgnode agent">
+                  <span class="dgpill">Agent 2</span>
+                  <div class="dgnt"><span class="dgnum">4</span>Intent Classifier</div>
+                  <div class="dgns">Zero-UI multi-intent<br>transaction parsing</div>
+                </div>
+              </div>
+
+              <div class="dgflowbar">
+                <span class="dgok">Valid</span>
+                <span class="dgnote">→ the draft is resolved and checked below</span>
+                <span class="dgno">Invalid</span>
+                <span class="dgnote">→ the turn stops here; nothing downstream is reached</span>
+              </div>
+
+              <div class="dgrow">
+                <div class="dgbox">
+                  <div class="dgboxtag">Action Agents</div>
+                  <div class="dgboxin">
+                    <div class="dgnode agent">
+                      <span class="dgpill">Agent 3</span>
+                      <div class="dgnt"><span class="dgnum">5</span>Payment Agent</div>
+                      <div class="dgns">Extracts payment details</div>
+                    </div>
+                    <div class="dgnode">
+                      <div class="dgnt"><span class="dgnum">6</span>Payees and Account Resolution</div>
+                    </div>
+                    <div class="dgnode">
+                      <div class="dgnt"><span class="dgnum">7</span>Canonical draft and schema gate</div>
+                    </div>
+                    <div class="dgnode agent">
+                      <span class="dgpill">Agent 4</span>
+                      <div class="dgnt"><span class="dgnum">8</span>Validation Agent</div>
+                      <div class="dgns">Checks against original words</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="dgchips">
+                <div class="dgchip"><b>Dynamic Ambiguity Resolution</b> and Semantic Discrepancy Auditing</div>
+                <div class="dgchip"><b>Typed Contracts</b> — structured JSON proposals only:
+                  amount · payee · source · others</div>
+                <div class="dgchip"><b>Shaped for DBS's APIs</b> — the draft carries the fields a bank transfer needs (source, beneficiary, amount, currency, reference)</div>
+                <div class="dgchip"><b>No agent holds a key.</b> Without an approval and a signing
+                  key there is no ledger access.</div>
+              </div>
+            </div>
+
+            <!-- ---------- BAND 2 · the deterministic half ---------- -->
+            <div class="dgband det">
+              <div class="dgbhead">
+                <span class="dgbno">②</span>
+                <span class="dgbname">DECIDE, AUTHORISE AND EXECUTE</span>
+                <span class="dgbsub">the deterministic half</span>
+              </div>
+
+              <div class="dgrow">
+                <div class="dgbox">
+                  <div class="dgboxtag">Banking Policy Check</div>
+                  <div class="dgboxin">
+                    <div class="dgnode"><div class="dgnt"><span class="dgnum">9</span>Policy + scam decision</div></div>
+                    <div class="dgnode"><div class="dgnt"><span class="dgnum">10</span>Risk / value threshold check</div></div>
+                    <div class="dgnode"><div class="dgnt"><span class="dgnum">11</span>Velocity throttling check</div></div>
+                    <div class="dgnode"><div class="dgnt"><span class="dgnum">12</span>Field-by-field confirmation</div></div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="dgrow">
+                <div class="dgnode wide">
+                  <div class="dgnt">TTS Voice Output</div>
+                  <div class="dgns">Cartesia</div>
+                </div>
+                <div class="dgarrow" aria-hidden="true"></div>
+                <div class="dgnode wide">
+                  <div class="dgnt">User Confirmation</div>
+                  <div class="dgns">Human-in-the-loop<br>biometric authorisation</div>
+                </div>
+                <div class="dgarrow" aria-hidden="true"></div>
+                <div class="dgnode">
+                  <div class="dgnt"><span class="dgnum">13</span>Mock Biometrics</div>
+                  <div class="dgns">Simulated adapter</div>
+                </div>
+                <div class="dgarrow" aria-hidden="true"></div>
+                <div class="dgnode key">
+                  <div class="dgnt"><span class="dgnum">14</span>Canonical payload signing</div>
+                  <div class="dgns">The signed artifact</div>
+                </div>
+                <div class="dgarrow" aria-hidden="true"></div>
+                <div class="dgnode key">
+                  <div class="dgnt"><span class="dgnum">15</span>Zero-Trust Gateway</div>
+                  <div class="dgns">Trusts nothing it is told</div>
+                </div>
+                <div class="dgarrow" aria-hidden="true"></div>
+                <div class="dgnode key">
+                  <div class="dgnt"><span class="dgnum">16</span>Payment Complete</div>
+                  <div class="dgns">The only exit</div>
+                </div>
+              </div>
+
+              <div class="dgchips">
+                <div class="dgchip"><b>Zero-Trust API Gateway Policies</b> — the gateway re-derives
+                  the canonical payload and runs 14 checks: the signature, the draft version, a complete
+                  confirmation, the validation result, the risk policy, freeze and cancel status,
+                  nonce reuse and expiry. Only then is the ledger reachable.</div>
+                <div class="dgchip"><b>Behind the gateway is a mock ledger.</b> Stage 15 calls one
+                  function, <span class="mono">Ledger.execute()</span>, which records the payment in
+                  memory. Connecting DBS's payment API means replacing that one call; that
+                  integration is not built in this prototype.</div>
+              </div>
+            </div>
+          </div>
+
+          <h3>Reading this against the control chain</h3>
+          <p class="exsub">The diagram above numbers its boxes 0–16. The sixteen-stage control
+            chain on the main screen is the same walk with the same names, numbered 0–15, and the
+            two agree exactly on <b>0–8</b>. After that:</p>
+          <ul class="exlist">
+            <li><b>Box 8 covers two stages.</b> The diagram draws the Validation Agent and its
+              “checks against original words” as one box; the chain runs the agent (stage 8) and
+              the deterministic comparator (stage 9) separately, because one is a model and one
+              is code.</li>
+            <li><b>The Banking Policy Check is one stage, not four.</b> The dashed block holds
+              boxes 9–12. The chain runs the policy, risk and velocity checks as <b>one</b> stage
+              (index 10) — they read the same resolved draft and share one decision — and runs the
+              field-by-field confirmation as its own stage (index 11).</li>
+            <li><b>So from chain index 11 on, the chain index is the diagram number minus one.</b>
+              Nothing is missing and nothing is duplicated; the two are the same path at two
+              different resolutions. The Execution-path page shows it stage by stage.</li>
+          </ul>
+        </section>
+
+        <!-- PAGE 4 ("What's real") used to sit here as its own tab, with its own top-bar button.
+             Both were removed on request. The live/simulated comparison and the
+             requirements-coverage list are now the closing sections of the "How it works" page
+             below, so the overlay has three pages rather than four. Nothing was deleted except
+             the page wrapper, the tab and the button. -->
+
+        <!-- ---------------- PAGE 2 · how it works ----------------
+             The two-band explanation, laid out the way the presenter's slide lays it out:
+             (1) UNDERSTAND AND PROPOSE, the AI half, five boxes left to right; (2) DECIDE,
+             AUTHORISE AND EXECUTE, the deterministic half, four functional blocks. Then the
+             four bounded agents, then the sixteen-stage control chain - rendered from the SAME
+             `STAGES` array the live chain uses (translations.js), so the explainer can never
+             drift out of step with what is actually on the main screen.
+
+             There are FOUR agents, not five. The Personalization Agent was removed from this
+             page: it is a wording-register service that runs OUTSIDE the control chain - it can
+             choose phrasing, it can never authorise, sign or reach the ledger - so it is not one
+             of the bounded agents the architecture draws. -->
+        <section class="expage" data-page="how" hidden>
+          <h2>One utterance in — one governed, audited DBS payment out</h2>
+          <p class="exlead">AI proposes. Deterministic code decides. You approve. Tencent Cloud
+            carries the voice. <b>No model ever holds a key or touches the ledger.</b></p>
+
+          <div class="twoband">
+            <div class="tb ai">
+              <div class="tbhead"><span class="tbno">①</span>UNDERSTAND AND PROPOSE
+                <span class="tbsub">the AI half</span></div>
+              <div class="tbcards">
+                <div class="tbcard">
+                  <div class="tbt">Auntie speaks</div>
+                  <div class="tbs">English · Mandarin<br>Bahasa Melayu · Singlish</div>
+                </div>
+                <div class="tbcard">
+                  <div class="tbt">Tencent Cloud ASR</div>
+                  <div class="tbs">Speech → text<br>asr.cloud.tencent.com</div>
+                </div>
+                <div class="tbcard">
+                  <div class="tbt">Guardrails</div>
+                  <div class="tbs">Scam + prompt-injection screen, backed by deterministic rules</div>
+                </div>
+                <div class="tbcard">
+                  <div class="tbt">4 bounded agents</div>
+                  <div class="tbs">Guardrails · Intent<br>Payment · Validation</div>
+                </div>
+                <div class="tbcard">
+                  <div class="tbt">Typed contracts</div>
+                  <div class="tbs">JSON proposals only — never an account, never an approval</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="tb det">
+              <div class="tbhead"><span class="tbno">②</span>DECIDE, AUTHORISE AND EXECUTE
+                <span class="tbsub">the deterministic half</span></div>
+              <div class="tbcards four">
+                <div class="tbcard">
+                  <div class="tbt">Check the proposal</div>
+                  <ul class="tbl">
+                    <li>Typed-contract schema</li>
+                    <li>Matches the utterance</li>
+                    <li>Every intent kept</li>
+                    <li>Amount + currency</li>
+                  </ul>
+                </div>
+                <div class="tbcard">
+                  <div class="tbt">Resolve the details</div>
+                  <ul class="tbl">
+                    <li>Verify beneficiary</li>
+                    <li>Verify source account</li>
+                    <li>Retrieve trusted data</li>
+                    <li>Resolve ambiguity</li>
+                  </ul>
+                </div>
+                <div class="tbcard">
+                  <div class="tbt">Apply DBS controls</div>
+                  <ul class="tbl">
+                    <li>Policy + scam decision</li>
+                    <li>Risk / value threshold</li>
+                    <li>Velocity throttling</li>
+                    <li>Field-by-field confirm</li>
+                  </ul>
+                </div>
+                <div class="tbcard">
+                  <div class="tbt">Authorise + execute</div>
+                  <ul class="tbl">
+                    <li>Lock the reviewed draft</li>
+                    <li>Mock FaceID, then signing</li>
+                    <li>Zero-trust gateway</li>
+                    <li>Mock ledger records</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+
+            <div class="tb foot">
+              <span class="tbfk">PAYMENT</span>
+              <span class="tbfv">behind the gateway</span>
+              <span class="tbfpill">Mock ledger (this demo)</span>
+              <span class="tbfpill">DBS payment API (integration target, not built)</span>
+            </div>
+          </div>
+
+          <h3>The four bounded agents</h3>
+          <p class="exsub">Each agent gets exactly one decision, a typed output, and no authority.
+            None of them holds a signing key, a gateway credential or ledger access.</p>
+          <div class="exagents" id="exAgentList"></div>
+
+          <h3>Why “bounded” is the load-bearing word</h3>
+          <ul class="exlist">
+            <li><b>A model's output is data, never an instruction.</b> Every agent returns JSON
+              that is parsed against a strict schema. Anything out of shape is rejected and the
+              turn falls back — it cannot be reinterpreted as a command.</li>
+            <li><b>Independence is structural, not promised.</b> The Validation Agent (stage 8)
+              never sees the other agents' reasoning. It reads the immutable evidence and the
+              canonical draft, and returns MATCH or MISMATCH. The stage after it is code, not a
+              model: the comparator re-derives the comparison independently.</li>
+            <li><b>Failure degrades, it does not open.</b> If an agent times out, its
+              deterministic mock answers instead. The turn gets slower and plainer, never looser.</li>
+            <li><b>The dangerous half is not reachable by language.</b> No prompt, in any
+              language, can produce a signature, an authorisation or a ledger write, because
+              those live in code the model cannot call.</li>
+          </ul>
+
+          <h3>The sixteen-stage control chain, in order</h3>
+          <p class="exsub">Stages 3, 4, 5 and 8 are the only four that call a model. Everything
+            else is code, and the four model stages are boxed in on both sides by code. The two
+            bands are the two halves of the argument: the AI half may propose, the deterministic
+            half decides.</p>
+          <div class="exctl" id="exCtlList"></div>
+
+          <!-- ---- Closing sections, moved here from the old "What's real" page ----------------
+               Same markup, same classes, same #reqs id - only the page wrapper changed. The
+               two-column shape is kept because the two columns ARE the argument, and #reqs stays
+               in the DOM so its live row-lighting still works (ui.js looks it up by id). -->
           <h2>What is simulated — and what is real</h2>
           <p class="exlead">Two things in this build are mocks, and both are named on the screen.
             Everything either side of them is the live system.</p>
@@ -369,21 +728,25 @@
               <ul>
                 <li><b>Speech recognition.</b> Tencent Cloud ASR. Audio goes up, text comes back,
                   in English, Mandarin and Bahasa Melayu.</li>
-                <li><b>Speech synthesis.</b> Cartesia Sonic, with three real voices — English,
-                  Mandarin and Malay. The top bar shows which engine is speaking, and says so if
-                  it ever has to fall back.</li>
-                <li><b>The five agents.</b> Real model calls over HTTPS, each with a typed JSON
-                  schema, a retry budget and a hard deadline. If the model is unreachable the
-                  agent degrades to its deterministic mock and the panel says so — it never
+                <li><b>Speech synthesis.</b> Cartesia Sonic by default, with English, Mandarin and
+                  Malay voices; TRTC Mode switches to Tencent Cloud TTS. The top bar shows which
+                  engine is speaking, and says so if it ever has to fall back.</li>
+                <li><b>The four agents.</b> Real model calls over HTTPS when a model key is
+                  configured, each with a typed JSON schema, a retry budget and a hard deadline.
+                  Without a key, or if the model is unreachable, each agent runs its deterministic
+                  mock instead, and its card says <span class="mono">engine: mock</span>. It never
                   silently pretends.</li>
                 <li><b>The sixteen-stage control chain.</b> Plain deterministic code. No model
                   can call into it, skip a stage, or reorder one.</li>
                 <li><b>The audit ledger.</b> Append-only and hash-chained: every event carries
                   the hash of the event before it, so editing history breaks the chain visibly.</li>
-                <li><b>The payload signature.</b> A real signature over the canonical draft,
-                  re-verified at the gateway before anything is allowed to execute.</li>
-                <li><b>Guardrail screening.</b> Amount, velocity, payee, scam-language and
-                  audio-risk rules all run as code, not as a model's opinion.</li>
+                <li><b>The payload signature.</b> An HMAC-SHA256 signature over the canonical
+                  payload, re-verified at the gateway before anything is allowed to execute. The
+                  key is a server-held demo key, not a bank HSM.</li>
+                <li><b>Guardrail screening.</b> The Guardrails Agent's verdict is backed by code:
+                  a scam-typology table (government impersonation, romance, tech support,
+                  secrecy and more), amount, velocity and payee rules. Code can make the verdict
+                  stricter, never looser.</li>
               </ul>
             </div>
 
@@ -394,7 +757,8 @@
                   returns the same verdict shape the real one would, and it is the only thing in
                   the system that can authorise a payment.</li>
                 <li><b>The payment itself.</b> A restricted mock capability writes to a synthetic
-                  ledger. No money moves, no real account is touched, no gateway is contacted.</li>
+                  ledger. No money moves, no real account is touched, no bank system is
+                  contacted.</li>
                 <li><b>The customer.</b> “Mei Ling” and “DBS Savings ending 1234” are synthetic
                   fixtures — not real customer data.</li>
                 <li><b>Payees and balances.</b> Fixtures, resolved through the same code path a
@@ -402,7 +766,7 @@
                   bypassed.</li>
               </ul>
               <p class="exnote">Why the boundary sits exactly there: the biometric sensor and the
-                payment rail are the two places a prototype cannot legally or practically reach.
+                payment ledger are the two places a prototype cannot legally or practically reach.
                 Everything either side of that line is the real thing.</p>
             </div>
           </div>
@@ -414,90 +778,186 @@
           <div class="reqs" id="reqs"></div>
         </section>
 
-        <!-- ---------------- PAGE 2 · the agents and the controls ---------------- -->
-        <section class="expage" data-page="agents" hidden>
-          <h2>Five bounded agents, sixteen deterministic controls</h2>
-          <p class="exlead">The whole architecture is one sentence: <b>a model may propose, only
-            deterministic code may decide.</b></p>
+        <!-- ---------------- PAGE 3 · the execution path ----------------
+             The stage-by-stage walk from a spoken sentence to a signed payment, in the layout the
+             presenter's slide uses: a propose row, then the deterministic stages, then the one
+             exit. The right-hand column is the integration boundary - what the DBS Fund Transfer
+             API expects, and what on Tencent Cloud is genuinely live rather than modelled.
 
-          <h3>The five bounded agents</h3>
-          <p class="exsub">Each agent gets exactly one decision, a typed output, and no authority.
-            None of them holds a signing key, a gateway credential or ledger access.</p>
-          <div class="exagents" id="exAgentList"></div>
+             This page used to END with the A-H failure-branch rail. That section was removed on
+             request, so the page now finishes at the outcome. See the note at the foot of the
+             section for what that costs: those buttons were the only `.sbtn` elements in the
+             DOM, so the 22 scripted branches no longer have an in-UI trigger. -->
+        <section class="expage" data-page="path" hidden>
+          <h2>The execution path — voice to a signed DBS payment</h2>
+          <!-- The numbering on this page is the CONTROL CHAIN's (00-15), the same one the chain on
+               the main screen highlights and the same one the reference card on the right lists.
+               It is deliberately NOT the slide's numbering: the slide's own reference table and
+               its own stage rows disagree with each other by one (its table runs 1-16, its rows
+               label the signed artifact "stage 13" where the table puts it at 14), so quoting the
+               slide here would put two different numbers on one screen. The chain's numbering is
+               the only one that is also what the live event stream emits. -->
+          <p class="exlead">Every stage from 09 onwards is deterministic code — and only stage 15
+            can move money.</p>
+          <p class="exsub">The signed artifact is produced at stage 13. The gateway at stage 14
+            re-derives it and trusts nothing it is told. The mock ledger at stage 15 is the only place a
+            payment is recorded.</p>
 
-          <h3>Why “bounded” is the load-bearing word</h3>
-          <ul class="exlist">
-            <li><b>A model's output is data, never an instruction.</b> Every agent returns JSON
-              that is parsed against a strict schema. Anything out of shape is rejected and the
-              turn falls back — it cannot be reinterpreted as a command.</li>
-            <li><b>Independence is structural, not promised.</b> The Independent Validation Agent
-              (stage 8) never sees the other agents' reasoning. It reads the immutable evidence
-              and the canonical draft, and returns MATCH or MISMATCH.</li>
-            <li><b>Failure degrades, it does not open.</b> If an agent times out, its
-              deterministic mock answers instead. The turn gets slower and plainer, never looser.</li>
-            <li><b>The dangerous half is not reachable by language.</b> No prompt, in any
-              language, can produce a signature, an authorisation or a ledger write, because
-              those live in code the model cannot call.</li>
-          </ul>
+          <div class="pwrap">
+            <div class="pcol">
 
-          <h3>The sixteen deterministic controls, in order</h3>
-          <p class="exsub">Stages 3, 4, 5 and 8 are the only four that call a model. Everything
-            else is code, and the four model stages are boxed in on both sides by code.</p>
-          <div class="exctl" id="exCtlList"></div>
-        </section>
+              <div class="prow propose">
+                <div class="prlab">PROPOSE <span>voice in, typed contracts out</span></div>
+                <div class="prflow">
+                  <span class="prnode">Voice</span>
+                  <span class="prar" aria-hidden="true">→</span>
+                  <span class="prnode">Tencent ASR</span>
+                  <span class="prar" aria-hidden="true">→</span>
+                  <span class="prnode">Orchestrator</span>
+                  <span class="prar" aria-hidden="true">→</span>
+                  <span class="prnode hot">4 agents</span>
+                  <span class="prar" aria-hidden="true">→</span>
+                  <span class="prnode">Typed contracts</span>
+                  <span class="prtag">may propose · never an approval</span>
+                </div>
+              </div>
 
-        <!-- ---------------- PAGE 3 · failure branches (backup) ---------------- -->
-        <section class="expage" data-page="branches" hidden>
-          <h2>Failure branches A–H</h2>
-          <p class="exlead">The golden path is what the demo runs by default. These are the
-            branches the control chain is built to survive — run any of them to show the system
-            refusing, escalating or freezing instead of paying.</p>
-          <p class="exsub">Every branch below runs against the real control chain and the real
-            guardrails. Nothing here is staged: the outcome is whatever the deterministic half
-            decides.</p>
+              <div class="prow det">
+                <div class="prlab">STAGES 9–12 <span>deterministic</span></div>
+                <div class="prflow">
+                  <span class="prnode">Resolve · validate · risk · confirm · biometric</span>
+                  <span class="prtag">no model decides these stages</span>
+                </div>
+              </div>
 
-          <div class="rail" id="rail">
-            <div class="grp HAPPY"><span class="glab">HAPPY</span>
-              <button class="sbtn" data-s="HAPPY">HAPPY · Golden path</button>
+              <div class="prow sig">
+                <div class="prlab">STAGE 13 <span>the signed artifact</span></div>
+                <div class="prflow">
+                  <span class="prnode mono">canonical_payload() + sign_payload()</span>
+                  <span class="prtag">the signed artifact</span>
+                </div>
+                <div class="prsub">One canonical serialisation of the reviewed draft, then signed
+                  with HMAC-SHA256 using a server-held demo key (a bank would use an HSM). Everything downstream verifies against this, and nothing
+                  downstream is allowed to trust a claim about it.</div>
+              </div>
+
+              <div class="prow gate">
+                <div class="prlab">STAGE 14 <span>zero-trust gateway</span></div>
+                <div class="prflow">
+                  <span class="prnode mono">gateway_verify() — 14 checks, trusts nothing it is told</span>
+                  <span class="prtag">no agent may reach this</span>
+                </div>
+                <div class="prsub">Re-derives the canonical payload and independently checks the
+                  signature, the draft version, a complete confirmation, the validation result,
+                  the risk policy, freeze and cancel status, nonce reuse and expiry.
+                  A mismatch stops the payment here, after signing and before the ledger.</div>
+              </div>
+
+              <div class="prow rail">
+                <div class="prlab">STAGE 15 <span>restricted mock payment capability</span></div>
+                <div class="prflow">
+                  <span class="prnode mono">Ledger.execute()</span>
+                  <span class="prtag">this demo</span>
+                </div>
+                <div class="prflow">
+                  <span class="prnode mono">DBS Fund Transfer API</span>
+                  <span class="prtag">integration target, not built</span>
+                </div>
+              </div>
+
+              <div class="prow out">
+                <div class="prlab">OUTCOME <span>after the ledger returns</span></div>
+                <div class="prflow">
+                  <span class="prnode mono">LEDGER_RECORDED / LEDGER_NOT_INVOKED / SCHEDULE_HELD</span>
+                </div>
+                <div class="prsub">Every outcome carries the ledger's transaction reference plus a
+                  hash-chained, append-only audit record — the audit record is the only version of
+                  events that counts.</div>
+              </div>
+
+              <div class="pnote">
+                <b>TODAY vs THE INTEGRATION.</b> Stage 15 makes one call, <span class="mono">Ledger.execute()</span>,
+                which records the payment in a simulated in-memory ledger: no money moves, no real
+                account is touched, and the demo says so on screen. Connecting DBS means replacing
+                that one call with a DBS API client. It sits behind the same gateway, so
+                <b>nothing else in the control chain has to change</b>. That integration is not
+                built in this prototype.
+              </div>
             </div>
-            <div class="grp A"><span class="glab">A</span>
-              <button class="sbtn" data-s="A1">A1 Another person uses device</button>
-              <button class="sbtn" data-s="A2">A2 Synthetic / replayed voice</button>
-              <button class="sbtn" data-s="A3">A3 Old spoken "yes" replayed</button>
-            </div>
-            <div class="grp B"><span class="glab">B</span>
-              <button class="sbtn" data-s="B1">B1 Amount materially ambiguous</button>
-              <button class="sbtn" data-s="B2">B2 Duplicate saved payee</button>
-              <button class="sbtn" data-s="B3">B3 Draft mismatch → freeze</button>
-            </div>
-            <div class="grp C"><span class="glab">C</span>
-              <button class="sbtn" data-s="C1">C1 Direct confirmation bypass</button>
-              <button class="sbtn" data-s="C2">C2 Poisoned payee metadata</button>
-              <button class="sbtn" data-s="C3">C3 False internal state</button>
-              <button class="sbtn" data-s="C4">C4 System-message injection</button>
-            </div>
-            <div class="grp D"><span class="glab">D</span>
-              <button class="sbtn" data-s="D1">D1 Safe-account scam</button>
-              <button class="sbtn" data-s="D2">D2 Coached to remove limits</button>
-              <button class="sbtn" data-s="D3">D3 Family-emergency scam</button>
-            </div>
-            <div class="grp E"><span class="glab">E</span>
-              <button class="sbtn" data-s="E1">E1 Field-by-field review</button>
-              <button class="sbtn" data-s="E2">E2 You correct the amount</button>
-              <button class="sbtn" data-s="E3">E3 Language mismatch</button>
-            </div>
-            <div class="grp F"><span class="glab">F</span>
-              <button class="sbtn" data-s="F1">F1 Forged approval claim</button>
-              <button class="sbtn" data-s="F2">F2 Payload changed after signing</button>
-              <button class="sbtn" data-s="F3">F3 Expired / replayed / duplicate</button>
-            </div>
-            <div class="grp G"><span class="glab">G</span>
-              <button class="sbtn" data-s="G1">G1 Multiple / out-of-shape request</button>
-            </div>
-            <div class="grp H"><span class="glab">H</span>
-              <button class="sbtn" data-s="H1">H1 Insufficient funds</button>
+
+            <div class="pside">
+              <!-- The DBS card is the INTEGRATION TARGET, taken from DBS's published Fund Transfer API
+                   documentation. This build does not call it: stage 15 is Ledger.execute(). It is
+                   worded as what the integration would send, never as something the app does.
+                   The Tencent card describes only what this build actually uses. The gateway
+                   function name and its check count are asserted against controls.py in
+                   shell.test.js section 9f. -->
+              <div class="pcard">
+                <div class="pch">DBS Fund Transfer API — the integration target</div>
+                <dl class="pdl">
+                  <dt>Status</dt><dd><b>Not built.</b> From DBS's published API documentation;
+                    this build records payments in the mock ledger and does not call DBS</dd>
+                  <dt>Base</dt><dd><span class="mono">https://www.dbs.com/sandbox/api/sg/v1</span></dd>
+                  <dt>Auth</dt><dd>a pre-issued token carried in the header set — <span
+                    class="mono">clientId</span>, <span class="mono">accessToken</span>,
+                    <span class="mono">uuid</span>, <span class="mono">accept-version</span></dd>
+                  <dt>Version</dt><dd><span class="mono">accept-version: 1.0</span>, to be pinned.
+                    Unset means "latest", which would change behaviour the day DBS publishes a
+                    new version</dd>
+                  <dt>Own accounts</dt><dd>POST /transfers/toOwnAccounts · wrapper
+                    <span class="mono">fundTransferDetl</span> — <span class="mono">transferType</span>
+                    does not exist on this operation</dd>
+                  <dt>Saved payee</dt><dd>POST /transfers/creditPayeeAccount · wrapper
+                    <span class="mono">fundTransferPayee</span> — carries
+                    <span class="mono">transferType</span>, plus
+                    <span class="mono">purpose</span> when the destination is another bank</dd>
+                  <dt>Amount</dt><dd>a two-decimal <b>string</b> in every published sample</dd>
+                  <dt>Reference</dt><dd>DBS takes no idempotency key, so the integration would
+                    derive a stable reference from the draft and the gateway's idempotency key,
+                    so that a retry cannot become a second payment</dd>
+                  <dt>Response</dt><dd>201 <span class="mono">{referenceId, status: ACCEPTED}</span>;
+                    errors arrive as an array of <span class="mono">{code, message, moreInfo}</span></dd>
+                  <dt>Separate product</dt><dd>bills and card payments are the Bill Payments API
+                    (<span class="mono">/billPayments</span>) — a different DBS product, not a
+                    parameter on this one</dd>
+                </dl>
+              </div>
+
+              <div class="pcard">
+                <div class="pch">Tencent Cloud — what is genuinely live</div>
+                <dl class="pdl">
+                  <dt>Lighthouse</dt><dd>ap-singapore — hosts the page, the backend and the audit
+                    DB</dd>
+                  <dt>ASR</dt><dd>asr.cloud.tencent.com · signed WebSocket · <b>two</b> engines,
+                    because no single one covers English + Chinese + Malay:
+                    <span class="mono">16k_zh_en</span> (zh + en) and
+                    <span class="mono">16k_multi_lang</span> (en + ms). Auto resolves to
+                    <span class="mono">16k_zh_en</span>, deliberately</dd>
+                  <dt>TTS</dt><dd>Cartesia Sonic by default (the only engine with a Malay voice).
+                    TRTC Mode switches to Tencent Cloud TTS: TextToVoice, or TRTC
+                    TextToSpeechSSE streaming when it is configured</dd>
+                  <dt>Model</dt><dd>served from Tencent Cloud MaaS
+                    (tokenhub-intl.tencentcloudmaas.com); /health reports which model is active,
+                    rather than the page naming one that may have changed</dd>
+                </dl>
+              </div>
+
+              <div class="pcard">
+                <div class="pch">The 16-stage chain — reference</div>
+                <div class="preftable" id="exRefList"></div>
+              </div>
             </div>
           </div>
+
+          <!-- The A-H failure-branch rail used to sit here. It was removed on request: the
+               Execution-path page now ends at the outcome.
+
+               CONSEQUENCE, deliberately accepted: these 22 buttons were the ONLY elements in
+               the DOM carrying `.sbtn`, and scenarios.js binds every scripted scenario with
+               `document.querySelectorAll('.sbtn')`. With the rail gone there is no in-UI
+               trigger for the 22 rehearsal branches - the app runs through the live /turn flow
+               only. The 19 SC.* definitions, runScenario(), the backend's 100-scenario suite and
+               the `data-s` ids are all still present and tested; only the buttons are gone. -->
         </section>
 
       </div>
@@ -509,14 +969,14 @@
      cached copies of these files, so a fix that IS in the file never reaches the screen - a
      Bahasa "working on it" card kept coming up in English long after the code was corrected.
      Bump the stamp whenever one of these files changes. -->
-<script src="translations.js?v=20261008c"></script>
-<script src="icons.js?v=20261007b"></script>
-<script src="ui.js?v=20261008g"></script>
-<script src="personalization.js?v=20261007b"></script>
-<script src="scenarios.js?v=20261008g"></script>
-<script src="stt.js?v=20261007b"></script>
-<script src="live.js?v=20261008g"></script>
-<script src="tts.js?v=20261008b"></script>
-<script src="shell.js?v=20261008g"></script>
+<script src="translations.js?v=20261011m"></script>
+<script src="icons.js?v=20261011m"></script>
+<script src="ui.js?v=20261011m"></script>
+<script src="personalization.js?v=20261011m"></script>
+<script src="scenarios.js?v=20261011m"></script>
+<script src="stt.js?v=20261011m"></script>
+<script src="live.js?v=20261011m"></script>
+<script src="tts.js?v=20261011m"></script>
+<script src="shell.js?v=20261011m"></script>
 </body>
 </html>

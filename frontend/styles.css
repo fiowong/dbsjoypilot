@@ -149,11 +149,14 @@ button{font-family:inherit}
 #studio.appmode .stage{justify-content:center}
 /* Joy herself. Hidden on the chat screen (see #studio.appmode below) because that is where the
    inspector needs the width and the phone needs the height.
+   SIZE: the owner asked for 1.5x on 9 Oct, so every number in this rule is 1.5x what it was
+   (52%/360px -> 78%/540px, and 32vw/250px -> 48vw/375px at the breakpoint). If you change one,
+   change all four or the two breakpoints drift apart.
    `max-height` is a belt-and-braces cap, not a duplicate of the height: if the hero pair's height
    ever resolves to `auto`, the percentage inside `min()` becomes invalid and `height` falls back
    to the image's own 720px intrinsic size. The cap stops that from silently making Joy taller
    than the phone she is standing next to. */
-.joymascot{display:none;flex-shrink:0;height:min(52%,360px);max-height:360px;width:auto;
+.joymascot{display:none;flex-shrink:0;height:min(78%,540px);max-height:540px;width:auto;
   filter:drop-shadow(0 18px 30px rgba(0,0,0,.55))}
 .joymascot img{display:block;height:100%;width:auto;object-fit:contain}
 #studio.appmode .joymascot{display:block}
@@ -258,8 +261,23 @@ button{font-family:inherit}
   flex:1;min-height:0;position:relative;background:#000;color:#fff;
   padding:calc(var(--statusbar-h) + 14px) 22px 24px;overflow-y:auto;
 }
-.lgform-head{padding:8px 0 22px;display:flex;align-items:flex-start}
+.lgform-head{padding:8px 0 22px;display:flex;align-items:center;gap:12px}
 .lgform-head .dbslogo{height:28px}
+
+/* The DEMO tag exists to break the "is this a real bank page?" question at a glance.
+   It sits directly beside the logo on purpose: the logo is the thing that makes the page
+   look official, so the counter-label has to be attached to it, not buried in a footer.
+   This is the same reason the credential form was deleted rather than restyled -- a
+   classifier (and a person) decides in the first second. */
+.lgdemotag{
+  font-size:10px;font-weight:800;letter-spacing:.14em;
+  color:#ffb4b4;border:1px solid #6d2020;background:#2a0d0d;
+  padding:3px 8px;border-radius:5px;line-height:1;
+}
+.lgdemo{margin-bottom:22px}
+.lgdtitle{font-size:17px;font-weight:650;color:#fff;line-height:1.3;margin-bottom:9px}
+.lgdsub{font-size:12.5px;color:#9a9aa6;line-height:1.62}
+.lgdsub b{color:#cfcfd8}
 
 .lgf{display:block;margin-bottom:10px;position:relative}
 /* The wrapper exists so the trailing validity tick can anchor to the input box itself
@@ -334,6 +352,13 @@ button{font-family:inherit}
   padding:calc(var(--statusbar-h) + 6px) 16px 12px;flex-shrink:0;
 }
 .appbar-t{color:#fff;font-size:12.5px;font-weight:700;letter-spacing:.2px}
+/* Sits against the DBS wordmark on every in-phone screen. Small, but it is never scrolled
+   away and it is never absent -- which is the point. */
+.appdemo{
+  font-size:9px;font-weight:800;letter-spacing:.12em;line-height:1;
+  color:#ffb4b4;border:1px solid #6d2020;background:#2a0d0d;
+  padding:2px 6px;border-radius:4px;
+}
 .appbar-x{
   margin-left:auto;display:flex;align-items:center;gap:5px;
   background:transparent;border:1px solid #3A3A42;color:#D6D6DE;
@@ -993,22 +1018,44 @@ button{font-family:inherit}
 /* ==========================================================================
    top chrome
    ========================================================================== */
+/* THE TOP BAR IS A HEIGHT BUDGET, NOT DECORATION.
+   The stage below it is `flex:1 1 auto`, and the phone inside the stage is `height:100%`. So
+   every pixel the top bar gains is a pixel the phone LOSES -- the two are directly traded.
+   `.top` is `flex-wrap:wrap`, so the bar has two possible heights: one row, or two. Adding the
+   Home button on 9 Oct pushed logo(327) + gap + badges(1144) to 1485px against a 1460px
+   container, and the bar silently flipped from one row to two: 74px -> 113px, which shrank the
+   phone from 870px to 831px. Nothing looked broken; the phone was just quietly smaller.
+   The fix is to buy the width back from spacing rather than from any label, so the bar fits on
+   one row again with margin to spare (10px at 1460px, measured 9 Oct). If you add another
+   control here, re-measure .top: if it is ~107px tall you have wrapped again.
+   MEASURED BUDGET (1600x1000, `.wrap` capped at 1460): logo 325 + gap 9 + badges 1116 = 1450.
+   That 10px is all the headroom there is -- one more control WILL wrap it, and wrapping costs
+   the phone 34px. Below 1500px the compaction rule further down this file buys the room back. */
 .top{
-  display:flex;align-items:center;gap:14px;flex-wrap:wrap;flex:0 0 auto;
+  display:flex;align-items:center;gap:9px;flex-wrap:wrap;flex:0 0 auto;
   padding:clamp(10px,2vw,16px) 0;
   position:sticky;top:0;z-index:20;
   background:linear-gradient(var(--studio) 78%, rgba(15,15,17,0));
   margin-bottom:clamp(8px,1.5vw,12px);
 }
-.logo{display:flex;align-items:center;gap:13px;min-width:0}
+.logo{display:flex;align-items:center;gap:11px;min-width:0}
 .logo .dbslogo{height:30px}
 .logo h1{font-size:clamp(18px,2.4vw,22px);font-weight:800;color:#fff;letter-spacing:-.3px;white-space:nowrap}
 .logo .tag{font-size:11.5px;color:#B9B9C4;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.badges{display:flex;gap:7px;flex-wrap:wrap;margin-left:auto;align-items:center}
-.bdg{font-size:10.5px;font-weight:700;letter-spacing:.4px;padding:5px 10px;border-radius:999px;
+.badges{display:flex;gap:5px;flex-wrap:wrap;margin-left:auto;align-items:center}
+.bdg{font-size:10.5px;font-weight:700;letter-spacing:.4px;padding:5px 8px;border-radius:999px;
   background:var(--studio2);border:1px solid var(--studio-line);color:#C9C9D4;white-space:nowrap}
 .bdg.mock{background:#3A2A12;border-color:#6B4A1C;color:#FFCF87}
 .bdg.live{background:#12301F;border-color:#1F5C3A;color:#7FE0A8}
+/* The four top-bar buttons, each named for the page it opens, so the colour is a wayfinding cue
+   and not a status light. They are deliberately four DISTINCT hues rather than two, because two
+   hues is what made the old chips read as "warning" and "good news" - a judgement about the demo
+   rather than a signpost to its contents. The hues follow the DBS palette: brand red for the
+   headline architecture, a cool blue for the explanation, a teal-green for the execution path,
+   and the existing amber for the honesty page, where amber still means "this part is simulated". */
+.bdg.arch{background:#3A1418;border-color:#7A2228;color:#FF9AA0}
+.bdg.how{background:#14202E;border-color:#24405C;color:#8FC4F0}
+.bdg.path{background:#122A28;border-color:#1E5A52;color:#7FE0CE}
 /* The two status chips are <button>s now, because each one opens the page that backs up its
    claim. `.bdg` already restates background, border, padding, size and weight, so the button
    reset only needs the cursor, the hover and a visible focus ring - a chip that looks inert but
@@ -1043,9 +1090,25 @@ button{font-family:inherit}
 .vengine.warn .k{color:#F0B429}
 
 /* small ghost buttons in the top bar */
-.ghostbtn{font-size:10.5px;font-weight:700;letter-spacing:.4px;padding:5px 10px;border-radius:999px;
+.ghostbtn{font-size:10.5px;font-weight:700;letter-spacing:.4px;padding:5px 8px;border-radius:999px;
   background:transparent;border:1px dashed var(--studio-line);color:#8B8B98;cursor:pointer;white-space:nowrap;transition:.14s}
 .ghostbtn:hover{border-color:var(--brand);color:#fff;border-style:solid}
+
+/* NARROW-LAPTOP COMPACTION -- the same height budget as the comment above `.top`, spent
+   differently. `.wrap` is capped at 1460px, so the bar's budget stops growing at ~1512px
+   viewport; at 1440 (a very common laptop width) the bar was 66px short and wrapped, costing
+   the phone 34px of height. This tightens the TYPE SCALE ONLY -- no label is shortened, no
+   control is hidden, no colour changes -- which recovers ~75px and keeps one row at 1440.
+   Below ~1366px the bar still wraps; that is pre-existing and acceptable, because at that
+   point there genuinely is not room for seven controls beside a 325px logo. Verified with
+   /tmp/aj-topbar-sweep.cjs, which hides #homeBtn and re-measures: at 1366 the bar is two rows
+   with Home AND without it, so Home is not the cause there. The rule moves the single-row
+   floor from >=1512px down to >=1440px, which is the width that actually matters. */
+@media (max-width:1500px){
+  .bdg{font-size:10px;letter-spacing:.2px;padding:5px 7px}
+  .techtoggle{font-size:10px}
+  .ghostbtn{font-size:10px}
+}
 
 /* personalisation status/settings button */
 .personalize-btn{font-size:10.5px;font-weight:700;letter-spacing:.4px;padding:5px 10px;border-radius:999px;
@@ -1264,8 +1327,20 @@ body.tech-hidden .ins{display:none}
 .exagent dd{margin:0;color:#B9B9C4;min-width:0}
 .exagent dd.never{color:#FF9B9B}
 
-/* the sixteen controls, numbered to match the chain on the main screen */
-.exctl{display:grid;grid-template-columns:1fr 1fr;gap:4px 14px}
+/* the sixteen controls, numbered to match the chain on the main screen, grouped into the two
+   bands the architecture diagram draws. The band is the argument, so the grouping is real layout
+   and not decoration: everything in the first band may propose, nothing in it can authorise. */
+.exctl{display:flex;flex-direction:column;gap:16px}
+.exband{display:grid;grid-template-columns:1fr 1fr;gap:4px 14px}
+.exbandh{grid-column:1/-1;display:flex;align-items:center;gap:8px;font-size:10.5px;font-weight:800;
+  letter-spacing:.9px;color:#B9B9C4;padding-bottom:5px;border-bottom:1px solid var(--studio-line)}
+.exbandh .exbandno{font-size:13px;line-height:1}
+.exbandh .exbandsub{margin-left:auto;font-size:10px;font-weight:700;letter-spacing:.3px;color:#7A7A88;
+  text-transform:none}
+.exband.ai .exbandh{border-bottom-color:#24405C}
+.exband.ai .exbandh .exbandno{color:#8FC4F0}
+.exband.det .exbandh{border-bottom-color:#4A1E22}
+.exband.det .exbandh .exbandno{color:var(--brand)}
 .exct{display:flex;gap:9px;align-items:flex-start;padding:5px 8px;border-radius:8px;background:#17171B}
 .exct.llm{background:#241618;border:1px solid #6B2226}
 .exct .exctn{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:10.5px;font-weight:800;
@@ -1276,10 +1351,171 @@ body.tech-hidden .ins{display:none}
 .exct.llm .exctt{color:#fff;font-weight:700}
 .exct .excty{font-size:10px;color:#8A8A98;line-height:1.35}
 
-/* the failure-branch rail inside the overlay. The buttons are the same `.sbtn` elements the main
-   screen used to carry; only the container changes, so the page-level margins go. */
+/* The failure-branch rail used to live here. It was removed from the overlay on request, so
+   NOTHING in the DOM carries `.rail` or `.sbtn` any more and the two rules below (this one and
+   the `.sbtn` block above) are currently unused. They are kept, not deleted, because the
+   scenario machinery behind them - scenarios.js, the 19 SC.* definitions, the `data-s` ids - is
+   all still present and tested; re-enabling the rail should be a markup change, not a restyle.
+   shell.test.js asserts `.sbtn` count === 0, so re-adding it is a deliberate act. */
 .explain .rail{background:#17171B;border:1px dashed var(--studio-line);border-radius:14px;
   padding:14px 16px;margin:0}
+
+/* ==========================================================================
+   PAGE 1 · THE ARCHITECTURE DIAGRAM
+   Drawn in HTML and CSS rather than shipped as an image: it stays sharp at any zoom, it
+   follows the DBS palette, and it lives in the same file as everything else. Two bands,
+   exactly as the presenter's diagram has them, and the band accent is the whole point -
+   blue for the half that may only propose, brand red for the half that decides.
+   ========================================================================== */
+.dgm{display:flex;flex-direction:column;gap:18px;margin-top:16px}
+.dgband{border:1px solid #33333C;border-left:3px solid #33333C;border-radius:14px;
+  background:#15151A;padding:14px 16px}
+.dgband.ai{border-left-color:#24405C}
+.dgband.det{border-left-color:var(--brand)}
+.dgbhead{display:flex;align-items:center;gap:9px;margin-bottom:13px;flex-wrap:wrap}
+.dgbno{font-size:15px;line-height:1}
+.dgband.ai .dgbno{color:#8FC4F0}
+.dgband.det .dgbno{color:var(--brand)}
+.dgbname{font-size:12.5px;font-weight:800;letter-spacing:1px;color:#fff}
+.dgbsub{font-size:10.5px;font-weight:700;color:#7A7A88}
+.dgrow{display:flex;align-items:stretch;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+.dgrow:last-child{margin-bottom:0}
+.dgstack{display:flex;flex-direction:column;gap:6px;justify-content:center}
+.dgnode{background:#1E1E24;border:1px solid #33333C;border-radius:9px;padding:7px 10px;
+  font-size:11.5px;line-height:1.35;color:#C9C9D4;min-width:0;display:flex;flex-direction:column;
+  justify-content:center;gap:2px}
+.dgnode.wide{min-width:132px}
+.dgnode.agent{background:#241618;border-color:#6B2226}
+.dgnode.key{background:#2A1518;border-color:var(--brand)}
+.dgnode .dgnt{font-weight:700;color:#fff;font-size:11.5px}
+.dgnode .dgns{font-size:10px;color:#8A8A98;line-height:1.4}
+.dgnode .dgns em{font-style:normal;color:#8FC4F0}
+.dgnum{display:inline-block;min-width:15px;margin-right:5px;
+  font-family:ui-monospace,Menlo,Consolas,monospace;font-size:9.5px;font-weight:800;color:#8A8A98}
+.dgnode.agent .dgnum{color:var(--brand)}
+.dgnode.key .dgnum{color:#FF9AA0}
+.dgpill{display:inline-block;align-self:flex-start;font-size:9px;font-weight:800;letter-spacing:.5px;
+  padding:2px 6px;border-radius:5px;background:#3A1418;color:#FF9AA0;border:1px solid #7A2228;
+  margin-bottom:3px;text-transform:uppercase}
+.dgarrow{align-self:center;color:#57575F;font-size:13px;flex-shrink:0}
+.dgarrow::before{content:'\2192'}
+/* The dashed group box carries its label on the border, so it needs a little headroom above or
+   the label collides with whatever sits on the previous line. */
+.dgbox{flex:1 1 100%;border:1px dashed #3C3C46;border-radius:12px;padding:11px 12px;
+  position:relative;margin-top:8px}
+.dgboxtag{position:absolute;top:-8px;left:12px;font-size:9.5px;font-weight:800;letter-spacing:.6px;
+  color:#B9B9C4;background:#15151A;padding:0 6px;text-transform:uppercase}
+.dgboxin{display:flex;gap:6px;flex-wrap:wrap}
+.dgboxin .dgnode{flex:1 1 150px}
+.dgflowbar{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin:0 0 10px;
+  font-size:10.5px;color:#8A8A98}
+.dgok{font-weight:800;color:#7FE0A8}
+.dgno{font-weight:800;color:#FF9AA0}
+.dgnote{color:#8A8A98}
+.dgchips{display:flex;gap:8px;flex-wrap:wrap;margin-top:11px;padding-top:11px;
+  border-top:1px solid #2A2A32}
+.dgchip{font-size:10.5px;line-height:1.45;color:#8A8A98;background:#1A1A20;border:1px solid #2E2E36;
+  border-radius:8px;padding:6px 9px;flex:1 1 210px}
+.dgchip b{color:#C9C9D4}
+
+@media(max-width:700px){
+  /* The diagram stacks on a phone, so a right-pointing arrow sitting between two boxes that are
+     now stacked vertically points at nothing - it reads like a broken table. Rotating it is the
+     whole difference between "the flow runs down the page" and "these boxes are unrelated". */
+  .dgarrow{transform:rotate(90deg)}
+}
+
+/* ==========================================================================
+   PAGE 2 · THE TWO-BAND EXPLANATION
+   The presenter's slide layout: five boxes across the AI half, four functional blocks across
+   the deterministic half, and the payment rail as a footer strip because it is the boundary
+   between the two, not a stage inside either.
+   ========================================================================== */
+.twoband{display:flex;flex-direction:column;gap:10px;margin-top:16px}
+.tb{border:1px solid #33333C;border-left:3px solid #33333C;border-radius:13px;background:#15151A;
+  padding:12px 14px}
+.tb.ai{border-left-color:#24405C}
+.tb.det{border-left-color:var(--brand)}
+.tb.foot{display:flex;align-items:center;gap:9px;flex-wrap:wrap;background:#1A1A20;
+  border-left-color:#2E2E36}
+.tbhead{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:11px;font-weight:800;
+  letter-spacing:1px;color:#fff;margin-bottom:11px}
+.tbhead .tbno{font-size:14px;line-height:1}
+.tb.ai .tbhead .tbno{color:#8FC4F0}
+.tb.det .tbhead .tbno{color:var(--brand)}
+.tbhead .tbsub{font-size:10px;font-weight:700;color:#7A7A88;letter-spacing:.3px}
+.tbcards{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}
+.tbcards.four{grid-template-columns:repeat(4,1fr)}
+.tbcard{background:#1E1E24;border:1px solid #33333C;border-radius:10px;padding:9px 10px;min-width:0}
+.tb.ai .tbcard{border-color:#24405C}
+.tb.det .tbcard{border-color:#4A1E22}
+.tbt{font-size:11.5px;font-weight:800;color:#fff;margin-bottom:5px;line-height:1.3}
+.tbs{font-size:10px;color:#8A8A98;line-height:1.45}
+.tbl{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:4px}
+.tbl li{font-size:10px;line-height:1.4;color:#9A9AA8;padding-left:10px;position:relative}
+.tbl li::before{content:'';position:absolute;left:0;top:5px;width:4px;height:4px;border-radius:1px;
+  background:#57575F}
+.tbfk{font-size:10px;font-weight:800;letter-spacing:.6px;color:#8A8A98}
+.tbfv{font-size:10.5px;color:#7A7A88}
+.tbfpill{font-size:10px;font-weight:700;padding:3px 8px;border-radius:999px;background:#20202A;
+  border:1px solid #33333C;color:#C9C9D4}
+
+/* ==========================================================================
+   PAGE 3 · THE EXECUTION PATH
+   The stage-by-stage walk on the left, the integration boundary on the right. The right-hand
+   column is deliberately narrower: it is the reference you glance at while the presenter
+   walks the left-hand column, not a second thing to read.
+   ========================================================================== */
+.pwrap{display:grid;grid-template-columns:1.35fr 1fr;gap:clamp(14px,2vw,22px);margin-top:16px;
+  align-items:start}
+.pcol{display:flex;flex-direction:column;gap:9px;min-width:0}
+.pside{display:flex;flex-direction:column;gap:12px;min-width:0}
+.prow{border:1px solid #33333C;border-left:3px solid #33333C;border-radius:12px;background:#15151A;
+  padding:11px 13px}
+.prow.propose{border-left-color:#24405C}
+.prow.det{border-left-color:#2E7D5B}
+.prow.sig{border-left-color:#8A6A20}
+.prow.gate{border-left-color:var(--brand)}
+.prow.rail{border-left-color:var(--brand-dk)}
+.prow.out{border-left-color:#57575F}
+.prlab{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;font-size:10.5px;font-weight:800;
+  letter-spacing:.8px;color:#fff;margin-bottom:9px}
+.prlab span{font-size:9.5px;font-weight:700;letter-spacing:.2px;color:#7A7A88;text-transform:none}
+.prflow{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:7px}
+.prflow:last-child{margin-bottom:0}
+.prnode{font-size:10.5px;font-weight:700;color:#C9C9D4;background:#1E1E24;border:1px solid #33333C;
+  border-radius:7px;padding:5px 9px;line-height:1.3}
+.prnode.mono{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:10px;font-weight:600;
+  color:#B9B9C4}
+.prnode.hot{background:#241618;border-color:#6B2226;color:#fff}
+.prar{color:#57575F;font-size:12px;flex-shrink:0}
+.prtag{margin-left:auto;font-size:9.5px;font-weight:800;letter-spacing:.3px;color:#8A8A98;
+  white-space:nowrap}
+.prsub{font-size:10.5px;line-height:1.5;color:#8A8A98}
+.pnote{margin-top:4px;font-size:11px;line-height:1.55;color:#B9B9C4;background:#17171B;
+  border-left:2px solid var(--brand);border-radius:0 8px 8px 0;padding:10px 12px}
+.pnote b{color:#fff}
+.pcard{background:#17171B;border:1px solid #33333C;border-radius:12px;padding:12px 13px;min-width:0}
+.pch{font-size:11px;font-weight:800;letter-spacing:.5px;color:#fff;margin-bottom:10px;
+  padding-bottom:8px;border-bottom:1px solid var(--studio-line)}
+.pdl{margin:0;display:grid;grid-template-columns:auto 1fr;gap:5px 10px;font-size:10.5px;line-height:1.5}
+.pdl dt{color:#8A8A98;font-weight:700;white-space:nowrap}
+.pdl dd{margin:0;color:#B9B9C4;min-width:0}
+/* Identifiers quoted out of the code (paths, header names, wrapper object names). Monospace so a
+   reader can tell `creditPayeeAccount` is a literal and not prose, and light enough not to
+   compete with the sentence it sits in. */
+.pdl .mono{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:10px;color:#D6D6E0}
+.preftable{display:flex;flex-direction:column;gap:3px}
+.prefrow{display:grid;grid-template-columns:auto 1fr auto;gap:8px;align-items:baseline;
+  padding:4px 7px;border-radius:7px;background:#1A1A20}
+.prefn{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:9.5px;font-weight:800;color:#8A8A98}
+.preft{font-size:10.5px;color:#C9C9D4;line-height:1.35}
+.prefb{font-size:8.5px;font-weight:800;letter-spacing:.4px;padding:2px 5px;border-radius:4px;
+  white-space:nowrap}
+.prefrow.ai .prefb{background:#14202E;color:#8FC4F0;border:1px solid #24405C}
+.prefrow.det .prefb{background:#2A1518;color:#FF9AA0;border:1px solid #6B2226}
+.prefrow.ai .prefn{color:#8FC4F0}
+.prefrow.det .prefn{color:var(--brand)}
 
 /* ==========================================================================
    small-screen refinements
@@ -1294,15 +1530,15 @@ body.tech-hidden .ins{display:none}
   .device{height:min(760px,74vh)}
   /* A DEFINITE height, deliberately not a percentage. Below this breakpoint the page stops
      being viewport-height-bound, so the hero pair's height is content-derived and indefinite -
-     and `min(52%, 360px)` becomes invalid at used-value time, falls back to `auto`, and renders
-     Joy at her full 720px intrinsic height, taller than the phone beside her. vw always
-     resolves. */
-  .joymascot{height:min(32vw,250px)}
+     and a percentage inside min() becomes invalid at used-value time, falls back to `auto`, and
+     renders Joy at her full 720px intrinsic height, taller than the phone beside her. vw always
+     resolves. 1.5x on 9 Oct, in step with the base rule above. */
+  .joymascot{height:min(48vw,375px)}
   .ins{grid-template-columns:1fr;grid-template-rows:auto}
   .chain,.agents,.reqs{max-height:clamp(200px,32vh,340px)}
   .audit{max-height:180px}
-  /* the overlay's two-column arguments stack here, and the card takes the whole screen */
-  .excols,.exagents,.exctl{grid-template-columns:1fr}
+  /* the overlay's multi-column arguments stack here, and the card takes the whole screen */
+  .excols,.exagents,.exband,.tbcards,.tbcards.four,.pwrap{grid-template-columns:1fr}
   .excard{height:96vh;width:98vw}
 }
 @media(max-width:640px){

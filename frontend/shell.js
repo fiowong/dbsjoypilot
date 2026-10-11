@@ -7,10 +7,12 @@
    by those files: MASCOT, money(), chatEl, scroll(), resetRun(), audit(), popup(),
    liveFreeTurn(), mic. Loaded after live.js so all of those exist.
 
-   It also owns the top bar's one ACTION button, #resetBtn (see resetDemo below). Joy's
-   mascot beside the phone is NOT switched here: it is shown by `#studio.appmode .joymascot`
-   in styles.css, and `appmode` is exactly the "not in the chat yet" state this file already
-   maintains for the inspector. One class, two consequences, no extra state to keep in sync. */
+   It also owns the top bar's TWO action buttons, #homeBtn (homeDemo) and #resetBtn
+   (resetDemo) - Home always returns to the login screen, Reset is context-aware and restarts
+   in place. Joy's mascot beside the phone is NOT switched here: it is shown by
+   `#studio.appmode .joymascot` in styles.css, and `appmode` is exactly the "not in the chat
+   yet" state this file already maintains for the inspector. One class, two consequences, no
+   extra state to keep in sync. */
 
 /* ---------- element refs ---------- */
 const studioEl  = $('studio');
@@ -293,7 +295,7 @@ function introCard(){
          <span class="iav"><img src="assets/auntie_mascot_half.png" alt="Joy"></span>
          <div class="imeta">
            <div class="inm">Joy</div>
-           <div class="isub">Voice-first Payments</div>
+           <div class="isub">voice-first payments</div>
          </div>
          <img class="dbslogo" src="assets/dbs-logo-white.png" alt="DBS">
        </div>
@@ -357,10 +359,13 @@ function showJoy(blank){
 }
 
 /* ---------- shell wiring ---------- */
-/* The User ID / PIN form IS the login screen. There is no launchpad behind it any more
-   (the hero photo and the six tiles were removed on 2 Oct), so the form is simply always
-   open on this screen and never has to be shown or hidden. #lgSubmit is what enters
-   digibank; a logout comes back here. */
+/* The User ID / PIN form IS the login screen. There is no launchpad behind it (the hero photo
+   and the six tiles were removed on 2 Oct), so the form is simply always open on this screen
+   and never has to be shown or hidden. #lgSubmit is what enters digibank; a logout, or the
+   top bar's Home button, comes back here.
+   The form was briefly deleted on 9 Oct (a bank login on a day-old domain reads as phishing to
+   a classifier, and the domain was suspended over it) and then restored the same day at the
+   owner's explicit request, with the trade-off understood. See index.html for the full note. */
 const lgFormEl = $('lgForm');
 function openLoginForm(){
   if(!lgFormEl) { showHome(); return; }
@@ -439,10 +444,25 @@ function resetDemo(){
 const resetBtn = $('resetBtn');
 if(resetBtn) resetBtn.addEventListener('click', ev=>{ ev.preventDefault(); resetDemo(); });
 
-/* The A-H rail is a BACKUP, kept for the BRD walkthrough and judge Q&A. It no longer has a
-   top-bar toggle or a strip of its own: it lives on page 3 of the explainer overlay, which is
-   opened from either status chip. scenarios.js still wires its `.sbtn` buttons by class, so the
-   rail works wherever it is placed. */
+/* HOME. The unconditional one: clear the run AND go back to the DBS login screen, from
+   wherever the demo happens to be -- mid-chat, inside a failure branch, or parked on a
+   half-answered confirmation popup.
+   Reset is deliberately context-aware (see above) and so cannot serve as "take me back to the
+   start"; that is the gap this fills. A presenter who has lost the thread has one button that
+   always lands in the same place. */
+function homeDemo(){
+  resetRun();
+  gotoLoginForm();
+  audit('DEMO_HOME · operator returned to the login screen', 'warn');
+}
+const homeBtn = $('homeBtn');
+if(homeBtn) homeBtn.addEventListener('click', ev=>{ ev.preventDefault(); homeDemo(); });
+
+/* The A-H rail has been REMOVED, at the owner's request. It began as a BACKUP for the BRD
+   walkthrough, then moved onto page 3 of the explainer overlay. There is now no `.sbtn` element
+   in the DOM at all, so scenarios.js's `querySelectorAll('.sbtn')` binding finds nothing and the
+   22 scripted branches have no in-UI trigger - the app runs through the live /turn flow only.
+   The 19 SC.* definitions and the backend's 62-scenario suite are untouched. */
 
 /* Boot: open straight on the User ID / PIN form, matching iggy. The launchpad (Jewel/Changi
    hero + 6 tiles) is still in the DOM and reachable via the form's back arrow, but the form

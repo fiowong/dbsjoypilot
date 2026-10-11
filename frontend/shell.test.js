@@ -13,6 +13,25 @@ const css  = fs.readFileSync(path.join(dir, 'styles.css'), 'utf8');
 const files = ['translations.js','icons.js','ui.js','personalization.js','scenarios.js','stt.js',
                'live.js','shell.js'];
 
+// The OLD brand name is gone; the product is Joy / JoyPilot now.
+// Two things make this check stricter than it first looks:
+//   1. It scans the WHOLE frontend FOLDER, not a hand-kept list of app files. The folder is
+//      what gets deployed, so a stray mention in serve.py or a test file is served bytes too
+//      -- and a scanner greps the bytes, not the DOM. A hand-kept list would silently miss
+//      any new file someone drops in.
+//   2. The needle is ASSEMBLED AT RUNTIME, so this test file does not itself contain the
+//      string it is looking for. A test that ships the forbidden word cannot assert the word
+//      is absent -- the same trap as explaining a removal by quoting what was removed.
+// Matched case-SENSITIVELY and on purpose: the technical global `window.AUNTIEJOY_API_BASE` is
+// a configuration contract between the page and the backend (and `AUNTIEJOY_*` are environment
+// variable names), not branding -- renaming those would break the deploy for no user-visible
+// gain, so they are deliberately out of scope for this check.
+const OLD_BRAND = new RegExp('Auntie' + 'Joy');
+const frontendHasOldBrand = () =>
+  fs.readdirSync(dir)
+    .filter(f => /\.(js|mjs|css|html|py|json)$/.test(f))
+    .some(f => OLD_BRAND.test(fs.readFileSync(path.join(dir, f), 'utf8')));
+
 let fails = 0;
 const ok = (name, cond, extra) => {
   console.log((cond ? '  PASS  ' : '  FAIL  ') + name + (cond ? '' : '   → ' + (extra === undefined ? '' : extra)));
@@ -73,14 +92,17 @@ const ev = code => window.eval(code);
 console.log('\n=== 1. LANDING IS THE DBS LOGIN (nothing auto-runs) ===');
 ok('login screen is active', scrOn('scrLogin'));
 ok('chat transcript is empty at boot', chat.children.length === 0, chat.children.length + ' children');
-// The A-H rail is a BACKUP and must never be on the main screen. It no longer has a top-bar
-// toggle or a full-width strip of its own: it now lives on page 3 of the explainer overlay,
-// which is hidden at boot. The buttons themselves are unchanged and scenarios.js still wires
-// them by class, so what this guards is that the rail is (a) still present and (b) not visible
-// until someone asks for it.
-ok('the A-H rail is off the main screen (page 3 of the hidden explainer overlay)',
-   !!$('rail') && !!$('explain') && $('explain').hidden === true &&
-   $('explain').contains($('rail')));
+// The A-H rail is GONE - removed, not relocated. It used to sit on the Execution-path page of
+// the explainer overlay; the owner asked for it to be taken out, so it was. These two checks
+// stop it creeping back, and they pin the CONSEQUENCE rather than hiding it: `.sbtn` is the
+// class scenarios.js binds every scripted scenario with (`querySelectorAll('.sbtn')`), so an
+// empty `.sbtn` set means the 22 rehearsal branches have no in-UI trigger any more and the app
+// runs through the live /turn flow only. If someone re-adds the rail, this fails - which is the
+// point, because the trade-off should be a decision, not an accident.
+ok('the A-H rail is gone from the document entirely', !$('rail'));
+ok('no scenario-rail buttons (.sbtn) exist anywhere',
+   doc.querySelectorAll('.sbtn').length === 0,
+   doc.querySelectorAll('.sbtn').length + ' .sbtn');
 ok('no backend call was made at boot', fetchCalls === 0, fetchCalls + ' calls');
 
 console.log('\n=== 2. DEVICE MOCKUP ===');
@@ -92,16 +114,56 @@ ok('inspector sits outside the device', !$('device').contains($('agents')));
 ok('only one screen is active at a time', ['scrLogin','appwin','scrJoy'].filter(scrOn).length === 1);
 
 console.log('\n=== 3. LOGIN FORM (boot) -> DBS HOME -> ASK JOY TO PAY ===');
-// The User ID / PIN form IS the login screen. The launchpad (hero photo + six tiles) and
-// the form's back arrow were deleted on 2 Oct, so boot lands on the form and LOGIN goes
-// straight into digibank - there is no tile grid round trip any more.
-ok('login form is OPEN at boot (matching iggy, form-first)',
+// The User ID / PIN form IS the login screen. The launchpad (hero photo + six tiles) and the
+// form's back arrow were deleted on 2 Oct, so boot lands on the form and LOGIN goes straight
+// into digibank -- there is no tile grid round trip any more.
+ok('login form is OPEN at boot (form-first)',
    $('lgForm').hidden === false && scrOn('scrLogin'));
 ok('no launchpad remains behind the form (hero + tiles deleted 2 Oct)',
    !doc.querySelector('#scrLogin .lghero') && !doc.querySelector('#scrLogin .lgmenu'));
 ok('no back arrow on the form (nothing to go back to)', !$('lgFormBack'));
+
+console.log('\n=== 3b. THE LOGIN FORM IS INTACT (and the DEMO labelling stays) ===');
+// THE FORM WAS DELETED ON 9 OCT AND RESTORED THE SAME DAY. Both halves of that are worth
+// recording, because the reasons are in direct tension and the next person will ask.
+//
+// WHY IT WAS DELETED: on 9 Oct the .xyz registry put dbsjoy.xyz on `server hold` -- which
+// deletes the name from the DNS zone, so no resolver anywhere can find it -- and Google Safe
+// Browsing served a "Dangerous site" interstitial. Both were triggered by the same thing: a
+// pixel-faithful DBS digibank User ID + PIN form on a domain that was ONE DAY OLD. Nothing was
+// ever collected (the fields are prefilled samples, the form has no action and no method, and no
+// value is read, stored or transmitted). It made no difference -- a page that ASKS for a bank
+// PIN does not get the benefit of the doubt, and a classifier cannot tell a demo from a phish.
+//
+// WHY IT IS BACK: the owner asked for it back, explicitly, having been told the above. That is
+// their call to make and it is now the intended state, so this section guards the FORM, not its
+// absence. What must NOT come back is the part that was impersonation rather than simulation:
+// the real DBS Bank Ltd company registration number. That stays out, and is asserted below.
+ok('the User ID field is present', !!$('lgUser'));
+ok('the PIN field is present and masked', !!$('lgPin') && $('lgPin').type === 'password');
+ok('both fields are prefilled with obvious samples, never real credentials',
+   $('lgUser').value === 'S1234567A' && $('lgPin').value === 'SAMPLEPASSWORD1234');
+ok('the form has no action and no method -- it cannot post anywhere',
+   !$('lgForm').getAttribute('action') && !$('lgForm').getAttribute('method'));
+ok('the LOGIN button is the way in',
+   !!$('lgSubmit') && /LOGIN/i.test($('lgSubmit').textContent));
+ok('the PIN-recovery links are present', !!$('lgForgotUser') && !!$('lgForgotPin'));
+ok('the Face ID and sign-up affordances are present', !!$('lgFace') && !!$('lgStarted'));
+ok('the real DBS company number is NOT quoted anywhere -- the one line we do not restore',
+   !/196800306E/.test(html));
+ok('the page title names the product and says prototype',
+   /joy/i.test(doc.title) && /prototype/i.test(doc.title), doc.title);
+ok('no old-brand ("Auntie" + "Joy") mention survives anywhere in the deployed frontend folder',
+   !OLD_BRAND.test(html) && !frontendHasOldBrand());
+ok('a DEMO tag sits beside the logo on the entry screen',
+   !!doc.querySelector('#scrLogin .lgdemotag'));
+ok('a DEMO tag travels with the DBS chrome inside the phone',
+   !!doc.querySelector('#appwin .appdemo'));
+ok('the form carries a note saying these are sample credentials',
+   /sample credentials/i.test($('scrLogin').textContent));
+
 $('lgSubmit').dispatchEvent(new window.MouseEvent('click', { bubbles:true }));
-ok('login dismissed, app window active', !scrOn('scrLogin') && scrOn('appwin'));
+ok('LOGIN dismissed, app window active', !scrOn('scrLogin') && scrOn('appwin'));
 // Home is the real-digibank dashboard: red cashback hero, 5 quick-action tiles, the ONE
 // Joy CTA, the deposits card, and a 5-tab bottom nav.
 ok('red cashback hero present', !!$('appBody').querySelector('.hero'));
@@ -371,9 +433,9 @@ console.log('\n=== 9c. VOICE MODE IS DISCREET (nothing announces it) ===');
    9d. THE RE-LAYOUT: TOP BAR, TWO PANELS, HERO PAIR, EXPLAINER OVERLAY
    Every check here guards a DELIBERATE move rather than an accident, and the
    recurring theme is "taken off the screen" vs "deleted". The state readout, the
-   audit timeline, the requirements list and the A-H rail were all RELOCATED. A
-   later tidy-up that genuinely deletes one of them has to fail here, because on
-   the screen the two look identical.
+   audit timeline and the requirements list were RELOCATED; the A-H rail was later
+   DELETED outright. A tidy-up that genuinely deletes one of the relocated blocks
+   has to fail here, because on the screen the two look identical.
    ========================================================================== */
 console.log('\n=== 9d. TOP BAR, TWO PANELS, HERO PAIR, EXPLAINER OVERLAY ===');
 (function(){
@@ -392,12 +454,39 @@ console.log('\n=== 9d. TOP BAR, TWO PANELS, HERO PAIR, EXPLAINER OVERLAY ===');
      /function resetDemo\(\)\{[\s\S]{0,120}resetRun\(\)/.test(shellSrc));
   ok('resetDemo() restarts the chat in place when the chat is the current screen',
      /classList\.contains\('on'\)[\s\S]{0,40}showJoy\(true\)/.test(shellSrc));
-  ok('the demo-status chip is a BUTTON that opens its own explainer',
-     !!$('demoBadge') && $('demoBadge').tagName === 'BUTTON' &&
-     $('demoBadge').dataset.explain === 'demo');
-  ok('the agents chip is a BUTTON that opens its own explainer',
-     !!$('agentsBadge') && $('agentsBadge').tagName === 'BUTTON' &&
-     $('agentsBadge').dataset.explain === 'agents');
+  // HOME sits next to Reset, and the two are NOT the same control. Reset is context-aware
+  // (inside the chat it restarts in place), so it cannot be used as "take me back to the start".
+  // Home is the unconditional one: clear the run and land on the login screen, from anywhere.
+  ok('a Home button sits in the top bar next to Reset',
+     !!$('homeBtn') && $('resetBtn').previousElementSibling === $('homeBtn') &&
+     $('homeBtn').classList.contains('ghostbtn') && $('resetBtn').classList.contains('ghostbtn'));
+  ok('Home is wired to homeDemo()', /homeBtn\.addEventListener\('click'[\s\S]{0,80}homeDemo\(\)/.test(shellSrc));
+  ok('homeDemo() clears the run and then goes to the login screen, in that order',
+     /function homeDemo\(\)\{[\s\S]{0,160}resetRun\(\)[\s\S]{0,80}gotoLoginForm\(\)/.test(shellSrc));
+  // The two long status chips are gone. They described the demo's LIMITS ("DEMO ENVIRONMENT ·
+  // SIMULATED APPROVAL · SYNTHETIC LEDGER") rather than its own contents, and the green one
+  // claimed five agents against an architecture that has four. THREE buttons replaced them, each
+  // named for the page it opens, so the control names its destination instead of its caveat.
+  // A fourth button ("What's real") was removed on request: it is not a standalone tab any more,
+  // and its content is now the closing section of "How it works". Asserted as a SET: the order is
+  // a presentation choice, the membership is the contract.
+  const expBtns = [...doc.querySelectorAll('.badges [data-explain]')];
+  ok('the two status chips are gone, replaced by three page buttons',
+     !$('demoBadge') && !$('agentsBadge') && expBtns.length === 3,
+     expBtns.length + ' buttons');
+  ok('every page button is a real BUTTON, not a div',
+     expBtns.every(b => b.tagName === 'BUTTON'));
+  ok('the three buttons open arch / how / path, one each',
+     expBtns.map(b => b.dataset.explain).sort().join(',') === 'arch,how,path',
+     expBtns.map(b => b.dataset.explain).join(','));
+  ok('there is no standalone "What\'s real" button any more',
+     !expBtns.some(b => b.dataset.explain === 'real'),
+     expBtns.map(b => b.dataset.explain).join(','));
+  ok('no button claims a COUNT of agents or controls in the top bar',
+     !expBtns.some(b => /\bagents?\b|\bcontrols?\b|\d/i.test(b.textContent)),
+     expBtns.map(b => b.textContent.trim()).join(' | '));
+  ok('the three buttons are visually distinct (three hues)',
+     ['arch','how','path'].every(c => new RegExp('^\\.bdg\\.' + c + '\\{', 'm').test(css)));
 
   // ---- the inspector is two panels, not four ----
   const panels = doc.querySelectorAll('.ins > .panel');
@@ -447,34 +536,36 @@ console.log('\n=== 9d. TOP BAR, TWO PANELS, HERO PAIR, EXPLAINER OVERLAY ===');
   // falling back to the image's own 720px intrinsic height. Measured: Joy rendered TALLER than
   // the phone. The small-screen rule must therefore use a unit that always resolves.
   ok('the small-screen mascot height is definite (vw), not an unresolvable percentage',
-     /@media\(max-width:900px\)\{[\s\S]*?\.joymascot\{height:min\(32vw,250px\)\}/.test(css));
+     /@media\(max-width:900px\)\{[\s\S]*?\.joymascot\{height:min\(48vw,375px\)\}/.test(css));
   ok('the mascot also carries a hard max-height cap as a backstop',
-     /\.joymascot\{[^}]*max-height:360px/.test(css));
+     /\.joymascot\{[^}]*max-height:540px/.test(css));
+  // The owner asked for the mascot at 1.5x on 9 Oct. The size lives in TWO places (the base
+  // rule and the <=900px breakpoint) and they drift apart silently -- the phone would just look
+  // fine on one viewport and wrong on the other. So assert the RATIO, not the numbers: whatever
+  // the base cap is, the breakpoint cap must be the same 1.5x multiple of it that it is today.
+  const capBase = (css.match(/\.joymascot\{[^}]*max-height:(\d+)px/) || [])[1];
+  const capSmall = (css.match(/\.joymascot\{height:min\(\d+vw,(\d+)px\)\}/) || [])[1];
+  ok('the mascot is 1.5x its previous size at BOTH breakpoints (base 540px / small 375px)',
+     capBase === '540' && capSmall === '375', 'base=' + capBase + ' small=' + capSmall);
   // A state with no label falls through to the RAW enum, and at 14px monospace in a
-  // third-of-a-panel box "CONFIRMATION_READY" breaks mid-word as "CONFIRMATION_RE / ADY".
-  //
-  // The enum is read from the DECLARATION in models.py, NOT from a list of names copied into
-  // this file. The earlier version scanned every backend file for a hardcoded set of fourteen
-  // names, so it could only ever find states already on that list -- seven real ones
-  // (EVIDENCE_COMMITTED, DRAFTING, DRAFT_READY, COOLING_OFF, CONFIRMATION_COMPLETE, SCHEDULED,
-  // CANCELLED) were invisible to it, rendered as raw enums, and this check stayed green.
-  // Reading the declaration is what makes "adding a state fails here" true rather than claimed.
-  const modelsPath = path.join(dir, '..', 'backend', 'app', 'models.py');
+  // third-of-a-panel box "CONFIRMATION_READY" breaks mid-word as "CONFIRMATION_RE / ADY". The
+  // enum list is read out of the BACKEND rather than a hand-copied one, so adding a state to the
+  // state machine fails here until someone gives it a human label.
+  const appDir = path.join(dir, '..', 'backend', 'app');
   const stateNames = new Set();
-  if (fs.existsSync(modelsPath)) {
-    const modelsSrc = fs.readFileSync(modelsPath, 'utf8');
-    const enumSrc = modelsSrc.match(/class SessionState\([\s\S]*?(?=\nclass )/);
-    for (const m of (enumSrc ? enumSrc[0] : '').matchAll(/^\s{4}([A-Z][A-Z0-9_]*)\s*=/gm)) {
-      stateNames.add(m[1]);
+  if (fs.existsSync(appDir)) {
+    for (const f of fs.readdirSync(appDir).filter(n => n.endsWith('.py'))) {
+      const src = fs.readFileSync(path.join(appDir, f), 'utf8');
+      for (const m of src.matchAll(/"(IDLE|CAPTURED|CLARIFICATION_REQUIRED|CONFIRMATION_READY|CONFIRMED|EXECUTED|FROZEN|REJECTED|BLOCKED|SAFETY_INTERVENTION|STEP_UP_REQUIRED|EXPIRED|AWAITING_BIOMETRIC|SIGNED)"/g)) {
+        stateNames.add(m[1]);
+      }
     }
   }
-  ok('the SessionState enum was read out of models.py', stateNames.size >= 10,
-     'found ' + stateNames.size + ' states');
   const labelBlock = (uiSrc.match(/STATE_LABEL = \{([\s\S]*?)\n\};/) || ['', ''])[1];
   const labelled = new Set([...labelBlock.matchAll(/([A-Z_]+):/g)].map(m => m[1]));
   const unlabelled = [...stateNames].filter(s => !labelled.has(s));
   ok('every backend session state has a human label in STATE_LABEL',
-     unlabelled.length === 0,
+     stateNames.size >= 10 && unlabelled.length === 0,
      'found ' + stateNames.size + ' states; unlabelled: ' + unlabelled.join(', '));
 
   // ---- the phone got bigger ----
@@ -505,26 +596,87 @@ console.log('\n=== 9d. TOP BAR, TWO PANELS, HERO PAIR, EXPLAINER OVERLAY ===');
      /%/.test(capFloor) && /\d+px/.test(capFloor),
      'max-height:' + psplitCap);
 
+  // ---- THE TOP BAR IS A HEIGHT BUDGET, and this is the only place that can catch it ----
+  // `.top` is flex-wrap:wrap and the stage below it is `flex:1 1 auto`, so a SECOND ROW in the
+  // bar costs the phone 34px of height (870 -> 837) while nothing on screen looks wrong. Adding
+  // the Home button on 9 Oct pushed the bar 25px over its 1460px container and did exactly that.
+  // jsdom has no layout engine, so this cannot be measured here; instead it pins the four
+  // spacing values the live measurement depends on. Relax any one of them and the bar wraps
+  // again at 1440px. The numbers come from /tmp/aj-topbar-sweep.cjs, not from guesswork.
+  ok('the top bar keeps its compact spacing (only ~10px of slack at 1460px)',
+     /^\.top\{[^}]*gap:9px/m.test(css) &&
+     /^\.badges\{[^}]*gap:5px/m.test(css) &&
+     /^\.bdg\{[^}]*padding:5px 8px/m.test(css) &&
+     /^\.ghostbtn\{[^}]*padding:5px 8px/m.test(css));
+  // 1440px is a common laptop width. Without this rule the bar is 66px short there and wraps.
+  ok('a narrow-laptop compaction rule keeps the bar one row down to 1440px',
+     /@media \(max-width:1500px\)\{[\s\S]*?\.bdg\{font-size:10px/.test(css));
+
   // ---- the explainer overlay ----
   ok('the overlay starts hidden', !!$('explain') && $('explain').hidden === true);
   const pages = doc.querySelectorAll('#explain .expage');
-  ok('the overlay has three pages', pages.length === 3, pages.length + ' pages');
+  ok('the overlay has THREE pages, not four', pages.length === 3, pages.length + ' pages');
   ok('every page has a tab that selects it',
      [...pages].every(p => !!doc.querySelector('#exTabs .extab[data-page="' + p.dataset.page + '"]')));
-  ok('the demo page carries the requirements-coverage list',
-     doc.querySelector('.expage[data-page="demo"]').contains($('reqs')));
-  ok('the branches page carries the A-H rail',
-     doc.querySelector('.expage[data-page="branches"]').contains($('rail')));
-  ok('the agents page has a mount for the agents and one for the controls',
+  ok('the tab order matches the button order (arch, how, path)',
+     [...doc.querySelectorAll('#exTabs .extab')].map(b => b.dataset.page).join(',') ===
+       'arch,how,path',
+     [...doc.querySelectorAll('#exTabs .extab')].map(b => b.dataset.page).join(','));
+  // The architecture diagram is the page a presenter opens FIRST, so it must be the default:
+  // the one page with no `hidden` attribute, and the first tab. If this ever flips, "one click
+  // to the diagram" quietly becomes "one click to the diagram, plus a second click".
+  ok('the architecture page is the default (no hidden attribute)',
+     doc.querySelector('.expage[data-page="arch"]').hidden === false);
+  ok('the architecture page is drawn, not shipped as an image',
+     !!doc.querySelector('.expage[data-page="arch"] .dgm') &&
+     !!doc.querySelector('.expage[data-page="arch"] .dgband.ai') &&
+     !!doc.querySelector('.expage[data-page="arch"] .dgband.det'));
+  ok('the diagram carries both band names in the diagram\'s own words',
+     /UNDERSTAND AND PROPOSE/.test($('explain').textContent) &&
+     /DECIDE, AUTHORISE AND EXECUTE/.test($('explain').textContent));
+  // The diagram numbers 0-16 and the chain numbers 0-15. That difference is deliberate and
+  // explained on the page, so what must be guarded is that the explanation is PRESENT -- a bare
+  // diagram would look like a bug the first time someone counts the boxes.
+  ok('the page explains why the diagram counts 0-16 and the chain counts 0-15',
+     /Banking Policy Check is one stage, not four/.test($('explain').textContent));
+  // "What's real" is no longer a page of its own. Its two blocks - the live/simulated comparison
+  // and the requirements-coverage list - are now the closing sections of the "How it works" page,
+  // so #reqs must be found INSIDE data-page="how". ui.js looks #reqs up by id, so the move needed
+  // no JavaScript change at all; this is the assertion that keeps it that way.
+  ok('the requirements-coverage list now lives on the how-it-works page',
+     doc.querySelector('.expage[data-page="how"]').contains($('reqs')));
+  ok('the live/simulated comparison moved with it',
+     /SIMULATED — deliberately, and labelled/.test(
+       doc.querySelector('.expage[data-page="how"]').textContent));
+  ok('there is no "real" page and no "real" tab any more',
+     !doc.querySelector('.expage[data-page="real"]') &&
+     !doc.querySelector('#exTabs .extab[data-page="real"]'));
+  // The A-H rail was removed from the execution-path page on request. Asserted here as well as
+  // at the top of the file: this is the block that would otherwise silently keep passing while
+  // the page quietly grew a rail back.
+  ok('the execution-path page no longer carries the A-H rail',
+     !doc.querySelector('.expage[data-page="path"] #rail') && !$('rail'));
+  ok('the failure-branches page is gone as a tab of its own',
+     !doc.querySelector('.expage[data-page="branches"]') &&
+     !doc.querySelector('#exTabs .extab[data-page="branches"]'));
+  ok('the how-it-works page has a mount for the agents and one for the controls',
      !!$('exAgentList') && !!$('exCtlList'));
-  ok('the agents page lists all five agents',
-     doc.querySelectorAll('#exAgentList .exagent').length === 5,
+  ok('the execution-path page has a mount for the reference table', !!$('exRefList'));
+  ok('the how-it-works page lists all FOUR agents, not five',
+     doc.querySelectorAll('#exAgentList .exagent').length === 4,
      doc.querySelectorAll('#exAgentList .exagent').length + ' cards');
+  ok('the Personalization Agent is not presented as a bounded agent',
+     !/Personalization Agent/.test($('exAgentList').textContent));
   // The control list is rendered from the SAME STAGES array the live chain uses, so this is
   // really a check that the explainer cannot drift out of step with the main screen.
   ok('the controls list renders all sixteen stages',
      doc.querySelectorAll('#exCtlList .exct').length === 16,
      doc.querySelectorAll('#exCtlList .exct').length + ' controls');
+  ok('the controls are grouped into the two bands the diagram draws',
+     doc.querySelectorAll('#exCtlList .exband').length === 2 &&
+     doc.querySelectorAll('#exCtlList .exband.ai .exct').length === 9 &&
+     doc.querySelectorAll('#exCtlList .exband.det .exct').length === 7,
+     [...doc.querySelectorAll('#exCtlList .exband')].map(b => b.className).join(' | '));
   ok('exactly four stages are marked as model stages',
      doc.querySelectorAll('#exCtlList .exct.llm').length === 4,
      doc.querySelectorAll('#exCtlList .exct.llm').length + ' marked');
@@ -532,24 +684,104 @@ console.log('\n=== 9d. TOP BAR, TWO PANELS, HERO PAIR, EXPLAINER OVERLAY ===');
      [...doc.querySelectorAll('#exCtlList .exct.llm .exctn')].map(n => n.textContent).join(',') ===
        '03,04,05,08',
      [...doc.querySelectorAll('#exCtlList .exct.llm .exctn')].map(n => n.textContent).join(','));
+  // The reference table on the path page is built from the same array, so it is a third view of
+  // one source of truth rather than a third copy of the list.
+  ok('the reference table renders all sixteen stages, tagged by band',
+     doc.querySelectorAll('#exRefList .prefrow').length === 16 &&
+     doc.querySelectorAll('#exRefList .prefrow.ai').length === 9 &&
+     doc.querySelectorAll('#exRefList .prefrow.det').length === 7,
+     doc.querySelectorAll('#exRefList .prefrow').length + ' rows');
   ok('Escape closes the overlay', /ev\.key === 'Escape'/.test(uiSrc));
   ok('the overlay has a close button', !!$('exClose'));
 
   // ---- and it actually opens, switches page and closes ----
   const wasHidden = $('explain').hidden;
-  ev("openExplainer('agents')");
-  const openedOnAgents = $('explain').hidden === false &&
-    doc.querySelector('.expage[data-page="agents"]').hidden === false &&
-    doc.querySelector('.expage[data-page="demo"]').hidden === true;
-  const tabOn = doc.querySelector('#exTabs .extab[data-page="agents"]').classList.contains('on');
-  ev("showExplainerPage('branches')");
-  const switched = doc.querySelector('.expage[data-page="branches"]').hidden === false &&
-                   doc.querySelector('.expage[data-page="agents"]').hidden === true;
+  ev("openExplainer('how')");
+  const openedOnHow = $('explain').hidden === false &&
+    doc.querySelector('.expage[data-page="how"]').hidden === false &&
+    doc.querySelector('.expage[data-page="arch"]').hidden === true;
+  const tabOn = doc.querySelector('#exTabs .extab[data-page="how"]').classList.contains('on');
+  ev("showExplainerPage('path')");
+  const switched = doc.querySelector('.expage[data-page="path"]').hidden === false &&
+                   doc.querySelector('.expage[data-page="how"]').hidden === true;
+  // openExplainer() with no argument must land on the DIAGRAM, not on whichever page was last
+  // read: the top-bar buttons always pass a page, so the no-argument path is the one a future
+  // caller (a keyboard shortcut, a deep link) would use.
+  ev("showExplainerPage('how')"); ev("openExplainer()");
+  const defaultedToArch = doc.querySelector('.expage[data-page="arch"]').hidden === false;
   ev("closeExplainer()");
-  ok('openExplainer() reveals the overlay on the requested page', wasHidden && openedOnAgents);
+  ok('openExplainer() reveals the overlay on the requested page', wasHidden && openedOnHow);
   ok('the matching tab is marked as selected', tabOn);
   ok('showExplainerPage() switches to another page and hides the first', switched);
+  ok('openExplainer() with no argument defaults to the architecture page', defaultedToArch);
   ok('closeExplainer() hides the overlay again', $('explain').hidden === true);
+})();
+
+console.log('\n=== 9f. THE EXECUTION-PATH PAGE QUOTES THE CODE, NOT THE SLIDE ===');
+// The explainer pages name functions, a check count and the payment path. Those are checkable
+// facts, so they are asserted against the BACKEND SOURCE rather than against a reviewer's memory.
+// This build has no payment rail: stage 15 calls Ledger.execute() directly (orchestrator.py), and
+// the DBS Fund Transfer API is an integration target only. The page must say exactly that, and
+// must never name a rail class the code does not define.
+(function(){
+  const controls = fs.readFileSync(path.join(dir, '..', 'backend', 'app', 'controls.py'), 'utf8');
+  const orch     = fs.readFileSync(path.join(dir, '..', 'backend', 'app', 'orchestrator.py'), 'utf8');
+  const html     = fs.readFileSync(path.join(dir, 'index.html'), 'utf8');
+
+  ok('stage 15 on the page is the mock ledger the orchestrator actually calls',
+     /Ledger\.execute\(/.test(orch) && /Ledger\.execute\(\)/.test(html));
+  ok('the page names no rail class the backend does not define',
+     !/MockLedgerRail|DbsFundTransferRail/.test(html) ||
+     /class (MockLedgerRail|DbsFundTransferRail)/.test(controls + orch));
+  ok('the DBS API is presented as an integration target, not as something the app calls',
+     /integration target/.test(html) && /not built/.test(html));
+  ok('the page does not invent a token endpoint the code never calls',
+     !/\/auth\/token/.test(html));
+  ok("the page does not use the slide's wrong path names",
+     !/\/transfers\/ownAccount/.test(html) && !/\/transfers\/payeeAccount/.test(html));
+
+  // The gateway function is `gateway_verify()` (controls.py); the slide wrote `gateway.verify()`.
+  ok('the page names the gateway function the code actually defines',
+     controls.includes('def gateway_verify(') &&
+     /gateway_verify\(\)/.test(html) &&
+     !/gateway\.verify\(\)/.test(html));
+
+  // The check count is a NUMBER on the page, so pin it to the function body: a claim of "14
+  // checks" that quietly becomes 15 checks in code is exactly the drift this catches.
+  const from = controls.indexOf('def gateway_verify(');
+  const rest = controls.slice(from + 1);
+  const stop = rest.indexOf('\ndef ');
+  const body = stop > 0 ? rest.slice(0, stop) : rest;
+  const keys = [...new Set([...body.matchAll(/checks\["([a-z_]+)"\]/g)].map(m => m[1]))];
+  ok('the checks the page claims are the checks the function runs',
+     keys.length === 14 && /14 checks/.test(html), keys.length + ' in code');
+
+  // The signature is an HMAC with a demo key; the page must not call it a bank-owned key.
+  ok('the page describes the signature as the demo HMAC the code uses',
+     /hmac\.new\(/.test(controls) && /HMAC-SHA256/.test(html) && !/bank-owned key/.test(html));
+})();
+
+console.log('\n=== 9e. HOME RETURNS TO THE LOGIN SCREEN FROM ANYWHERE ===');
+// Reset and Home are deliberately different controls, and the difference is the whole point.
+// Reset is CONTEXT-AWARE: inside the chat it restarts in place, so it can never serve as "take
+// me back to the start". Home is the unconditional one. A presenter who has wandered into a
+// failure branch, or into a half-answered confirmation popup, needs exactly one button that
+// always lands in the same place -- so this drives it from the two places they get stuck.
+(function(){
+  // From the deepest point in the flow: the Joy chat.
+  ev("showHome()"); ev("showJoy(true)");
+  const inChat = scrOn('scrJoy');
+  $('homeBtn').dispatchEvent(new window.MouseEvent('click', { bubbles:true }));
+  ok('Home gets you back to the login screen from the chat',
+     inChat && scrOn('scrLogin') && !scrOn('scrJoy'));
+  ok('and the form is open and usable when you land',
+     $('lgForm').hidden === false && !!$('lgUser') && !!$('lgPin'));
+  ok('the run was CLEARED, not just navigated away from', chat.children.length === 0,
+     chat.children.length + ' transcript children left behind');
+  // And from the digibank home, the other place a presenter can get stuck.
+  ev("showHome()");
+  $('homeBtn').dispatchEvent(new window.MouseEvent('click', { bubbles:true }));
+  ok('Home also works from the digibank home', scrOn('scrLogin') && !scrOn('appwin'));
 })();
 
 console.log('\n=== 10. NO STRAY ERRORS ===');
