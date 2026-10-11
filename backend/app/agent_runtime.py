@@ -6,7 +6,7 @@ from pydantic import BaseModel, ValidationError
 
 # =====================================================================
 # 2. Shared typed-agent runtime, BRD §8.4
-#    All four agents go through this. Fail closed on any deviation.
+#    All five agents go through this. Fail closed on any deviation.
 # =====================================================================
 class AgentUnavailable(Exception):
     """Any timeout, malformed JSON, unknown enum, incomplete field set or schema failure."""

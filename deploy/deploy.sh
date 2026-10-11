@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Deploy AuntieJoy from this machine to a Lighthouse instance.
+# Deploy JoyPilot from this machine to a Lighthouse instance.
 #
 #     ./deploy/deploy.sh <public-ip> [ssh-key]
 #
@@ -68,9 +68,19 @@ rsync -az --delete \
     -e "ssh ${SSH_OPTS[*]}" \
     "$REPO_ROOT/" "$REMOTE_USER@$HOST:~/auntiejoy-dcta-main/"
 
+# provision.sh reads these from its environment, but they are set HERE, on the laptop, so each
+# one that is set must be carried over the ssh call. Without this, BASIC_PASS=... or
+# RUN_SELFTEST=0 in front of deploy.sh was silently ignored on the instance.
+PASS_ENV=""
+for var in ENABLE_BASIC_AUTH BASIC_USER BASIC_PASS ENABLE_TLS RUN_SELFTEST; do
+    if [ -n "${!var+x}" ]; then
+        PASS_ENV+="$var=$(printf '%q' "${!var}") "
+    fi
+done
+
 echo "==> Provisioning on the instance"
 ssh "${SSH_OPTS[@]}" "$REMOTE_USER@$HOST" \
-    "cd ~/auntiejoy-dcta-main && DOMAIN='$DOMAIN' PUBLIC_IP='$HOST' ./deploy/provision.sh"
+    "cd ~/auntiejoy-dcta-main && ${PASS_ENV}DOMAIN='$DOMAIN' PUBLIC_IP='$HOST' ./deploy/provision.sh"
 
 echo
 if [ -n "$DOMAIN" ]; then

@@ -302,7 +302,7 @@ function _providerLabel(name){
   if(name === 'cartesia') return 'Cartesia';
   if(name === 'texttospeechse') return 'Tencent TRTC';
   if(name === 'texttovoice') return 'Tencent';
-  return name || '—';
+  return name || '-';
 }
 
 /* Paint the SPEAKING row from the state we hold.
