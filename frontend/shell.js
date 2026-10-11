@@ -305,9 +305,9 @@ function introCard(){
            You'll review and authorise before any money moves.</div>
          <div class="cmdlabel">SAMPLE VOICE COMMANDS</div>
          <div class="chips">
-           <button class="chip" type="button" data-say="Pay Mei Tan 50 dollars">&ldquo;Pay Mei Tan $50 tomorrow&rdquo;</button>
+           <button class="chip" type="button" data-say="Pay Mei Tan $50 tomorrow">&ldquo;Pay Mei Tan $50 tomorrow&rdquo;</button>
            <button class="chip" type="button" data-say="Send Ah Boy one fifty">&ldquo;Send Ah Boy one fifty&rdquo;</button>
-           <button class="chip" type="button" data-say="付三十块给Uncle Lim">&ldquo;付30块给Uncle Lim&rdquo;</button>
+           <button class="chip" type="button" data-say="付30块给Uncle Lim">&ldquo;付30块给Uncle Lim&rdquo;</button>
            <button class="chip" type="button" data-say="Bayar Ibu 20 dollar">&ldquo;Bayar Ibu 20 dollar&rdquo;</button>
          </div>
        </div>

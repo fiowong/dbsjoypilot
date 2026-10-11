@@ -764,6 +764,17 @@ console.log('\n=== 9f. THE EXECUTION-PATH PAGE QUOTES THE CODE, NOT THE SLIDE ==
      /hmac\.new\(/.test(controls) && /HMAC-SHA256/.test(html) && !/bank-owned key/.test(html));
 })();
 
+console.log('\n=== 9g. A SAMPLE COMMAND SENDS EXACTLY WHAT IT SHOWS ===');
+// The "Pay Mei Tan $50 tomorrow" chip used to send "Pay Mei Tan 50 dollars", so the payment the
+// customer saw on the button was not the one Joy prepared. Each chip's data-say must be its label.
+(function(){
+  const src = fs.readFileSync(path.join(dir, 'shell.js'), 'utf8');
+  const chips = [...src.matchAll(/class="chip"[^>]*data-say="([^"]*)">&ldquo;([^&]*)&rdquo;/g)];
+  ok('the sample command chips are found', chips.length >= 4, chips.length + ' chips');
+  const off = chips.filter(m => m[1] !== m[2]).map(m => m[2]);
+  ok('every chip sends the sentence written on it', off.length === 0, off.join(' | ') || 'all match');
+})();
+
 console.log('\n=== 9e. HOME RETURNS TO THE LOGIN SCREEN FROM ANYWHERE ===');
 // Reset and Home are deliberately different controls, and the difference is the whole point.
 // Reset is CONTEXT-AWARE: inside the chat it restarts in place, so it can never serve as "take
