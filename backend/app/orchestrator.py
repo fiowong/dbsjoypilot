@@ -38,7 +38,7 @@ from .llm_client import arm_turn_deadline, disarm_turn_deadline
 # attribute the match itself: parsing converts a nickname to its display name before the resolver
 # sees it, so only the store can say "the customer said a nickname, and it was this one". `teach`
 # is the single write path, and it refuses any beneficiary that is not already a saved payee.
-from .nicknames import match_in_text as nickname_match, teach as teach_nickname
+from .nicknames import match_in_text as nickname_match, teach as teach_nickname, latin_word
 from .scam_patterns import match_scam_pattern, message_params, raises
 from .controls import (resolve_payee_and_account, closest_saved_payee,
                         compare_validation_result, evaluate_risk,
@@ -392,7 +392,7 @@ def _payees_named_in(text: str, customer_id: str) -> List:
     payees = get_repository().get_saved_payees(customer_id)
 
     def named(phrase: str) -> bool:
-        return bool(re.search(rf"\b{re.escape(phrase.lower())}\b", lowered))
+        return bool(re.search(latin_word(re.escape(phrase.lower())), lowered))
 
     full = [p for p in payees if named(p.display_name)]
     if full:
@@ -1392,7 +1392,7 @@ async def _run_turn(req: TurnRequest) -> TurnResponse:
         spoken_nick = nickname_match(session.customer_id, req.text)
         word = (spoken_nick[0] if spoken_nick and spoken_nick[1].beneficiary_id
                 == payee.beneficiary_id else payee.display_name)
-        breath = re.sub(rf"\b{re.escape(held['phrase'])}\b", word, held["breath"], flags=re.I)
+        breath = re.sub(latin_word(re.escape(held['phrase'])), word, held["breath"], flags=re.I)
         session.pending_recipient = None
         session.open_clarification_field = None
         if (session.pending_amount_payee

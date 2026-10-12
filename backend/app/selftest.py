@@ -379,6 +379,16 @@ PARSER_CASES = [
      lambda: parse_amount("send two thousand five hundred to John")[0], 250000),
     ("'one grand, then one fifty' keeps the grand as the larger amount",
      lambda: parse_amount("move one grand, then send one fifty to Ah Girl.")[0], 100000),
+    # An English name inside a Mandarin sentence, with no space after 给. \b sees no boundary
+    # between 给 and "mei", so this came back with no payee and Joy asked who to pay.
+    ("'帮我付50块给mei tan' names Mei Tan",
+     lambda: parse_payee_phrase("帮我付50块给mei tan", _PCUST), "mei tan"),
+    ("'帮我付50块给Mei Tan' names Mei Tan",
+     lambda: parse_payee_phrase("帮我付50块给Mei Tan", _PCUST), "mei tan"),
+    ("'给Mei Tan付50块' names Mei Tan",
+     lambda: parse_payee_phrase("给Mei Tan付50块", _PCUST), "mei tan"),
+    ("'mum' still does not match inside 'mumble'",
+     lambda: parse_payee_phrase("pay mumble 50", _PCUST), None),
     ("'一百五十' is S$150, not S$100", lambda: parse_amount("转一百五十块给阿美")[0], 15000),
     ("'一百五' is S$150", lambda: parse_amount("给阿美转一百五")[0], 15000),
     ("'两千五' is S$2,500", lambda: parse_amount("转两千五给阿美")[0], 250000),

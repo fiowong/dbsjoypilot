@@ -114,6 +114,19 @@ def find(customer_id: str, phrase: Optional[str]) -> Optional[Payee]:
     return index(customer_id).get(key) if key else None
 
 
+# A Latin letter or digit. \b cannot be used to fence an English name inside a Mandarin sentence:
+# CJK characters are word characters in Unicode mode, so there is no \b between 给 and "mei" in
+# "帮我付50块给mei tan", and "\bmei tan\b" never matched it. These lookarounds only treat a LATIN
+# neighbour as "the same word", so "mum" still cannot match inside "mumble" while "给mei tan" and
+# "mei tan付" both match.
+_LATIN_WORD_CHAR = r"0-9A-Za-z_\u00C0-\u024F"
+
+
+def latin_word(body: str) -> str:
+    """`body` (a regex) fenced so it matches as a whole word, also when CJK text touches it."""
+    return rf"(?<![{_LATIN_WORD_CHAR}]){body}(?![{_LATIN_WORD_CHAR}])"
+
+
 def _nickname_pattern(nickname: str) -> str:
     """A boundary that actually works for a Mandarin nickname.
 
@@ -128,8 +141,8 @@ def _nickname_pattern(nickname: str) -> str:
     it would let "mum" fire on "mumble".
     """
     body = re.escape(nickname)
-    left = r"\b" if nickname[:1].isascii() and nickname[:1].isalnum() else ""
-    right = r"\b" if nickname[-1:].isascii() and nickname[-1:].isalnum() else ""
+    left = rf"(?<![{_LATIN_WORD_CHAR}])" if nickname[:1].isascii() and nickname[:1].isalnum() else ""
+    right = rf"(?![{_LATIN_WORD_CHAR}])" if nickname[-1:].isascii() and nickname[-1:].isalnum() else ""
     return f"{left}{body}{right}"
 
 
