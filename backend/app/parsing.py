@@ -7,7 +7,7 @@ from .config import Settings
 from .repository import get_repository
 # Imported under a local name so the call site reads as a question about the turn, not as a
 # module reference. nicknames.py reads its file lazily, so importing it here costs no I/O.
-from .nicknames import match_in_text as nickname_match
+from .nicknames import match_in_text as nickname_match, latin_word
 
 # =====================================================================
 # 4. Language + amount understanding (deterministic, multilingual)
@@ -720,7 +720,7 @@ def committed_amount_for_recipient(customer_id: Optional[str], recipient_phrase:
 # the customer whether they wanted to pay somebody called "Us".
 # The trailing \b stops the run landing in the MIDDLE of a CamelCase word: "Pay StarHub bill"
 # used to capture "Star" and ask the customer whether they meant a payee called Star.
-_NAME_RUN = r"[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b"
+_NAME_RUN = r"[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*(?![A-Za-z])"
 
 
 def parse_payee_phrase(text: str, customer_id: Optional[str] = None) -> Optional[str]:
@@ -739,7 +739,8 @@ def parse_payee_phrase(text: str, customer_id: Optional[str] = None) -> Optional
     #    The CUE words are matched case-insensitively (a turn often starts "Send …" with a
     #    capital S) but the NAME is not, a capitalised run is what tells us it is a name at
     #    all, so lowercasing that would swallow ordinary words like "fifty dollar".
-    run = re.search(rf"(?i:kepada|to|给|pay|transfer to|send)\s+({_NAME_RUN})", text)
+    # 给 needs no space after it: "给Mei Tan" is how the name is typed or transcribed in Mandarin.
+    run = re.search(rf"(?:(?i:kepada|to|pay|transfer to|send)\s+|给\s*)({_NAME_RUN})", text)
     if run:
         phrase = run.group(1).strip()
         # A single-word name that IS a known alias still goes through the alias table, so
@@ -753,7 +754,7 @@ def parse_payee_phrase(text: str, customer_id: Optional[str] = None) -> Optional
     #    "send may $50" was answered with "I couldn't find a saved payee called May" even though
     #    "may" had been in this table the whole time.
     for alias in sorted(PAYEE_ALIASES, key=len, reverse=True):
-        if re.search(rf"\b{re.escape(alias)}\b", lowered):
+        if re.search(latin_word(re.escape(alias)), lowered):
             return PAYEE_ALIASES[alias]
     return None
 
@@ -979,11 +980,11 @@ def parse_biller_phrase(text: str, customer_id: Optional[str] = None) -> Optiona
     lowered = text.lower()
     for b in _billers_for(customer_id):
         name = b.display_name.lower()
-        if re.search(rf"\b{re.escape(name)}\b", lowered):
+        if re.search(latin_word(re.escape(name)), lowered):
             return b.display_name
         # Space-insensitive form: the name's letters with optional whitespace between them.
         flexible = r"\s*".join(re.escape(ch) for ch in name if not ch.isspace())
-        if flexible and re.search(rf"\b{flexible}\b", lowered):
+        if flexible and re.search(latin_word(flexible), lowered):
             return b.display_name
     return None
 
@@ -1023,7 +1024,7 @@ def parse_card_phrase(text: str, customer_id: Optional[str] = None) -> Optional[
     """
     lowered = text.lower()
     for c in _cards_for(customer_id):
-        if re.search(rf"\b{re.escape(c.display_name.lower())}\b", lowered):
+        if re.search(latin_word(re.escape(c.display_name.lower())), lowered):
             return c.display_name
     if re.search(r"\b(credit card|my card|the card)\b", lowered):
         cards = _cards_for(customer_id)
@@ -1058,7 +1059,7 @@ def parse_own_account_phrase(text: str, customer_id: Optional[str] = None) -> Op
     """
     lowered = text.lower()
     for oa in _own_accounts_for(customer_id):
-        if re.search(rf"\b{re.escape(oa.display_name.lower())}\b", lowered):
+        if re.search(latin_word(re.escape(oa.display_name.lower())), lowered):
             return oa.display_name
     # A bare "joint" counts too: "move S$1,000 to joint" is how the instruction is actually
     # spoken (IN-10). "joint" as a whole word never matches "join"/"jointly", so this stays tight.

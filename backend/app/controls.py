@@ -15,6 +15,7 @@ from .data import POLICY
 from .repository import get_repository
 from .parsing import PAYEE_ALIASES
 from . import nicknames
+from .nicknames import latin_word
 
 # 7. Deterministic controls, the half that is allowed to move money
 # =====================================================================
@@ -146,14 +147,14 @@ def detect_multiple_recipients(text: str, customer_id: str) -> Optional[List[str
         if not hit:
             for alias, canon in PAYEE_ALIASES.items():
                 if " " in alias and canon == p.display_name.lower() \
-                        and re.search(rf"\b{re.escape(alias)}\b", lowered):
+                        and re.search(latin_word(re.escape(alias)), lowered):
                     hit = True
                     break
         if not hit:
             # A nickname counts as naming that payee, so "pay mum and john" is still two people.
             for word, owner in nick_index.items():
                 if owner.beneficiary_id == p.beneficiary_id \
-                        and re.search(rf"\b{re.escape(word)}\b", lowered):
+                        and re.search(latin_word(re.escape(word)), lowered):
                     hit = True
                     break
         if hit:
