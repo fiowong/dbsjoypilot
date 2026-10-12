@@ -9,7 +9,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap">
-<link rel="stylesheet" href="styles.css?v=20261011q">
+<link rel="stylesheet" href="styles.css?v=20261012a">
 </head>
 <body>
 <div class="wrap" id="studio">
@@ -22,7 +22,11 @@
         <div class="tag">Joy listens. DBS protects. Auntie approves.</div>
       </div>
     </div>
-    <div class="badges">
+    <!-- PHONE ONLY: on a phone the controls below would take three rows above the app, so they
+         fold behind this button (styles.css, the max-width:600px block; ui.js wires it). -->
+    <button class="menubtn" id="menuBtn" type="button" aria-label="Demo controls"
+            aria-expanded="false" aria-controls="topBadges">&#8943;</button>
+    <div class="badges" id="topBadges">
       <!-- ALL THREE ARE BUTTONS, and that is the point. A judge's next move after hearing a
            claim is always "show me". Making the control name the thing it opens means the
            evidence is one click away instead of in a document nobody opens.
@@ -956,14 +960,14 @@
      cached copies of these files, so a fix that IS in the file never reaches the screen - a
      Bahasa "working on it" card kept coming up in English long after the code was corrected.
      Bump the stamp whenever one of these files changes. -->
-<script src="translations.js?v=20261011q"></script>
-<script src="icons.js?v=20261011q"></script>
-<script src="ui.js?v=20261011q"></script>
-<script src="personalization.js?v=20261011q"></script>
-<script src="scenarios.js?v=20261011q"></script>
-<script src="stt.js?v=20261011q"></script>
-<script src="live.js?v=20261011q"></script>
-<script src="tts.js?v=20261011q"></script>
-<script src="shell.js?v=20261011q"></script>
+<script src="translations.js?v=20261012a"></script>
+<script src="icons.js?v=20261012a"></script>
+<script src="ui.js?v=20261012a"></script>
+<script src="personalization.js?v=20261012a"></script>
+<script src="scenarios.js?v=20261012a"></script>
+<script src="stt.js?v=20261012a"></script>
+<script src="live.js?v=20261012a"></script>
+<script src="tts.js?v=20261012a"></script>
+<script src="shell.js?v=20261012a"></script>
 </body>
 </html>

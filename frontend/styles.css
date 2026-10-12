@@ -1563,3 +1563,53 @@ body.tech-hidden .ins{display:none}
   .device{height:min(700px,78vh);border-width:5px}
   .device::before,.device::after{display:none}
 }
+
+
+/* ==========================================================================
+   PHONE (max-width:600px): the app IS the phone
+   On a real phone the device mockup draws a second phone inside the first: a second status
+   bar, a bezel and rounded corners eating the edges. Here the frame is dropped and the DBS app
+   fills the screen below a one-row header, and the top-bar controls fold behind the menu
+   button. Everything is inside this block, so nothing wider than 600px changes.
+   ========================================================================== */
+.menubtn{display:none}
+@media(max-width:600px){
+  :root{--mtop-h:52px;--statusbar-h:8px}
+  body{padding:0}
+  #studio{height:auto;padding-bottom:0}
+
+  /* one-row header: logo, name, menu button */
+  .top{flex-direction:row;flex-wrap:nowrap;align-items:center;gap:8px;
+    height:var(--mtop-h);padding:0 12px;margin:0;background:var(--studio)}
+  .logo .dbslogo{height:22px}
+  .logo h1{font-size:17px}
+  .logo .tag{display:none}
+  .menubtn{display:flex;align-items:center;justify-content:center;margin-left:auto;
+    width:44px;height:44px;border-radius:12px;cursor:pointer;
+    background:var(--studio2);border:1px solid var(--studio-line);color:#fff;font-size:22px;line-height:1}
+  .badges{display:none}
+  body.menu-open .badges{display:flex;flex-direction:column;align-items:stretch;gap:8px;
+    position:absolute;top:calc(var(--mtop-h) - 4px);left:12px;right:12px;z-index:40;margin:0;
+    padding:12px;border-radius:14px;background:var(--studio2);border:1px solid var(--studio-line);
+    box-shadow:0 18px 40px rgba(0,0,0,.6)}
+  body.menu-open .badges .bdg,
+  body.menu-open .badges .ghostbtn{min-height:44px;padding:10px 14px;font-size:14px;
+    white-space:normal;text-align:left;border-radius:10px}
+  body.menu-open .badges .techtoggle{min-height:44px;font-size:14px;padding:0 4px}
+
+  /* the frame goes, the screen fills the phone */
+  .stage,.stage .heropair{display:block}
+  .joymascot,#studio.appmode .joymascot{display:none}
+  .device{width:100%;max-width:none;height:calc(100dvh - var(--mtop-h));aspect-ratio:auto;
+    border:0;border-radius:0;padding:0;box-shadow:none}
+  .device::before,.device::after,.island,.statusbar{display:none}
+  .device-screen{border-radius:0}
+
+  /* iOS zooms the page when a text field under 16px gets focus */
+  .cinput .fld,.lgf input{font-size:16px}
+
+  /* technical panels, when switched on: below the app, full height, nothing clipped */
+  .stage .ins{padding:12px}
+  .chain,.agents,.reqs,.audit{max-height:none}
+  .foot{margin:0;padding:10px 12px 14px}
+}

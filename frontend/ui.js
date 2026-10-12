@@ -11,6 +11,25 @@ const techToggle = $('techToggle');
 if(techToggle){
   techToggle.onchange = () => document.body.classList.toggle('tech-hidden', !techToggle.checked);
 }
+// On a phone the panels start hidden: the screen is the customer's app, and the panels would
+// stack below it as a long scroll. The switch (in the menu) still turns them on.
+if(techToggle && window.matchMedia && window.matchMedia('(max-width:600px)').matches){
+  techToggle.checked = false;
+  document.body.classList.add('tech-hidden');
+}
+// The phone-only menu button that holds the top-bar controls. A button inside the menu does its
+// job and closes the menu; a switch leaves it open, so several can be flipped in one go.
+const menuBtn = $('menuBtn'), topBadges = $('topBadges');
+if(menuBtn && topBadges){
+  const setMenu = open => {
+    document.body.classList.toggle('menu-open', open);
+    menuBtn.setAttribute('aria-expanded', String(open));
+  };
+  menuBtn.onclick = e => { e.stopPropagation(); setMenu(!document.body.classList.contains('menu-open')); };
+  topBadges.addEventListener('click', e => { if(e.target.closest('button')) setMenu(false); });
+  document.addEventListener('click', e => { if(!e.target.closest('#topBadges, #menuBtn')) setMenu(false); });
+  document.addEventListener('keydown', e => { if(e.key === 'Escape') setMenu(false); });
+}
 
 /* ==========================================================================
    VOICE MODE - a DEMO SWITCH for the "this is not Auntie" escalation
