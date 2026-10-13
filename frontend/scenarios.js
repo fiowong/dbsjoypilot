@@ -8,7 +8,7 @@ async function play(steps, my){
     switch(s.t){
       case 'auntie':   auntie(s.v); break;
       case 'attacker': attacker(s.v); break;
-      case 'iface':    iface(s.v); speak(fill(s.v)); break;
+      case 'iface':    iface(s.v); speak(fill(s.v), s.lang); break;
       case 'sys':      sysLine(s.v); break;
       case 'agent':    agent(s.name,s.v); break;
       case 'stage':    stage(s.n,s.s); break;
@@ -877,8 +877,11 @@ function stepsForEvent(ev, seenStages){
   // and already addressed the customer by name, so it is played VERBATIM; the client does not
   // rewrite, re-translate or re-address it. That is the whole point of the INTERFACE_LINE
   // contract: one author for the interface copy.
+  // The backend also says which language it rendered the line in. That tag picks the voice: a
+  // guess from the text read "sila berhenti sebentar ... menghantar bayaran" as English, because
+  // none of its words were on guessLang()'s short Malay list, and Malay was read in the EN voice.
   if(ev.event_type === 'INTERFACE_LINE' && (ev.payload||{}).text){
-    steps.push({t:'iface', v: ev.payload.text});
+    steps.push({t:'iface', v: ev.payload.text, lang: ev.payload.language});
   }
 
   const cardName = CARD_NAME_FOR_EVENT[ev.event_type];
