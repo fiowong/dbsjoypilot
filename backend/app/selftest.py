@@ -362,6 +362,22 @@ PARSER_CASES = [
      lambda: match_scam_pattern("move a grand to my joint account and then buy DBS shares with half of it"), None),
     ("splitting a bill with a friend is not structuring",
      lambda: match_scam_pattern("split the bill with John, send him 40"), None),
+    # A "bank officer" telling the customer to move money to a "safe account", in Malay. Only the
+    # urgency row matched, so Joy asked a question instead of stopping the payment.
+    ("BM safe-account story pauses as a scam (SC-16)",
+     lambda: match_scam_pattern("Seorang pegawai bank berkata bahwa uang saya tidak selamat. Dia "
+                                "menyuruh saya memindahkan lapan ribu dolar ke akaun selamat dengan "
+                                "segera. Jangan tanya sebarang soalan, cepat.").pattern_id, "SC-16"),
+    ("EN 'move it to a safe account' is SC-16",
+     lambda: match_scam_pattern("The bank said move all my savings to a safe account").pattern_id, "SC-16"),
+    ("ZH '转到安全账户' is SC-16",
+     lambda: match_scam_pattern("银行的人叫我把钱转到安全账户").pattern_id, "SC-16"),
+    ("a bank officer saying the money is not safe is SC-17",
+     lambda: match_scam_pattern("A DBS officer called, he says my money is not safe").pattern_id, "SC-17"),
+    ("BM 'jangan tanya' is coaching (SC-06)",
+     lambda: match_scam_pattern("jangan tanya apa-apa, hantar saja").pattern_id, "SC-06"),
+    ("my own savings account is not a safe-account scam",
+     lambda: match_scam_pattern("move 500 from my savings account to my joint account"), None),
     ("a payment to a son is not a family-emergency scam",
      lambda: match_scam_pattern("send 200 to my son John Doe"), None),
     # --- compound spoken numbers, now that ASR keeps numbers as words (stt convert_num_mode) ---

@@ -53,6 +53,26 @@ PATTERNS: List[ScamPattern] = [
              r"\b(must|have to|need to|wajib|mesti|perlu|or (else|my|i|you)|will be (cancel|arrest|"
              r"suspend|block|charge)|cancel|arrest|warrant|fine|denda|tangkap)\w*|必须|否则|逮捕|取消",
              _MONEY)),
+    # The "safe account" story: a caller posing as the bank (or police) says the money is at risk
+    # and must be moved somewhere "safe". No bank ever asks for this, so the phrase alone is enough.
+    # Placed above secrecy, coaching and urgency, which often come in the same breath and would
+    # otherwise answer with a weaker message.
+    ScamPattern(
+        "SC-16", "Safe-account transfer",
+        GuardrailDecision.SAFETY_INTERVENTION, RiskCategory.SCAM_OR_COERCION_SIGNAL,
+        "PAUSE_SCAM",
+        all=(r"\b(safe|safety|secure)\s+account\b|"
+             r"\bakaun\s+(yang\s+)?(selamat|terlindung)\b|\brekening\s+(yang\s+)?aman\b|"
+             r"安全(的)?(账户|帐户|户口)|保护(账户|帐户)",)),
+    # Someone claiming to be bank staff, saying the customer's money is not safe.
+    ScamPattern(
+        "SC-17", "Bank-staff impersonation",
+        GuardrailDecision.SAFETY_INTERVENTION, RiskCategory.SCAM_OR_COERCION_SIGNAL,
+        "PAUSE_SCAM",
+        all=(r"\b(bank|dbs)\s+(officer|staff|agent|manager|employee|representative)s?\b|"
+             r"\b(pegawai|kakitangan|staf|wakil)\s+bank\b|银行(的)?(职员|员工|经理|人员|的人)",
+             r"\b(not safe|unsafe|at risk|in danger|compromised|hacked|(tidak|tak)\s+selamat|"
+             r"dalam bahaya|berisiko|digodam)\b|不安全|有危险|有风险|被盗|被黑")),
     ScamPattern(
         "SC-05", "Secrecy instruction",
         GuardrailDecision.SAFETY_INTERVENTION, RiskCategory.SCAM_OR_COERCION_SIGNAL,
@@ -65,7 +85,8 @@ PATTERNS: List[ScamPattern] = [
         "SC-06", "Coaching to bypass questions",
         GuardrailDecision.SAFETY_INTERVENTION, RiskCategory.SCAM_OR_COERCION_SIGNAL,
         "SCAM_COACHING",
-        all=(r"\b(don'?t|do not|jangan)\s+ask\b|\bjust (follow|do) (what|whatever)\b|"
+        all=(r"\b(don'?t|do not|jangan)\s+ask\b|\b(jangan|tak payah|tidak perlu)\s+(tanya|soal)\b|"
+             r"\bjust (follow|do) (what|whatever)\b|"
              r"\bikut (saja|je|sahaja) (apa|cakap)|不要问|别问|照他说的|听他的",)),
     ScamPattern(
         "SC-07", "Request to remove limits",
