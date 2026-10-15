@@ -296,6 +296,22 @@ let _ttsProvider = 'cartesia';
 let _ttsSelected = 'cartesia';
 let _ttsFallbackActive = false;
 let _ttsFallbackFrom = '';
+// The server's own reason for the last fallback (from /health), e.g. Cartesia's quota_exceeded.
+let _ttsFallbackReason = '';
+
+// The fallback reason in a few words, for the small line under SPEAKING. The full text stays in
+// the cell's tooltip. Matched on Cartesia's own error codes, which tts.py passes through.
+function _fallbackNote(reason){
+  const r = (reason || '').toLowerCase();
+  if(!r) return 'could not speak';
+  if(r.includes('quota_exceeded') || r.includes('out of credits')) return 'out of credits';
+  if(r.includes('unauthorized') || r.includes('rejected')) return 'API key rejected';
+  if(r.includes('not configured')) return 'no API key set';
+  if(r.includes('voice_not_found')) return 'voice id not found';
+  if(r.includes('model_not_found')) return 'model id not found';
+  if(r.includes('transport') || r.includes('timed out') || r.includes('timeout')) return 'could not be reached';
+  return 'error, see /health';
+}
 
 // The backend uses three canonical names; the customer only needs to know the vendor.
 function _providerLabel(name){
@@ -316,6 +332,12 @@ function _renderTtsProvider(){
   if(!val) return;
   const speaking = _providerLabel(_ttsProvider);
   val.textContent = _ttsFallbackActive ? `${speaking} (fallback)` : speaking;
+  const note = document.getElementById('ttsProvNote');
+  if(note){
+    const failedName = _providerLabel(_ttsFallbackFrom || _ttsSelected);
+    note.textContent = _ttsFallbackActive ? `${failedName}: ${_fallbackNote(_ttsFallbackReason)}` : '';
+    note.hidden = !_ttsFallbackActive;
+  }
   if(row){
     row.classList.toggle('warn', _ttsFallbackActive);
     // Name the engine that failed from the server's own record, never by elimination: with
@@ -323,6 +345,7 @@ function _renderTtsProvider(){
     const failed = _providerLabel(_ttsFallbackFrom || _ttsSelected);
     row.title = _ttsFallbackActive
       ? `${failed} could not speak, so ${speaking} answered instead.`
+        + (_ttsFallbackReason ? `\n${_ttsFallbackReason}` : '')
       : `Speaking with ${speaking}.`;
   }
 }
@@ -413,12 +436,21 @@ async function refreshTtsProviderState(){
     const served = d.tts_served_provider || d.tts_provider;
     const changed = (served && served !== _ttsProvider)
       || (!!d.tts_fallback_active !== _ttsFallbackActive);
-    if(changed){
+    // The reason is stored even when nothing else changed: the response header already flipped
+    // the fallback flag before this ran, so `changed` is usually false by the time the reason
+    // arrives.
+    const reason = d.tts_fallback_active ? (d.tts_fallback_reason || '') : '';
+    if(changed || reason !== _ttsFallbackReason){
       _ttsSelected = d.tts_provider || _ttsSelected;
       _ttsProvider = served || _ttsProvider;
       _ttsFallbackActive = !!d.tts_fallback_active;
-      _ttsFallbackFrom = d.tts_fallback_from || '';
+      _ttsFallbackFrom = d.tts_fallback_from || _ttsFallbackFrom;
+      _ttsFallbackReason = reason;
       _renderTtsProvider();
     }
   }catch(err){ /* never let a status refresh break playback */ }
 }
+
+// On load, show a fallback the server is already in (e.g. Cartesia ran out of credits before
+// this page was opened), instead of waiting for the first spoken line to find out.
+refreshTtsProviderState();
