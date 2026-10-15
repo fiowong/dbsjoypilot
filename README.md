@@ -98,7 +98,8 @@ python3 -m uvicorn app.main:app --host 127.0.0.1 --port 8078
 
 With no `.env` it runs fully offline: the agents use their deterministic mocks, and the mic
 and Tencent voice stay off. To turn things on, copy `backend/.env.example` to `backend/.env`
-and fill in what you need. Every setting is explained in that file:
+and fill in what you need. The file only lists what you have to fill in, plus a few optional
+settings; the full list is in `backend/app/config.py`:
 
 - **LLM:** `HUNYUAN_API_KEY`, `AUNTIEJOY_LLM_BASE` and `AUNTIEJOY_LLM_MODEL`. Any
   OpenAI-compatible endpoint works, such as Tencent TokenHub. With a key set, each agent calls
