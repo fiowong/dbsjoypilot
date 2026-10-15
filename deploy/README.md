@@ -135,8 +135,8 @@ curl -s localhost:8078/health | python3 -m json.tool
 ```
 
 `/health` shows what is switched on: `engine` (live or mock), `llm_configured`,
-`asr_configured`, `tts_configured` and the TTS provider. Every setting is explained in
-`backend/.env.example`.
+`asr_configured`, `tts_configured` and the TTS provider. `backend/.env.example` lists the keys to
+fill in and a few optional settings; the full list is in `backend/app/config.py`.
 
 ## Options
 

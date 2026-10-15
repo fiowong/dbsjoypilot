@@ -108,7 +108,9 @@ class Settings:
 
     LLM_API_KEY = os.getenv("HUNYUAN_API_KEY") or os.getenv("SILICONFLOW_API_KEY") or ""
     LLM_BASE_URL = os.getenv("AUNTIEJOY_LLM_BASE", "https://api.siliconflow.cn/v1")
-    LLM_MODEL = os.getenv("AUNTIEJOY_LLM_MODEL", "tencent/Hunyuan-A13B-Instruct")
+    # `or`, not a getenv default: .env.example ships an empty AUNTIEJOY_LLM_MODEL= line, and an
+    # empty value must not replace the model id with nothing.
+    LLM_MODEL = os.getenv("AUNTIEJOY_LLM_MODEL") or "tencent/Hunyuan-A13B-Instruct"
     LIVE_LLM = bool(LLM_API_KEY)
 
     # ---- voice pipeline: the ears (ASR) and the mouth (TTS) ----
