@@ -1088,6 +1088,8 @@ button{font-family:inherit}
    without explanation is far more confusing than one that says why. */
 .vengine.warn .v{color:#F0B429}
 .vengine.warn .k{color:#F0B429}
+/* the reason the selected voice failed, under SPEAKING: "Cartesia: out of credits" */
+.vnote{margin-top:3px;font-size:10.5px;font-weight:600;line-height:1.3;color:#F0B429}
 
 /* small ghost buttons in the top bar */
 .ghostbtn{font-size:10.5px;font-weight:700;letter-spacing:.4px;padding:5px 8px;border-radius:999px;
