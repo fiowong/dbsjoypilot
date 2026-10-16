@@ -53,9 +53,30 @@ function _ttsAudioCtx(){
     _ttsCtx = new (window.AudioContext || window.webkitAudioContext)();
   }
   // Browsers start the context suspended until a user gesture; resume on each use so
-  // playback isn't gated by an interaction that happened many turns ago.
-  if(_ttsCtx.state === 'suspended'){ _ttsCtx.resume().catch(()=>{}); }
+  // playback isn't gated by an interaction that happened many turns ago. iOS also parks it in
+  // "interrupted" after the mic's own audio context closes, so anything but running resumes.
+  if(_ttsCtx.state !== 'running'){ _ttsCtx.resume().catch(()=>{}); }
   return _ttsCtx;
+}
+
+/* Phones only let a page start sound from inside a tap. The context used to be created after
+   Joy's reply came back, which is never inside a tap, so on iOS it stayed muted and the
+   reply appeared with no voice. Every tap now creates or resumes it and plays one silent
+   sample, which is what unlocks it. Cheap enough to do on every tap, and it also recovers
+   after iOS interrupts audio (a call, the mic, another app). */
+function _ttsUnlock(){
+  try{
+    const ctx = _ttsAudioCtx();
+    const buf = ctx.createBuffer(1, 1, 22050);
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    src.connect(ctx.destination);
+    src.start(0);
+  }catch(e){ /* no Web Audio: nothing to unlock */ }
+}
+if(typeof document !== 'undefined'){
+  ['pointerdown', 'touchend', 'keydown'].forEach(ev =>
+    document.addEventListener(ev, _ttsUnlock, { capture: true, passive: true }));
 }
 
 // Map our UI language (EN/ZH/BM, any case) to the code the backend expects.
@@ -141,6 +162,10 @@ async function _speakStream(text, lang){
     if(fellBack) refreshTtsProviderState();
   }
 
+  // iPhone: web audio follows the ring/silent switch unless the page asks for media playback,
+  // so with the phone on silent Joy made no sound at all. Set here, when Joy is about to speak,
+  // not on every tap: stt.js switches it to play-and-record while the mic is open.
+  try{ if(navigator.audioSession) navigator.audioSession.type = 'playback'; }catch(e){}
   const ctx = _ttsAudioCtx();
   const reader = res.body.getReader();
   const chain = { sources: new Set(), stopRequested: false };

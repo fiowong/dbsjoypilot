@@ -171,6 +171,9 @@ class SttClient {
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       throw new Error('no microphone API');
     }
+    // iPhone: tts.js asks for media playback so Joy can be heard on silent, and the mic needs
+    // play-and-record. Switched back to playback the next time Joy speaks.
+    try { if (navigator.audioSession) navigator.audioSession.type = 'play-and-record'; } catch (e) {}
     this.stream = await navigator.mediaDevices.getUserMedia({
       // Echo cancellation + noise suppression are tuned for VoIP (so the other person
       // doesn't hear themselves), not for ASR. They clip soft consonants and fricatives
